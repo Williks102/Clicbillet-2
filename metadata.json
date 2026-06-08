@@ -1,0 +1,6 @@
+{
+  "name": "ClicBillet",
+  "description": "Plateforme de billetterie et de gestion d'événements adaptée au marché ivoirien (Orange Money, MTN, Moov, Wave).",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
