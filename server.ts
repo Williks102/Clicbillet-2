@@ -12,12 +12,46 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Supabase Connection initialization with graceful safety checks
-let rawSupabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
-// Clean any multiple spaces or accidental characters in URL
-rawSupabaseUrl = rawSupabaseUrl.replace(/\s+/g, "");
+// Supabase Connection initialization with graceful safety checks and auto-correction of user typos
+const allEnvValues = [
+  process.env.SUPABASE_URL,
+  process.env.VITE_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  process.env.SUPABASE_ANON_KEY,
+  process.env.VITE_SUPABASE_PUBLISHABLE_KEY
+].map(val => (val || "").trim()).filter(Boolean);
 
-const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "").trim();
+let rawSupabaseUrl = "";
+let supabaseServiceKey = "";
+
+// Smart search: Find the value that is actually an HTTP/HTTPS URL
+for (const val of allEnvValues) {
+  const cleaned = val.replace(/\s+/g, "");
+  if (/^https?:\/\//i.test(cleaned)) {
+    rawSupabaseUrl = cleaned;
+    break;
+  }
+}
+
+// Smart search: Find the value that looks like a Supabase API key (starts with sb_ or JWT signature 'eyJ')
+for (const val of allEnvValues) {
+  const cleaned = val.replace(/\s+/g, "");
+  if (cleaned !== rawSupabaseUrl && (cleaned.startsWith("sb_") || cleaned.startsWith("eyJ"))) {
+    supabaseServiceKey = cleaned;
+    break;
+  }
+}
+
+// Fallback to classic sequential resolution if smart detection didn't find clear pairs
+if (!rawSupabaseUrl) {
+  const possibleUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim().replace(/\s+/g, "");
+  if (/^https?:\/\//i.test(possibleUrl)) {
+    rawSupabaseUrl = possibleUrl;
+  }
+}
+if (!supabaseServiceKey) {
+  supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "").trim().replace(/\s+/g, "");
+}
 
 let isSupabaseEnabled = false;
 let supabase: any = null;
@@ -38,7 +72,7 @@ if (rawSupabaseUrl && supabaseServiceKey) {
     }
   } else {
     console.warn("==================================================");
-    console.warn("[Supabase Warning] L'URL Supabase configuree semble invalide (n'est pas une URL HTTP/HTTPS) :", rawSupabaseUrl);
+    console.warn("[Supabase Warning] L'URL Supabase configurée semble invalide (n'est pas une URL HTTP/HTTPS) :", rawSupabaseUrl);
     console.warn("[Supabase] Repli automatique sur : db.json");
     console.warn("==================================================");
   }
