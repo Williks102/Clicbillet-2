@@ -496,6 +496,74 @@ app.post("/api/auth/login", async (req, res) => {
       });
 
       if (authError) {
+        // Essayer de migrer à la volée un utilisateur inséré par script SQL vers Supabase Auth
+        try {
+          const { data: dbUser, error: dbUserError } = await supabase
+            .from("users")
+            .select("*")
+            .eq("email", normalizedEmail)
+            .eq("password", password)
+            .maybeSingle();
+
+          if (dbUser && !dbUserError) {
+            console.log(`[Supabase Auth Migration] Profil trouvé pour ${normalizedEmail}. Tentative de migration à la volée vers l'authentification native.`);
+            
+            // Créer le compte en mode Admin authentifié s'il n'existe pas encore sous l'Auth
+            const { data: adminData, error: createAuthError } = await supabase.auth.admin.createUser({
+              email: normalizedEmail,
+              password: password,
+              email_confirm: true,
+              user_metadata: { name: dbUser.name, role: dbUser.role }
+            });
+
+            if (createAuthError) {
+              console.error("[Supabase Auth Migration Error] Impossible de créer le compte dans Auth :", createAuthError.message);
+            } else if (adminData?.user) {
+              const newUuid = adminData.user.id;
+              console.log(`[Supabase Auth Migration] Compte auth créé avec UUID : ${newUuid}. Remplacement dans la table public.`);
+              
+              // Supprimer l'ancienne ligne avec l'ID statique (pour éviter les conflits d'émail)
+              await supabase.from("users").delete().eq("id", dbUser.id);
+              
+              // Insérer la nouvelle ligne reliée à l'UUID sécurisé
+              const { data: newProfile, error: profileInsertError } = await supabase
+                .from("users")
+                .insert({
+                  id: newUuid,
+                  email: normalizedEmail,
+                  password: "[SECURE_SUPABASE_AUTH]",
+                  name: dbUser.name,
+                  role: dbUser.role
+                })
+                .select()
+                .single();
+
+              if (profileInsertError) {
+                console.error("[Supabase Auth Migration Error] Impossible de mettre à jour le profil public :", profileInsertError.message);
+              } else {
+                // Tenter une reconnexion avec les identifiants migrés
+                const { data: authDataRetry, error: authErrorRetry } = await supabase.auth.signInWithPassword({
+                  email: normalizedEmail,
+                  password: password,
+                });
+
+                if (!authErrorRetry && authDataRetry?.user && newProfile) {
+                  console.log(`[Supabase Auth Migration] Migration réussie avec succès et connexion établie pour ${normalizedEmail} !`);
+                  return res.json({
+                    id: newProfile.id,
+                    email: newProfile.email,
+                    name: newProfile.name,
+                    role: newProfile.role,
+                    token: authDataRetry?.session?.access_token
+                  });
+                }
+              }
+            }
+          }
+        } catch (migrationFail) {
+          console.error("[Supabase Auth Migration Crash]", migrationFail);
+        }
+
         return res.status(401).json({ error: "Identifiant ou mot de passe incorrect. " + authError.message });
       }
 
