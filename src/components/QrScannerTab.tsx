@@ -23,7 +23,11 @@ export default function QrScannerTab({ organizerId }: QrScannerTabProps) {
           { 
             fps: 10, 
             qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0
+            aspectRatio: 1.0,
+            videoConstraints: {
+              facingMode: "environment"
+            },
+            rememberLastUsedCamera: true
           },
           /* verbose= */ false
         );

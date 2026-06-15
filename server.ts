@@ -238,6 +238,188 @@ function saveDB(data: typeof INITIAL_DATABASE) {
 // Enable JSON parsing middleware
 app.use(express.json());
 
+/**
+ * UTILS DE SÉCURITÉ ET D'ASSAINISSEMENT DES ENTRÉES
+ * Protège les points de terminaison de l'API contre les failles d'injection (SQL, XSS, etc.)
+ */
+
+function sanitizeString(val: string): string {
+  if (!val) return "";
+  let s = val.trim();
+  // Neutralise les balises HTML ou scripts pour éviter l'exécution XSS
+  s = s.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Bloque les gestionnaires d'événements JavaScript actifs suspects
+  s = s.replace(/(javascript:|onload|onerror|onclick|onmouseover|onfocus|onkeydown|script)/gi, "[REDACTED_EVENT_HANDLER]");
+  return s;
+}
+
+function sanitizeObject(obj: any): any {
+  if (typeof obj === "string") {
+    return sanitizeString(obj);
+  } else if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeObject(item));
+  } else if (obj !== null && typeof obj === "object") {
+    const cleanObj: any = {};
+    for (const key of Object.keys(obj)) {
+      cleanObj[key] = sanitizeObject(obj[key]);
+    }
+    return cleanObj;
+  }
+  return obj;
+}
+
+// Middleware d'assainissement automatique global (XSS, Injection)
+app.use((req, res, next) => {
+  if (req.body) {
+    req.body = sanitizeObject(req.body);
+  }
+  if (req.query) {
+    req.query = sanitizeObject(req.query);
+  }
+  if (req.params) {
+    req.params = sanitizeObject(req.params);
+  }
+  next();
+});
+
+// Middleware de validation de structure pour l'inscription d'utilisateurs
+const validateRegister = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { email, password, name, role } = req.body;
+
+  if (!email || !password || !name || !role) {
+    return res.status(400).json({ error: "Tous les champs d'inscription sont obligatoires (email, password, name, role)." });
+  }
+
+  // Vérification rigoureuse du format e-mail
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: "Le format de l'e-mail est invalide." });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: "Le mot de passe doit contenir au moins 6 caractères pour des raisons de sécurité." });
+  }
+
+  if (name.length < 2 || name.length > 100) {
+    return res.status(400).json({ error: "Le nom doit comporter entre 2 et 100 caractères." });
+  }
+
+  if (role !== "client" && role !== "organizer") {
+    return res.status(400).json({ error: "Rôle utilisateur invalide spécifié." });
+  }
+
+  next();
+};
+
+// Middleware de validation de structure pour la connexion d'utilisateurs
+const validateLogin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: "Veuillez saisir votre e-mail et votre mot de passe." });
+  }
+
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: "Le format de l'e-mail est invalide." });
+  }
+
+  next();
+};
+
+// Middleware de validation pour la création / modification d'événements
+const validateEvent = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { title, date, time, price, venue, category, banner, totalTickets, organizerId } = req.body;
+
+  if (!title || !date || !time || !venue || !category || !organizerId) {
+    return res.status(400).json({ error: "Veuillez remplir tous les champs obligatoires correctement." });
+  }
+
+  if (price === undefined || isNaN(Number(price)) || Number(price) < 0) {
+    return res.status(400).json({ error: "Le tarif doit être un nombre positif ou nul." });
+  }
+
+  if (totalTickets === undefined || isNaN(Number(totalTickets)) || Number(totalTickets) <= 0) {
+    return res.status(400).json({ error: "Le nombre total de billets doit être un nombre positif supérieur à zéro." });
+  }
+
+  // Contraintes de limites de sécurité pour éviter le spam, les overflows de mémoire ou l'épuisement de ressources
+  if (Number(price) > 50000000) {
+    return res.status(400).json({ error: "Le prix de l'événement dépasse la limite autorisée." });
+  }
+
+  if (Number(totalTickets) > 1000000) {
+    return res.status(400).json({ error: "La quantité totale de billets est trop élevée." });
+  }
+
+  // Validation du format de la date YYYY-MM-DD
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(date)) {
+    return res.status(400).json({ error: "Le format de la date doit être YYYY-MM-DD." });
+  }
+
+  // Validation du format de l'heure HH:MM
+  const timeRegex = /^\d{2}:\d{2}$/;
+  if (!timeRegex.test(time)) {
+    return res.status(400).json({ error: "Le format de l'heure doit être HH:MM." });
+  }
+
+  if (banner && !banner.startsWith("http://") && !banner.startsWith("https://")) {
+    return res.status(400).json({ error: "L'URL de l'image de couverture est invalide (doit commencer par http:// ou https://)." });
+  }
+
+  next();
+};
+
+// Middleware de validation de commande de billet (Checkout)
+const validateCheckout = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { eventId, buyerId, buyerName, buyerEmail, tier, quantity, paymentDetails } = req.body;
+
+  if (!eventId || !buyerId || !buyerName || !buyerEmail || !tier || !quantity || !paymentDetails) {
+    return res.status(400).json({ error: "Champs d'achat de billets incomplets." });
+  }
+
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!emailRegex.test(buyerEmail)) {
+    return res.status(400).json({ error: "L'adresse e-mail de l'acheteur est invalide." });
+  }
+
+  if (tier !== "standard" && tier !== "vip") {
+    return res.status(400).json({ error: "Le ticket doit être de type 'standard' ou 'vip'." });
+  }
+
+  const qtyVal = Number(quantity);
+  if (isNaN(qtyVal) || qtyVal < 1 || qtyVal > 20) {
+    return res.status(400).json({ error: "La quantité achetée doit être comprise d'une valeur de 1 à 20 billets par commande." });
+  }
+
+  if (!paymentDetails.method) {
+    return res.status(400).json({ error: "Moyen de facturation requis." });
+  }
+
+  const allowedMethods = ["orange_money", "mtn_momo", "moov_money", "wave", "card"];
+  if (!allowedMethods.includes(paymentDetails.method)) {
+    return res.status(400).json({ error: "Passerelle de transaction invalide." });
+  }
+
+  next();
+};
+
+// Middleware de validation de scan d'accès ticket
+const validateVerifyTicket = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { qrCodeData } = req.body;
+
+  if (!qrCodeData) {
+    return res.status(400).json({ error: "Code QR d'accès requis." });
+  }
+
+  if (!qrCodeData.startsWith("clicbillet-verify:")) {
+    return res.status(400).json({ error: "Format de code d'accès ou signature invalide." });
+  }
+
+  next();
+};
+
 // API Endpoints: Event Fetching
 app.get("/api/events", async (req, res) => {
   if (isSupabaseEnabled && supabase) {
@@ -276,7 +458,7 @@ app.get("/api/events", async (req, res) => {
 });
 
 // Create Event Endpoint for Organizers
-app.post("/api/events", async (req, res) => {
+app.post("/api/events", validateEvent, async (req, res) => {
   const { title, description, date, time, price, venue, category, banner, totalTickets, organizerId, organizerName } = req.body;
 
   if (!title || !date || !time || isNaN(price) || !venue || !category || !totalTickets || !organizerId) {
@@ -356,7 +538,7 @@ app.post("/api/events", async (req, res) => {
 });
 
 // Authentication Endpoints
-app.post("/api/auth/register", async (req, res) => {
+app.post("/api/auth/register", validateRegister, async (req, res) => {
   const { email, password, name, role } = req.body;
 
   if (!email || !password || !name || !role) {
@@ -478,7 +660,7 @@ app.post("/api/auth/register", async (req, res) => {
   res.status(201).json(userWithoutPassword);
 });
 
-app.post("/api/auth/login", async (req, res) => {
+app.post("/api/auth/login", validateLogin, async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
@@ -686,7 +868,7 @@ app.get("/api/my-tickets", async (req, res) => {
 });
 
 // Checkout Purchase Ticket Endpoint
-app.post("/api/checkout", async (req, res) => {
+app.post("/api/checkout", validateCheckout, async (req, res) => {
   const { eventId, buyerId, buyerName, buyerEmail, tier, quantity, paymentDetails } = req.body;
 
   if (!eventId || !buyerId || !buyerName || !buyerEmail || !tier || !quantity || !paymentDetails) {
@@ -861,7 +1043,7 @@ app.post("/api/checkout", async (req, res) => {
 });
 
 // Ticket Verification Endpoint (QR Scanning Verification)
-app.post("/api/verify-ticket", async (req, res) => {
+app.post("/api/verify-ticket", validateVerifyTicket, async (req, res) => {
   const { qrCodeData, organizerId } = req.body;
 
   if (!qrCodeData) {
@@ -1069,7 +1251,7 @@ app.get("/api/organizer/stats", async (req, res) => {
 });
 
 // Update/Modify Event Endpoint
-app.put("/api/events/:id", async (req, res) => {
+app.put("/api/events/:id", validateEvent, async (req, res) => {
   const { id } = req.params;
   const { title, description, date, time, price, venue, category, banner, totalTickets, organizerId } = req.body;
 
