@@ -367,6 +367,7 @@ app.post("/api/auth/register", async (req, res) => {
 
   if (isSupabaseEnabled && supabase) {
     try {
+      // 1. Check if user already exists in public table (just to avoid auth spam)
       const { data: existingUser } = await supabase
         .from("users")
         .select("id")
@@ -377,20 +378,71 @@ app.post("/api/auth/register", async (req, res) => {
         return res.status(400).json({ error: "Un utilisateur avec cet e-mail existe déjà." });
       }
 
-      const newUserId = `usr-${Date.now()}`;
-      const { data, error } = await supabase
+      // 2. Register inside Supabase Auth.
+      // We first try using the Admin Auth API (available if service_role key is used)
+      // to create an auto-confirmed account and avoid email verification in rapid prototypes.
+      let authUser: any = null;
+      let isSignUpFallbackNeeded = false;
+
+      try {
+        const { data: adminData, error: adminError } = await supabase.auth.admin.createUser({
+          email: normalizedEmail,
+          password: password,
+          email_confirm: true,
+          user_metadata: { name, role }
+        });
+
+        if (adminError) {
+          // If the error says it's not authorized, this means we only have the anon API key, not service_role.
+          // In that case we will fallback to the normal signUp.
+          if (adminError.status === 401 || adminError.status === 403 || adminError.message.includes("authorized")) {
+            isSignUpFallbackNeeded = true;
+          } else {
+            throw adminError;
+          }
+        } else {
+          authUser = adminData?.user;
+        }
+      } catch (adminException) {
+        isSignUpFallbackNeeded = true;
+      }
+
+      if (isSignUpFallbackNeeded) {
+        // Fallback to client-side signUp if the service role key is not active on this environment
+        const { data: clientData, error: clientError } = await supabase.auth.signUp({
+          email: normalizedEmail,
+          password: password,
+          options: {
+            data: { name, role }
+          }
+        });
+
+        if (clientError) {
+          return res.status(400).json({ error: clientError.message });
+        }
+        authUser = clientData?.user;
+      }
+
+      if (!authUser) {
+        return res.status(500).json({ error: "Échec de l'enregistrement de l'utilisateur sur l'authentification Supabase." });
+      }
+
+      // 3. Create public profile row linking to the native Supabase auth user.id
+      const { data, error: profileError } = await supabase
         .from("users")
         .insert({
-          id: newUserId,
+          id: authUser.id,
           email: normalizedEmail,
-          password,
+          password: "[SECURE_SUPABASE_AUTH]", // Mots de passe gérés en toute sécurité par Supabase Auth
           name,
           role: role === "organizer" ? "organizer" : "client"
         })
         .select()
         .single();
 
-      if (error) throw error;
+      if (profileError) {
+        throw profileError;
+      }
 
       return res.status(201).json({
         id: data.id,
@@ -403,6 +455,7 @@ app.post("/api/auth/register", async (req, res) => {
     }
   }
 
+  // Fallback Database
   const db = getDB();
   const exists = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
   if (exists) {
@@ -436,30 +489,75 @@ app.post("/api/auth/login", async (req, res) => {
 
   if (isSupabaseEnabled && supabase) {
     try {
-      const { data, error } = await supabase
-        .from("users")
-        .select("*")
-        .eq("email", normalizedEmail)
-        .eq("password", password)
-        .maybeSingle();
+      // 1. Authenticate using Supabase Auth (Native cryptographic match)
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password: password,
+      });
 
-      if (error) throw error;
+      if (authError) {
+        return res.status(401).json({ error: "Identifiant ou mot de passe incorrect. " + authError.message });
+      }
 
-      if (!data) {
+      const authUser = authData?.user;
+      if (!authUser) {
         return res.status(401).json({ error: "Identifiants de connexion invalides." });
       }
 
+      // 2. Fetch profile from our public user table matching the authenticating user UUID
+      let { data: profile, error: profileError } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", authUser.id)
+        .maybeSingle();
+
+      // Auto-healing: If user exists in Auth but not in public table, let's create it on-the-fly
+      if (!profile) {
+        const userMetaName = authUser.user_metadata?.name || authUser.email?.split("@")[0] || "Abonné ClicBillet";
+        const userMetaRole = authUser.user_metadata?.role || "client";
+
+        const { data: newProfile, error: createProfileError } = await supabase
+          .from("users")
+          .insert({
+            id: authUser.id,
+            email: normalizedEmail,
+            password: "[SECURE_SUPABASE_AUTH]",
+            name: userMetaName,
+            role: userMetaRole
+          })
+          .select()
+          .single();
+
+        if (createProfileError) {
+          console.error("[Supabase Error] Impossibilité de créer le profil manquant :", createProfileError.message);
+        } else {
+          profile = newProfile;
+        }
+      }
+
+      if (profile) {
+        return res.json({
+          id: profile.id,
+          email: profile.email,
+          name: profile.name,
+          role: profile.role,
+          token: authData?.session?.access_token
+        });
+      }
+
+      // Safe placeholder if table entry failed completely
       return res.json({
-        id: data.id,
-        email: data.email,
-        name: data.name,
-        role: data.role
+        id: authUser.id,
+        email: authUser.email,
+        name: authUser.email?.split("@")[0] || "Abonné ClicBillet",
+        role: "client"
       });
     } catch (err: any) {
       console.error("[Supabase Error] User login, falling back to local file DB:", err.message);
     }
   }
 
+  // Fallback database lookup
   const db = getDB();
   const user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
 
