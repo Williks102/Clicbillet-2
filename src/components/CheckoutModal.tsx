@@ -15,6 +15,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
   const [tier, setTier] = useState<"standard" | "vip">("standard");
   const [quantity, setQuantity] = useState(1);
   const [method, setMethod] = useState<PaymentMethod>("orange_money");
+  const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
 
   // Payment details state
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -53,7 +54,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
     e.preventDefault();
     setError(null);
 
-    // Dynamic field validation before mock processing starts
+    // Dynamic field validation before processing starts
     if (method !== "card" && method !== "wave") {
       // Mobile money number must be valid 10-digit number
       const numOnly = phoneNumber.replace(/\s+/g, "");
@@ -110,6 +111,63 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || "Une erreur est survenue lors de la validation du paiement.");
+      }
+
+      // INTEGRATION PAIEMENT PRO (CÔTE D'IVOIRE)
+      try {
+        const merchantId = (import.meta as any).env.VITE_PAIEMENT_PRO_MERCHANT_ID || "ID_MARCHAND_DEMO";
+        const LibPaiementPro = (window as any).PaiementPro;
+        
+        if (LibPaiementPro) {
+          console.log("[PaiementPro] Initialisation du SDK avec l'ID marchand :", merchantId);
+          const pPro = new LibPaiementPro(merchantId);
+          
+          pPro.amount = totalPrice;
+          
+          // Mappage des canaux vers les codes officiels de Côte d'Ivoire (CI)
+          const channelMapping: Record<string, string> = {
+            orange_money: "OMCIV2",
+            mtn_momo: "MOMOCI",
+            moov_money: "FLOOZ",
+            wave: "WAVECI",
+            card: "CARD"
+          };
+          pPro.channel = channelMapping[method] || "WAVECI";
+          
+          // Référence unique de notre plateforme
+          pPro.referenceNumber = data.ticket.id || `TX-${Date.now()}`;
+          pPro.customerEmail = user?.email || "customer@example.com";
+          
+          // Séparation prénom / nom pour respecter les obligations du SDK
+          const fullName = user?.name || "Client ClicBillet";
+          const nameParts = fullName.trim().split(/\s+/);
+          pPro.customerLastname = nameParts[0] || "Client";
+          pPro.customerFirstName = nameParts.slice(1).join(" ") || "Billet";
+          
+          pPro.customerPhoneNumber = phoneNumber || "0700000000";
+          pPro.description = `Billet ${tier.toUpperCase()} - ${event.title}`;
+          
+          const appUrl = window.location.origin;
+          pPro.notificationURL = `${appUrl}/api/payment/callback`;
+          pPro.returnURL = `${appUrl}/?payment_success=true&ticket_id=${data.ticket.id}`;
+          pPro.returnContext = JSON.stringify({ ticketId: data.ticket.id, userId: user?.id });
+          
+          await pPro.getUrlPayment();
+          
+          if (pPro.success && pPro.url) {
+            console.log("[PaiementPro] Lien de paiement généré :", pPro.url);
+            setPaymentUrl(pPro.url);
+            
+            // Ouvrir la passerelle de paiement dans une nouvelle fenêtre/onglet
+            window.open(pPro.url, "_blank");
+          } else {
+            console.warn("[PaiementPro] Succès de l'initialisation non retourné par l'API, mode simulation actif.");
+          }
+        } else {
+          console.warn("[PaiementPro SDK] SDK non chargé globalement dans l'index.html, utilisation de la simulation locale.");
+        }
+      } catch (sdkErr) {
+        console.error("[PaiementPro SDK Integration Error]", sdkErr);
       }
 
       // Checkout Success! Go to step 4
@@ -417,12 +475,34 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
                 <Check className="h-7 w-7" strokeWidth={3} />
               </div>
               <div>
-                <h4 className="text-base font-black text-gray-900">Paiement Accepté ! Votre Pass est disponible.</h4>
-                <p className="text-xs text-gray-500 mt-1 pb-1">Un e-mail de confirmation contenant votre facture d'accès vient de vous être envoyé.</p>
+                <h4 className="text-base font-black text-gray-900">Commande Initiale Validée !</h4>
+                <p className="text-xs text-gray-500 mt-1 pb-1">Votre billet a été configuré avec succès dans votre espace.</p>
               </div>
+
+              {paymentUrl ? (
+                <div className="p-4 bg-orange-50 border border-orange-100 rounded-2xl w-full space-y-3">
+                  <p className="text-xs text-orange-850 font-semibold leading-relaxed">
+                    Une passerelle sécurisée <strong className="text-orange-600">Paiement Pro (CI)</strong> a été initiée pour effectuer le transfert. Si la page ne s'est pas ouverte automatiquement, cliquez ci-dessous :
+                  </p>
+                  <a
+                    href={paymentUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex w-full justify-center items-center rounded-xl bg-orange-600 px-4 py-3 text-xs font-black text-white hover:bg-orange-700 transition shadow-md shadow-orange-100"
+                    id="paiement-pro-direct-link"
+                  >
+                    Ouvrir le guichet Paiement Pro
+                  </a>
+                </div>
+              ) : (
+                <div className="p-4 bg-gray-50 border border-gray-150 rounded-2xl w-full text-xs text-gray-500">
+                  Transaction simulée terminée avec succès.
+                </div>
+              )}
+
               <button
                 onClick={onClose}
-                className="rounded-xl bg-orange-600 px-6 py-3 text-xs font-extrabold text-white hover:bg-orange-700 transition shadow-md shadow-orange-100 font-sans"
+                className="rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 px-6 py-3 text-xs font-extrabold transition font-sans w-full"
               >
                 Accéder à mes Billets
               </button>
