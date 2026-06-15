@@ -14,18 +14,38 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Supabase Connection initialization with graceful safety checks
-const supabaseUrl = process.env.SUPABASE_URL || "";
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || "";
-const isSupabaseEnabled = Boolean(supabaseUrl && supabaseServiceKey);
-const supabase = isSupabaseEnabled ? createClient(supabaseUrl, supabaseServiceKey) : null;
+let rawSupabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
+// Clean any multiple spaces or accidental characters in URL
+rawSupabaseUrl = rawSupabaseUrl.replace(/\s+/g, "");
 
-if (isSupabaseEnabled) {
-  console.log("==================================================");
-  console.log(`[Supabase] Activé ! Connexion en cours vers : ${supabaseUrl}`);
-  console.log("==================================================");
+const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "").trim();
+
+let isSupabaseEnabled = false;
+let supabase: any = null;
+
+if (rawSupabaseUrl && supabaseServiceKey) {
+  if (/^https?:\/\//i.test(rawSupabaseUrl)) {
+    try {
+      supabase = createClient(rawSupabaseUrl, supabaseServiceKey);
+      isSupabaseEnabled = true;
+      console.log("==================================================");
+      console.log(`[Supabase] Activé ! Connexion en cours vers : ${rawSupabaseUrl}`);
+      console.log("==================================================");
+    } catch (err: any) {
+      console.error("==================================================");
+      console.error("[Supabase Error] Échec de l'initialisation du client :", err.message);
+      console.error("[Supabase] Repli automatique sur : db.json");
+      console.error("==================================================");
+    }
+  } else {
+    console.warn("==================================================");
+    console.warn("[Supabase Warning] L'URL Supabase configuree semble invalide (n'est pas une URL HTTP/HTTPS) :", rawSupabaseUrl);
+    console.warn("[Supabase] Repli automatique sur : db.json");
+    console.warn("==================================================");
+  }
 } else {
   console.log("==================================================");
-  console.log("[Supabase] Configuration absente.");
+  console.log("[Supabase] Configuration absente ou incomplète (URL ou Clé manquante).");
   console.log("[Supabase] Repli automatique sur la base locale : db.json");
   console.log("==================================================");
 }
