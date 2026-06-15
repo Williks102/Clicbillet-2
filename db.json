@@ -1,0 +1,108 @@
+{
+  "users": [
+    {
+      "id": "usr-admin",
+      "email": "admin@clicbillet.ci",
+      "password": "password123",
+      "name": "Administrateur ClicBillet",
+      "role": "admin"
+    },
+    {
+      "id": "usr-client",
+      "email": "client@clicbillet.ci",
+      "password": "password123",
+      "name": "Jean-Eudes Koffi",
+      "role": "client"
+    },
+    {
+      "id": "org-1",
+      "email": "orga@clicbillet.ci",
+      "password": "password123",
+      "name": "Overcom Production",
+      "role": "organizer"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt-1",
+      "title": "Concert Géant de Didi B (Live à l'Agora d'Abobo)",
+      "description": "Le Shogun de la musique ivoirienne Didi B vous donne rendez-vous pour un concert d'anthologie à l'Agora d'Abobo. Ambiance 100% Rap Ivoire, effets spéciaux et prestations scéniques exceptionnelles !",
+      "date": "2026-07-25",
+      "time": "18:00",
+      "price": 5000,
+      "venue": "Agora d'Abobo, Abidjan",
+      "category": "Concert",
+      "banner": "https://images.unsplash.com/photo-1506157786151-b8491531f063?w=800&auto=format&fit=crop&q=60",
+      "ticketsSold": 345,
+      "totalTickets": 1500,
+      "organizerId": "org-1",
+      "organizerName": "Overcom Production"
+    },
+    {
+      "id": "evt-2",
+      "title": "Festival des Grillades d'Abidjan - 19ème Édition",
+      "description": "Le plus grand événement gastronomique de Côte d'Ivoire ! Venez savourer les meilleures grillades (poulets braisés, choucouya de mouton, attiéké poisson) rythmées par les prestations d'artistes majeurs de la scène ivoirienne.",
+      "date": "2026-08-15",
+      "time": "12:00",
+      "price": 3000,
+      "venue": "Palais de la Culture, Treichville, Abidjan",
+      "category": "Festivals",
+      "banner": "https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=800&auto=format&fit=crop&q=60",
+      "ticketsSold": 1205,
+      "totalTickets": 5000,
+      "organizerId": "org-1",
+      "organizerName": "Overcom Production"
+    },
+    {
+      "id": "evt-3",
+      "title": "Le Parlement du Rire : Gohou, Boukary & Amis",
+      "description": "Une thérapie par le rire d'une intensité folle ! Les sommités de l'humour ouest-africain réunies pour un spectacle inoubliable. Préparez-vous à rire aux éclats !",
+      "date": "2026-06-30",
+      "time": "20:00",
+      "price": 10000,
+      "venue": "Salle Anoumabo, Palais de la Culture",
+      "category": "Théâtre & Humour",
+      "banner": "https://images.unsplash.com/photo-1516280440614-37939bbacd6a?w=800&auto=format&fit=crop&q=60",
+      "ticketsSold": 180,
+      "totalTickets": 1200,
+      "organizerId": "org-1",
+      "organizerName": "Overcom Production"
+    },
+    {
+      "id": "evt-4",
+      "title": "Super Classico Maracana : Abidjan vs Yamoussoukro",
+      "description": "La grande finale de la ligue nationale de Maracana de Côte d'Ivoire. Venez encourager votre équipe favorite lors de chocs spectaculaires suivis de concerts live originaux localisés d'ambiance facile !",
+      "date": "2026-07-12",
+      "time": "15:00",
+      "price": 2000,
+      "venue": "Forum de l'Université de Cocody, Abidjan",
+      "category": "Sport",
+      "banner": "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=800&auto=format&fit=crop&q=60",
+      "ticketsSold": 67,
+      "totalTickets": 800,
+      "organizerId": "org-2",
+      "organizerName": "Fédération Maracana CI"
+    }
+  ],
+  "tickets": [
+    {
+      "id": "tkt-simulated-1",
+      "eventId": "evt-1",
+      "eventTitle": "Concert Géant de Didi B (Live à l'Agora d'Abobo)",
+      "eventDate": "2026-07-25",
+      "eventTime": "18:00",
+      "eventVenue": "Agora d'Abobo, Abidjan",
+      "buyerId": "usr-client",
+      "buyerName": "Jean-Eudes Koffi",
+      "buyerEmail": "client@clicbillet.ci",
+      "tier": "vip",
+      "pricePaid": 15000,
+      "qrCodeData": "clicbillet-verify:tkt-simulated-1",
+      "scanned": false,
+      "scannedAt": null,
+      "transactionRef": "TX-OM-5493010",
+      "purchaseDate": "2026-06-08T14:30:00Z",
+      "quantity": 1
+    }
+  ]
+}

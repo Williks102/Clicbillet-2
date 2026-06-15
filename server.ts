@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from "url";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
@@ -1150,6 +1149,7 @@ app.delete("/api/admin/users/:id", async (req, res) => {
 // Configure Vite middleware and static serving as requested
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -1163,9 +1163,13 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`ClicBillet server running on http://0.0.0.0:${PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`ClicBillet server running on http://0.0.0.0:${PORT}`);
+    });
+  } else {
+    console.log("[Vercel] En cours d'exécution dans un environnement Serverless - app.listen ignoré.");
+  }
 }
 
 startServer();
