@@ -432,6 +432,20 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
                 </div>
               )}
 
+              {/* Affichage de l'ID marchand Paiement Pro configure */}
+              <div className="p-3 bg-orange-50/20 border border-orange-150/20 rounded-2xl space-y-1">
+                <div className="flex items-center justify-between text-[10px] text-gray-500 font-semibold">
+                  <span>Passerelle Actrice :</span>
+                  <span className="text-orange-600 font-extrabold uppercase">Paiement Pro (CI)</span>
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-gray-500 font-semibold">
+                  <span>ID Marchand Connecté :</span>
+                  <span className="font-mono text-gray-800 bg-white px-1.5 py-0.5 rounded border border-gray-150 font-black">
+                    {(import.meta as any).env.VITE_PAIEMENT_PRO_MERCHANT_ID || "MARCHAND_DEMO_DEFAULT"}
+                  </span>
+                </div>
+              </div>
+
               {/* Action buttons triggers */}
               <div className="pt-6 border-t border-gray-100 flex items-center justify-between">
                 <button
@@ -499,6 +513,10 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
                   Transaction simulée terminée avec succès.
                 </div>
               )}
+
+              <div className="text-[10px] text-gray-450 font-medium tracking-wide">
+                Passerelle : <strong className="text-gray-600">Paiement Pro (CI)</strong> • ID Marchand : <span className="font-mono font-black text-orange-600">{(import.meta as any).env.VITE_PAIEMENT_PRO_MERCHANT_ID || "MARCHAND_DEMO_DEFAULT"}</span>
+              </div>
 
               <button
                 onClick={onClose}
