@@ -41,6 +41,7 @@ export interface Ticket {
   transactionRef: string;
   purchaseDate: string;
   quantity: number;
+  paymentStatus?: 'pending' | 'paid' | 'failed';
 }
 
 export type PaymentMethod = 'orange_money' | 'mtn_momo' | 'moov_money' | 'wave' | 'card';

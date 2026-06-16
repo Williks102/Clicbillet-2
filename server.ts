@@ -854,7 +854,8 @@ app.get("/api/my-tickets", async (req, res) => {
         scannedAt: t.scanned_at,
         transactionRef: t.transaction_ref,
         purchaseDate: t.purchase_date,
-        quantity: t.quantity
+        quantity: t.quantity,
+        paymentStatus: t.transaction_ref?.startsWith("PENDING-") ? "pending" : "paid"
       }));
       return res.json(mappedTickets);
     } catch (err: any) {
@@ -863,7 +864,10 @@ app.get("/api/my-tickets", async (req, res) => {
   }
 
   const db = getDB();
-  const filtered = db.tickets.filter(t => t.buyerId === buyerId);
+  const filtered = db.tickets.filter(t => t.buyerId === buyerId).map(t => ({
+    ...t,
+    paymentStatus: t.transactionRef?.startsWith("PENDING-") ? "pending" : "paid"
+  }));
   res.json(filtered);
 });
 
@@ -910,7 +914,7 @@ app.post("/api/checkout", validateCheckout, async (req, res) => {
       };
 
       const code = gatewayShortNames[paymentDetails.method] || "PAY";
-      const mockTransactionRef = `TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}`;
+      const mockTransactionRef = `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}`;
       const ticketId = `tkt-${Date.now()}`;
 
       // 2. Insert Ticket
@@ -1004,7 +1008,7 @@ app.post("/api/checkout", validateCheckout, async (req, res) => {
   };
 
   const code = gatewayShortNames[paymentDetails.method] || "PAY";
-  const mockTransactionRef = `TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}`;
+  const mockTransactionRef = `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}`;
 
   // Generate single grouped ticket, or multiple tickets? Let's generate one ticket indicating quantum
   const ticketId = `tkt-${Date.now()}`;
@@ -1073,8 +1077,11 @@ app.all("/api/payment/callback", async (req, res) => {
         console.warn(`[PaiementPro Callback] Ticket introuvable dans Supabase pour l'ID : ${referenceNumber}`);
       } else {
         console.log(`[PaiementPro Callback] Ticket correspondant trouvé dans Supabase : ${ticket.event_title}`);
-        // Ici, on pourrait mettre à jour le statut "payé" si un tel attribut existait.
-        // Comme le statut de validation est implicite, nous enregistrons des logs précieux.
+        if(status === "SUCCESS" || status === "success" || req.body.status === true) {
+          await supabase.from("tickets")
+            .update({ transaction_ref: ticket.transaction_ref.replace("PENDING-", "PAID-") })
+            .eq("id", referenceNumber);
+        }
       }
     } catch (err: any) {
       console.error("[PaiementPro Callback Supabase Error]", err.message);
@@ -1086,6 +1093,10 @@ app.all("/api/payment/callback", async (req, res) => {
       console.warn(`[PaiementPro Callback] Ticket local introuvable pour l'id : ${referenceNumber}`);
     } else {
       console.log(`[PaiementPro Callback] Ticket local de ${ticket.buyerName} mis à jour suite au callback.`);
+      if(status === "SUCCESS" || status === "success" || req.body.status === true) {
+        ticket.transactionRef = ticket.transactionRef.replace("PENDING-", "PAID-");
+        saveDB(db);
+      }
     }
   }
 

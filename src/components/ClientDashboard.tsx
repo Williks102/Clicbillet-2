@@ -208,10 +208,10 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
                   </span>
 
                   <span className={`inline-flex items-center text-xs font-bold ${
-                    tkt.scanned ? "text-gray-400" : "text-green-600"
+                    tkt.paymentStatus === "pending" ? "text-amber-500" : tkt.scanned ? "text-gray-400" : "text-green-600"
                   }`}>
-                    <span className={`mr-1 h-1.5 w-1.5 rounded-full ${tkt.scanned ? "bg-gray-400" : "bg-green-500"}`} />
-                    {tkt.scanned ? "Scanné" : "Valide"}
+                    <span className={`mr-1 h-1.5 w-1.5 rounded-full ${tkt.paymentStatus === "pending" ? "bg-amber-500" : tkt.scanned ? "bg-gray-400" : "bg-green-500"}`} />
+                    {tkt.paymentStatus === "pending" ? "En attente" : tkt.scanned ? "Scanné" : "Valide"}
                   </span>
                 </div>
 
@@ -299,10 +299,17 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
               {/* Secure QR Code Section */}
               <div className="flex flex-col items-center justify-center space-y-2 bg-gray-50/70 py-6 rounded-2xl border border-gray-100">
                 <div className="relative h-44 w-44 rounded-xl bg-white p-2 border border-gray-200 shadow-md flex items-center justify-center">
+                  {selectedTicket.paymentStatus === "pending" && (
+                    <div className="absolute inset-0 bg-white/95 flex flex-col items-center justify-center p-3 text-center rounded-xl z-10">
+                      <AlertTriangle className="h-10 w-10 text-amber-500 animate-pulse" />
+                      <span className="text-xs font-extrabold text-amber-600 mt-2">Paiement En Attente</span>
+                      <span className="text-[10px] text-gray-500 mt-1 leading-tight">Le QR Code sera généré dès validation.</span>
+                    </div>
+                  )}
                   <img
                     src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(selectedTicket.qrCodeData)}`}
                     alt="Billet QR Code"
-                    className="h-40 w-40"
+                    className={`h-40 w-40 ${selectedTicket.paymentStatus === "pending" ? 'opacity-20 grayscale blur-sm' : ''}`}
                     referrerPolicy="no-referrer"
                   />
                   {selectedTicket.scanned && (
@@ -363,7 +370,12 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
               <button
                 onClick={handlePrintTicket}
                 id="print-ticket-action-btn"
-                className="flex items-center justify-center space-x-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 active:scale-95"
+                disabled={selectedTicket.paymentStatus === "pending"}
+                className={`flex items-center justify-center space-x-1.5 rounded-xl border border-gray-200 px-4 py-2 text-xs font-bold ${
+                  selectedTicket.paymentStatus === "pending"
+                    ? "bg-gray-50 text-gray-400 cursor-not-allowed opacity-50"
+                    : "bg-white text-gray-700 hover:bg-gray-50 active:scale-95"
+                }`}
               >
                 <Printer className="h-4 w-4 text-gray-400" />
                 <span>Imprimer / PDF</span>
