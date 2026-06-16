@@ -196,7 +196,9 @@ const INITIAL_DATABASE = {
       purchaseDate: "2026-06-08T14:30:00Z",
       quantity: 1
     }
-  ]
+  ],
+  payouts: [],
+  transactions: []
 };
 
 // Initialize DB file helper
@@ -448,12 +450,26 @@ const validateVerifyTicket = (req: express.Request, res: express.Response, next:
 
 // API Endpoints: Event Fetching
 app.get("/api/events", async (req, res) => {
+  const { includePending } = req.query;
+
   if (isSupabaseEnabled && supabase) {
     try {
-      const { data, error } = await supabase
-        .from("events")
-        .select("*")
-        .order("created_at", { ascending: false });
+      let query = supabase.from("events").select("*").order("created_at", { ascending: false });
+      if (!includePending) {
+        query = query.eq("status", "approved");
+      }
+      let { data, error } = await query;
+
+      // Handle missing 'status' column in legacy Supabase schemas gracefully
+      if (error && error.message.includes('status')) {
+        const fallbackQuery = await supabase.from("events").select("*").order("created_at", { ascending: false });
+        if (!fallbackQuery.error) {
+           data = fallbackQuery.data;
+           error = null;
+        } else {
+           throw fallbackQuery.error;
+        }
+      }
 
       if (error) throw error;
 
@@ -472,7 +488,8 @@ app.get("/api/events", async (req, res) => {
         ticketsSold: e.tickets_sold ?? 0,
         totalTickets: e.total_tickets,
         organizerId: e.organizer_id,
-        organizerName: e.organizer_name
+        organizerName: e.organizer_name,
+        status: e.status || "approved"
       }));
       return res.json(mappedEvents);
     } catch (err: any) {
@@ -481,7 +498,11 @@ app.get("/api/events", async (req, res) => {
   }
 
   const db = getDB();
-  res.json(db.events);
+  let events = db.events || [];
+  if (!includePending) {
+    events = events.filter(e => e.status === "approved" || !e.status);
+  }
+  res.json(events);
 });
 
 // Create Event Endpoint for Organizers
@@ -497,7 +518,8 @@ app.post("/api/events", validateEvent, async (req, res) => {
 
   if (isSupabaseEnabled && supabase) {
     try {
-      const { data, error } = await supabase
+      let insertedData;
+      let { data, error } = await supabase
         .from("events")
         .insert({
           id: newEventId,
@@ -513,10 +535,39 @@ app.post("/api/events", validateEvent, async (req, res) => {
           tickets_sold: 0,
           total_tickets: Number(totalTickets),
           organizer_id: organizerId,
-          organizer_name: organizerName || "Organisateur ClicBillet"
+          organizer_name: organizerName || "Organisateur ClicBillet",
+          status: 'pending'
         })
         .select()
         .single();
+        
+      if (error && error.message.includes('status')) {
+        // Fallback for legacy DB missing 'status'
+        const fallback = await supabase
+          .from("events")
+          .insert({
+            id: newEventId,
+            title,
+            description: description || "Aucune description fournie.",
+            date,
+            time,
+            price: Number(price),
+            ticket_types: ticketTypes,
+            venue,
+            category,
+            banner: bannerUrl,
+            tickets_sold: 0,
+            total_tickets: Number(totalTickets),
+            organizer_id: organizerId,
+            organizer_name: organizerName || "Organisateur ClicBillet"
+          })
+          .select()
+          .single();
+          
+          if (fallback.error) throw fallback.error;
+          data = fallback.data;
+          error = null;
+      }
 
       if (error) throw error;
 
@@ -946,6 +997,20 @@ app.post("/api/checkout", validateCheckout, async (req, res) => {
 
       const code = gatewayShortNames[paymentDetails.method] || "PAY";
       const mockTransactionRef = `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}`;
+
+      // Log transaction attempt
+      try {
+        await supabase.from("transactions").insert({
+          id: mockTransactionRef,
+          event_id: eventId,
+          buyer_email: buyerEmail,
+          amount: totalPrice,
+          status: "pending",
+          date: new Date().toISOString(),
+          method: paymentDetails.method
+        });
+      } catch (e: any) { console.warn("Supabase tx log error:", e.message); }
+
       const ticketId = `tkt-${Date.now()}`;
 
       // 2. Insert Ticket
@@ -1044,6 +1109,17 @@ app.post("/api/checkout", validateCheckout, async (req, res) => {
 
   const code = gatewayShortNames[paymentDetails.method] || "PAY";
   const mockTransactionRef = `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}`;
+
+  db.transactions = db.transactions || [];
+  db.transactions.unshift({
+    id: mockTransactionRef,
+    eventId: eventId,
+    buyerEmail: buyerEmail,
+    amount: totalPrice,
+    status: "pending",
+    date: new Date().toISOString(),
+    method: paymentDetails.method
+  } as any);
 
   // Generate single grouped ticket, or multiple tickets? Let's generate one ticket indicating quantum
   const ticketId = `tkt-${Date.now()}`;
@@ -1754,6 +1830,119 @@ app.delete("/api/admin/users/:id", async (req, res) => {
     return res.json({ success: true, message: "Compte utilisateur révoqué avec succès." });
   }
   res.status(404).json({ error: "Utilisateur introuvable." });
+});
+
+// --- Modération Events ---
+app.patch("/api/admin/events/:id/status", async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  if (!status || !["approved", "rejected"].includes(status)) return res.status(400).json({ error: "Statut invalide" });
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { error } = await supabase.from("events").update({ status }).eq("id", id);
+      if (error) {
+         if (error.message.includes('status')) {
+            throw new Error('Supabase column events.status is missing. Update supabase_setup.sql');
+         }
+         throw error;
+      }
+      return res.json({ success: true, message: `Événement ${status}` });
+    } catch(e: any) {
+      console.warn("[Supabase Error] Admin event status update:", e.message);
+    }
+  }
+
+  const db = getDB();
+  const event = db.events.find(e => e.id === id);
+  if (event) {
+    event.status = status;
+    saveDB(db);
+    return res.json({ success: true, message: `Événement ${status}` });
+  }
+  res.status(404).json({ error: "Événement introuvable" });
+});
+
+// --- Payouts (Demandes de retrait) ---
+app.post("/api/organizer/payouts", async (req, res) => {
+  const { organizerId, amount, method, details } = req.body;
+  if (!organizerId || !amount || !method) return res.status(400).json({ error: "Champs manquants" });
+
+  const payout = {
+    id: `pay-${Date.now()}`, organizerId, amount: Number(amount), status: "pending" as const,
+    requestDate: new Date().toISOString(), method, details
+  };
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { error } = await supabase.from("payouts").insert({
+        id: payout.id, organizer_id: payout.organizerId, amount: payout.amount,
+        status: payout.status, request_date: payout.requestDate, method: payout.method, details: payout.details
+      });
+      if (error) throw error;
+    } catch(e: any) {
+       console.warn("[Supabase Error] Payout insert, falling back to local file DB:", e.message);
+    }
+  }
+  const db = getDB();
+  db.payouts = db.payouts || [];
+  db.payouts.unshift(payout as any);
+  saveDB(db);
+  res.json({ success: true, payout });
+});
+
+app.get("/api/organizer/payouts", async (req, res) => {
+  const { organizerId } = req.query;
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { data, error } = await supabase.from("payouts").select("*").eq("organizer_id", organizerId);
+      if (!error) return res.json(data.map((p: any) => ({...p, organizerId: p.organizer_id, requestDate: p.request_date})));
+    } catch(e) {}
+  }
+  const db = getDB();
+  res.json((db.payouts || []).filter(p => p.organizerId === organizerId || (p as any).organizer_id === organizerId));
+});
+
+app.get("/api/admin/payouts", async (req, res) => {
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { data, error } = await supabase.from("payouts").select("*").order("request_date", { ascending: false });
+      if (!error) return res.json(data.map((p: any) => ({...p, organizerId: p.organizer_id, requestDate: p.request_date})));
+    } catch(e) {}
+  }
+  const db = getDB();
+  res.json(db.payouts || []);
+});
+
+app.patch("/api/admin/payouts/:id/status", async (req, res) => {
+  const { status } = req.body;
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { error } = await supabase.from("payouts").update({ status }).eq("id", req.params.id);
+      if (!error) return res.json({ success: true });
+    } catch(e) {}
+  }
+  const db = getDB();
+  db.payouts = db.payouts || [];
+  const p = db.payouts.find(p => p.id === req.params.id);
+  if (p) {
+    p.status = status;
+    saveDB(db);
+    return res.json({ success: true });
+  }
+  res.status(404).json({ error: "Introuvable" });
+});
+
+// --- Transactions History ---
+app.get("/api/admin/transactions", async (req, res) => {
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { data, error } = await supabase.from("transactions").select("*").order("date", { ascending: false });
+      if (!error) return res.json(data.map((t: any) => ({...t, eventId: t.event_id, buyerEmail: t.buyer_email, errorDetails: t.error_details})));
+    } catch(e) {}
+  }
+  const db = getDB();
+  res.json(db.transactions || []);
 });
 
 // Configure Vite middleware and static serving as requested

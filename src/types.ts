@@ -22,6 +22,29 @@ export interface Event {
   totalTickets: number;
   organizerId: string;
   organizerName: string;
+  status?: "pending" | "approved" | "rejected";
+}
+
+export interface PayoutRequest {
+  id: string;
+  organizerId: string;
+  organizerName?: string;
+  amount: number;
+  status: "pending" | "completed" | "rejected";
+  requestDate: string;
+  method: string;
+  details: string;
+}
+
+export interface TransactionLog {
+  id: string;
+  eventId: string;
+  buyerEmail?: string;
+  amount: number;
+  status: "success" | "failed" | "pending";
+  date: string;
+  method: string;
+  errorDetails?: string;
 }
 
 export interface Ticket {

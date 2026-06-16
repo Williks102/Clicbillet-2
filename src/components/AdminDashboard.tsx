@@ -25,9 +25,11 @@ interface AdminStats {
 
 export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
   const [stats, setStats] = useState<AdminStats | null>(null);
+  const [payouts, setPayouts] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<"overview" | "events" | "users" | "tickets">("overview");
+  const [activeSubTab, setActiveSubTab] = useState<"overview" | "events" | "users" | "tickets" | "payouts" | "transactions">("overview");
 
   // Search & Filters parameters
   const [userSearch, setUserSearch] = useState("");
@@ -61,12 +63,19 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/admin/stats");
+      const [response, respPayouts, respTx] = await Promise.all([
+        fetch("/api/admin/stats"),
+        fetch("/api/admin/payouts"),
+        fetch("/api/admin/transactions")
+      ]);
       if (!response.ok) {
         throw new Error("Impossible de communiquer avec l'interface d'administration.");
       }
       const data = await response.json();
       setStats(data);
+
+      if (respPayouts.ok) setPayouts(await respPayouts.json());
+      if (respTx.ok) setTransactions(await respTx.json());
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Impossible de récupérer les statistiques d'administration.");
@@ -78,6 +87,32 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   useEffect(() => {
     fetchAdminData();
   }, []);
+
+  async function handleUpdateEventStatus(id: string, status: "approved" | "rejected") {
+    if (!confirm(`Confirmer le changement de statut en ${status} ?`)) return;
+    try {
+      const response = await fetch(`/api/admin/events/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status })
+      });
+      if (!response.ok) throw new Error("Erreur de mise à jour.");
+      fetchAdminData();
+    } catch (err: any) { alert(err.message); }
+  }
+
+  async function handleUpdatePayout(id: string, status: "completed" | "rejected") {
+    if (!confirm(`Marquer ce retrait comme ${status} ?`)) return;
+    try {
+      const response = await fetch(`/api/admin/payouts/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status })
+      });
+      if (!response.ok) throw new Error("Erreur de mise à jour.");
+      fetchAdminData();
+    } catch (err: any) { alert(err.message); }
+  }
 
   async function handleDeleteEvent(id: string) {
     if (!confirm("Êtes-vous sûr de vouloir supprimer cet événement de la plateforme ? Cette action est irréversible.")) return;
@@ -136,152 +171,175 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   }
 
   return (
-    <div className="space-y-8 py-6" id="admin-dashboard-container">
-      {/* Platform Level Header */}
-      <section className="rounded-2xl bg-slate-900 text-white p-6 md:p-8 border border-slate-800 shadow-xl relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-orange-600/10 via-transparent to-transparent opacity-60 pointer-events-none" />
-        <div className="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center space-x-1.5 rounded-full bg-orange-500/15 border border-orange-500/30 px-3 py-1 text-xs font-bold uppercase tracking-wider text-orange-400">
-              <ShieldCheck className="h-3.5 w-3.5" />
-              <span>Portail de Supervision Administrative</span>
-            </div>
-            <h2 className="mt-2 text-2xl font-black tracking-tight text-white">
-              Bonjour, {user.name}
-            </h2>
-            <p className="mt-1 text-xs text-slate-400 font-medium">
-              Suivi global des transactions financières, des réservations et modération des comptes de la plateforme ClicBillet Côte d'Ivoire.
-            </p>
-          </div>
-          <button
-            onClick={onLogout}
-            className="inline-flex items-center space-x-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-4 py-2.5 text-xs font-bold text-white transition-all active:scale-95 shrink-0"
-          >
-            <LogOut className="h-4 w-4" />
-            <span>Déconnexion</span>
-          </button>
-        </div>
-      </section>
-
-      {error && (
-        <div className="rounded-xl bg-red-50 p-4 text-sm font-semibold text-red-600 border border-red-100 flex items-center space-x-2">
-          <ShieldAlert className="h-5 w-5 shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
-
-      {/* Metrics Banner cards */}
-      {stats && (
-        <section className="grid grid-cols-2 gap-4 lg:grid-cols-6" id="admin-kpis-grid">
-          <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs col-span-2 sm:col-span-1 lg:col-span-2">
-            <div className="flex items-center justify-between">
-              <span className="text-gray-400 text-[10px] font-black uppercase tracking-wider">Volume d'affaires Brut</span>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-50 text-gray-700">
-                <DollarSign className="h-4 w-4" />
+    <div className="flex flex-col lg:flex-row gap-6 lg:gap-8" id="admin-dashboard-container">
+      {/* Sidebar Area */}
+      <aside className="w-full lg:w-64 shrink-0 space-y-6">
+        {/* Platform Level Header - Compacted for sidebar */}
+        <section className="rounded-2xl bg-slate-900 text-white p-5 border border-slate-800 shadow-xl relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-orange-600/20 via-transparent to-transparent opacity-60 pointer-events-none" />
+          <div className="relative z-10 flex flex-col gap-3">
+            <div>
+              <div className="inline-flex items-center space-x-1.5 rounded-full bg-orange-500/15 border border-orange-500/30 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-orange-400 mb-2">
+                <ShieldCheck className="h-3 w-3" />
+                <span>Supervision</span>
               </div>
+              <h2 className="text-xl font-black tracking-tight text-white truncate" title={user.name}>
+                {user.name}
+              </h2>
+              <p className="mt-1 text-[10px] text-slate-400 font-medium truncate">
+                {user.email}
+              </p>
             </div>
-            <p className="mt-3.5 text-xl font-black text-slate-900 font-sans tracking-tight">
-              {stats.totalRevenue.toLocaleString("fr-FR")} <span className="text-xs text-slate-500">FCFA</span>
-            </p>
-            <p className="mt-1 text-[10px] text-gray-400 font-bold uppercase">Recettes brutes (100%)</p>
-          </div>
-
-          <div className="rounded-2xl border border-orange-100 bg-orange-50/25 p-5 shadow-xs col-span-2 sm:col-span-1 lg:col-span-2">
-            <div className="flex items-center justify-between">
-              <span className="text-orange-500 text-[10px] font-black uppercase tracking-wider">Commission ClicBillet</span>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 text-orange-700">
-                <Sparkles className="h-4 w-4" />
-              </div>
-            </div>
-            <p className="mt-3.5 text-xl font-black text-orange-950 font-sans tracking-tight">
-              {(stats.totalPlatformCommission || 0).toLocaleString("fr-FR")} <span className="text-xs text-orange-650">FCFA</span>
-            </p>
-            <p className="mt-1 text-[10px] text-orange-500 font-bold uppercase">Revenus Admin (10%)</p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs col-span-2 sm:col-span-1 lg:col-span-2">
-            <div className="flex items-center justify-between">
-              <span className="text-gray-400 text-[10px] font-black uppercase tracking-wider">Reversement Organisateurs</span>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
-                <Building2 className="h-4 w-4" />
-              </div>
-            </div>
-            <p className="mt-3.5 text-xl font-black text-slate-900 font-sans tracking-tight">
-              {(stats.totalOrganizerPayout || 0).toLocaleString("fr-FR")} <span className="text-xs text-indigo-600">FCFA</span>
-            </p>
-            <p className="mt-1 text-[10px] text-gray-400 font-bold uppercase">Part Organisateur (90%)</p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs col-span-1">
-            <div className="flex items-center justify-between">
-              <span className="text-gray-400 text-[10px] font-black uppercase tracking-wider">Billets vendus</span>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
-                <TicketIcon className="h-4 w-4" />
-              </div>
-            </div>
-            <p className="mt-1.5 text-base font-black text-slate-900 font-sans tracking-tight">
-              {stats.totalTicketsSold.toLocaleString("fr-FR")}
-            </p>
-            <p className="mt-1 text-[9px] text-gray-400 font-bold uppercase">Réservations validées</p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs col-span-1">
-            <div className="flex items-center justify-between">
-              <span className="text-gray-400 text-[10px] font-black uppercase tracking-wider">Utilisateurs</span>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-                <Users className="h-4 w-4" />
-              </div>
-            </div>
-            <p className="mt-1.5 text-base font-black text-slate-900 font-sans tracking-tight">
-              {stats.totalUsers.toLocaleString("fr-FR")}
-            </p>
-            <p className="mt-1 text-[9px] text-gray-400 font-bold uppercase">Membres enregistrés</p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs col-span-2 sm:col-span-1 lg:col-span-2">
-            <div className="flex items-center justify-between">
-              <span className="text-gray-400 text-[10px] font-black uppercase tracking-wider">Événements</span>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
-                <Calendar className="h-4 w-4" />
-              </div>
-            </div>
-            <p className="mt-1.5 text-base font-black text-slate-900 font-sans tracking-tight">
-              {stats.totalEvents.toLocaleString("fr-FR")}
-            </p>
-            <p className="mt-1 text-[9px] text-gray-400 font-bold uppercase">Événements en ligne</p>
+            
+            <button
+              onClick={onLogout}
+              className="mt-2 inline-flex w-full items-center justify-center space-x-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-4 py-2 text-xs font-bold text-white transition-all active:scale-95 shrink-0 lg:hidden"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              <span>Déconnexion</span>
+            </button>
           </div>
         </section>
-      )}
 
-      {/* Controller Navigation tabs */}
-      <section className="border-b border-gray-200">
-        <div className="flex space-x-6">
-          {(["overview", "events", "users", "tickets"] as const).map((tab) => {
+        {/* Sidebar Navigation */}
+        <nav className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0 scrollbar-none">
+          {(["overview", "events", "users", "tickets", "payouts", "transactions"] as const).map((tab) => {
             const labels = {
               overview: "Tableau de Bord",
-              events: "Événements en ligne",
+              events: "Événements & Modération",
               users: "Membres & Rôles",
-              tickets: "Flux Transactionnel"
+              tickets: "Billets Vendus",
+              payouts: "Demandes de Retrait",
+              transactions: "Log Transactions"
+            };
+            const icons = {
+              overview: <Sparkles className="h-4 w-4" />,
+              events: <Calendar className="h-4 w-4" />,
+              users: <Users className="h-4 w-4" />,
+              tickets: <TicketIcon className="h-4 w-4" />,
+              payouts: <DollarSign className="h-4 w-4" />,
+              transactions: <TrendingUp className="h-4 w-4" />
             };
             return (
               <button
                 key={tab}
                 onClick={() => setActiveSubTab(tab)}
-                className={`pb-4 text-sm font-black transition-all ${
+                className={`flex items-center space-x-3 px-4 py-3 rounded-xl text-xs whitespace-nowrap font-black transition-all ${
                   activeSubTab === tab
-                    ? "border-b-2 border-orange-600 text-orange-600"
-                    : "text-gray-400 hover:text-gray-600"
+                    ? "bg-orange-50 text-orange-600 border border-orange-100 shadow-sm"
+                    : "text-gray-500 hover:bg-gray-50 hover:text-gray-900 border border-transparent"
                 }`}
               >
-                {labels[tab]}
+                {icons[tab]}
+                <span>{labels[tab]}</span>
               </button>
             );
           })}
-        </div>
-      </section>
+        </nav>
 
-      {/* Tab Context content */}
-      <section className="space-y-6">
+        <button
+          onClick={onLogout}
+          className="hidden lg:flex w-full items-center justify-center space-x-2 rounded-xl bg-gray-50 hover:bg-red-50 border border-gray-100 hover:border-red-100 text-gray-500 hover:text-red-600 px-4 py-2.5 text-xs font-bold transition-all active:scale-95 shrink-0"
+        >
+          <LogOut className="h-4 w-4" />
+          <span>Déconnexion</span>
+        </button>
+      </aside>
+
+      {/* Main Content Area */}
+      <main className="flex-1 min-w-0 space-y-6">
+        {error && (
+          <div className="rounded-xl bg-red-50 p-4 text-sm font-semibold text-red-600 border border-red-100 flex items-center space-x-2">
+            <ShieldAlert className="h-5 w-5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* Metrics Banner cards (Only show on overview) */}
+        {activeSubTab === "overview" && stats && (
+          <section className="grid grid-cols-2 gap-4 lg:grid-cols-6" id="admin-kpis-grid">
+            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs col-span-2 sm:col-span-1 lg:col-span-2">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-400 text-[10px] font-black uppercase tracking-wider">Volume d'affaires Brut</span>
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-50 text-gray-700">
+                  <DollarSign className="h-4 w-4" />
+                </div>
+              </div>
+              <p className="mt-3.5 text-xl font-black text-slate-900 font-sans tracking-tight">
+                {stats.totalRevenue.toLocaleString("fr-FR")} <span className="text-xs text-slate-500">FCFA</span>
+              </p>
+              <p className="mt-1 text-[10px] text-gray-400 font-bold uppercase">Recettes brutes (100%)</p>
+            </div>
+
+            <div className="rounded-2xl border border-orange-100 bg-orange-50/25 p-5 shadow-xs col-span-2 sm:col-span-1 lg:col-span-2">
+              <div className="flex items-center justify-between">
+                <span className="text-orange-500 text-[10px] font-black uppercase tracking-wider">Commission ClicBillet</span>
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 text-orange-700">
+                  <Sparkles className="h-4 w-4" />
+                </div>
+              </div>
+              <p className="mt-3.5 text-xl font-black text-orange-950 font-sans tracking-tight">
+                {(stats.totalPlatformCommission || 0).toLocaleString("fr-FR")} <span className="text-xs text-orange-650">FCFA</span>
+              </p>
+              <p className="mt-1 text-[10px] text-orange-500 font-bold uppercase">Revenus Admin (10%)</p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs col-span-2 sm:col-span-1 lg:col-span-2">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-400 text-[10px] font-black uppercase tracking-wider">Reversement Organisateurs</span>
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+                  <Building2 className="h-4 w-4" />
+                </div>
+              </div>
+              <p className="mt-3.5 text-xl font-black text-slate-900 font-sans tracking-tight">
+                {(stats.totalOrganizerPayout || 0).toLocaleString("fr-FR")} <span className="text-xs text-indigo-600">FCFA</span>
+              </p>
+              <p className="mt-1 text-[10px] text-gray-400 font-bold uppercase">Part Organisateur (90%)</p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs col-span-1">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-400 text-[10px] font-black uppercase tracking-wider">Billets vendus</span>
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                  <TicketIcon className="h-4 w-4" />
+                </div>
+              </div>
+              <p className="mt-1.5 text-base font-black text-slate-900 font-sans tracking-tight">
+                {stats.totalTicketsSold.toLocaleString("fr-FR")}
+              </p>
+              <p className="mt-1 text-[9px] text-gray-400 font-bold uppercase">Réservations validées</p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs col-span-1">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-400 text-[10px] font-black uppercase tracking-wider">Utilisateurs</span>
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                  <Users className="h-4 w-4" />
+                </div>
+              </div>
+              <p className="mt-1.5 text-base font-black text-slate-900 font-sans tracking-tight">
+                {stats.totalUsers.toLocaleString("fr-FR")}
+              </p>
+              <p className="mt-1 text-[9px] text-gray-400 font-bold uppercase">Membres enregistrés</p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs col-span-2 sm:col-span-1 lg:col-span-2">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-400 text-[10px] font-black uppercase tracking-wider">Événements</span>
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
+                  <Calendar className="h-4 w-4" />
+                </div>
+              </div>
+              <p className="mt-1.5 text-base font-black text-slate-900 font-sans tracking-tight">
+                {stats.totalEvents.toLocaleString("fr-FR")}
+              </p>
+              <p className="mt-1 text-[9px] text-gray-400 font-bold uppercase">Événements en ligne</p>
+            </div>
+          </section>
+        )}
+
+        {/* Tab Context content */}
+        <section className="space-y-6">
         
         {/* TAB 1: OVERVIEW COMPACT DASHBOARD */}
         {activeSubTab === "overview" && stats && (
@@ -408,6 +466,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                 <thead>
                   <tr className="border-b border-gray-100 text-gray-400 font-extrabold uppercase text-[9px] tracking-wider">
                     <th className="pb-3">Visual / Titre</th>
+                    <th className="pb-3 text-center">Statut</th>
                     <th className="pb-3">Organisateur</th>
                     <th className="pb-3">Date, Heure & Lieu</th>
                     <th className="pb-3">Tickets Vaudou</th>
@@ -429,6 +488,15 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                             </div>
                           </div>
                         </td>
+                        <td className="py-3 text-center">
+                          {evt.status === "pending" ? (
+                            <span className="px-2 py-1 bg-amber-50 text-amber-600 rounded-md text-[10px] font-bold uppercase border border-amber-200">En Attente</span>
+                          ) : evt.status === "rejected" ? (
+                            <span className="px-2 py-1 bg-red-50 text-red-600 rounded-md text-[10px] font-bold uppercase border border-red-200">Rejeté</span>
+                          ) : (
+                            <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-md text-[10px] font-bold uppercase border border-emerald-200">Approuvé</span>
+                          )}
+                        </td>
                         <td className="py-3 font-semibold text-gray-900">
                           {evt.organizerName} <span className="block text-[9px] text-gray-400 font-mono">ID: {evt.organizerId}</span>
                         </td>
@@ -442,13 +510,25 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                         </td>
                         <td className="py-3 text-right font-black text-orange-650">{evt.price.toLocaleString("fr-FR")} XOF</td>
                         <td className="py-3 text-center">
-                          <button
-                            onClick={() => handleDeleteEvent(evt.id)}
-                            className="bg-red-50 hover:bg-red-150 text-red-650 p-2 rounded-xl transition"
-                            title="Supprimer l'événement de la plateforme"
-                          >
-                            <Trash2 className="h-4 w-4 text-red-500" />
-                          </button>
+                          <div className="flex items-center justify-center space-x-1">
+                            {evt.status === "pending" && (
+                              <>
+                                <button onClick={() => handleUpdateEventStatus(evt.id, "approved")} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-2.5 py-1.5 text-[10px] font-bold uppercase rounded-md transition" title="Approuver">
+                                  Valid
+                                </button>
+                                <button onClick={() => handleUpdateEventStatus(evt.id, "rejected")} className="bg-gray-100 hover:bg-gray-200 text-gray-600 px-2.5 py-1.5 text-[10px] font-bold uppercase rounded-md transition" title="Rejeter">
+                                  Rejet
+                                </button>
+                              </>
+                            )}
+                            <button
+                              onClick={() => handleDeleteEvent(evt.id)}
+                              className="bg-red-50 hover:bg-red-150 text-red-650 p-1.5 rounded-md transition ml-2"
+                              title="Supprimer l'événement de la plateforme"
+                            >
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -635,7 +715,102 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
           </div>
         )}
 
+        {/* TAB 5: DEMANDES DE RETRAIT (PAYOUTS) */}
+        {activeSubTab === "payouts" && (
+          <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
+            <h4 className="text-sm font-black text-gray-955 border-b border-gray-50 pb-4">
+              Demandes de Retrait (Payouts)
+            </h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-gray-100 text-gray-400 font-extrabold uppercase text-[9px] tracking-wider">
+                    <th className="pb-3">ID Demande</th>
+                    <th className="pb-3">Organisateur</th>
+                    <th className="pb-3">Date de Demande</th>
+                    <th className="pb-3">Montant</th>
+                    <th className="pb-3">Moyen / Détails</th>
+                    <th className="pb-3 text-center">Action / Statut</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {payouts.map((p: any) => (
+                    <tr key={p.id}>
+                      <td className="py-3 font-mono text-[9px] text-gray-400">{p.id}</td>
+                      <td className="py-3 font-bold text-gray-950">{p.organizerName || p.organizerId}</td>
+                      <td className="py-3 text-gray-600">{new Date(p.requestDate).toLocaleString("fr-FR")}</td>
+                      <td className="py-3 font-black text-orange-650">{Number(p.amount).toLocaleString("fr-FR")} XOF</td>
+                      <td className="py-3">
+                        <span className="block font-bold uppercase">{p.method}</span>
+                        <span className="block text-[9px] text-gray-400 font-mono">{p.details}</span>
+                      </td>
+                      <td className="py-3 text-center">
+                        {p.status === "pending" ? (
+                          <div className="flex justify-center space-x-2">
+                            <button onClick={() => handleUpdatePayout(p.id, "completed")} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-2 py-1 text-[10px] font-bold rounded">Payer</button>
+                            <button onClick={() => handleUpdatePayout(p.id, "rejected")} className="bg-red-50 hover:bg-red-100 text-red-600 px-2 py-1 text-[10px] font-bold rounded">Refuser</button>
+                          </div>
+                        ) : p.status === "completed" ? (
+                          <span className="text-emerald-500 font-bold text-[10px] uppercase">Réglé</span>
+                        ) : (
+                          <span className="text-red-500 font-bold text-[10px] uppercase">Rejeté</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {payouts.length === 0 && <tr><td colSpan={6} className="text-center py-6 text-gray-400">Aucune demande de retrait.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 6: LOGS TRANSACTIONS */}
+        {activeSubTab === "transactions" && (
+          <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
+            <h4 className="text-sm font-black text-gray-955 border-b border-gray-50 pb-4">
+              Historique des Tentatives de Paiement
+            </h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-gray-100 text-gray-400 font-extrabold uppercase text-[9px] tracking-wider">
+                    <th className="pb-3">Transaction ID</th>
+                    <th className="pb-3">Client (Email)</th>
+                    <th className="pb-3">Moyen de Paiement</th>
+                    <th className="pb-3">Montant</th>
+                    <th className="pb-3">Date</th>
+                    <th className="pb-3 text-center">Statut</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {transactions.map((tx: any) => (
+                    <tr key={tx.id}>
+                      <td className="py-2.5 font-mono text-[9px] text-slate-800 font-black">{tx.id}</td>
+                      <td className="py-2.5 font-mono text-gray-500">{tx.buyerEmail}</td>
+                      <td className="py-2.5 font-bold uppercase">{tx.method}</td>
+                      <td className="py-2.5 font-black text-orange-650">{Number(tx.amount).toLocaleString("fr-FR")} XOF</td>
+                      <td className="py-2.5 text-[10px] text-gray-400">{new Date(tx.date).toLocaleString("fr-FR")}</td>
+                      <td className="py-2.5 text-center">
+                        {tx.status === "success" ? (
+                          <span className="text-emerald-500 font-bold text-[10px] uppercase">Succès</span>
+                        ) : tx.status === "failed" ? (
+                          <span className="text-red-500 font-bold text-[10px] uppercase">Échec</span>
+                        ) : (
+                          <span className="text-amber-500 font-bold text-[10px] uppercase">En Attente</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {transactions.length === 0 && <tr><td colSpan={6} className="text-center py-6 text-gray-400">Aucune transaction trouvée.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
       </section>
+      </main>
     </div>
   );
 }

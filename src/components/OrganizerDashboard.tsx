@@ -41,12 +41,14 @@ const BANNER_TEMPLATES = [
 ];
 
 export default function OrganizerDashboard({ user, events, onEventCreated, setActiveTab }: OrganizerDashboardProps) {
-  const [subTab, setSubTab] = useState<"dashboard" | "create" | "simulator">("dashboard");
+  const [subTab, setSubTab] = useState<"dashboard" | "create" | "simulator" | "payouts">("dashboard");
   const [stats, setStats] = useState<SalesStatus | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
 
   // Form Fields for Creation
   const [title, setTitle] = useState("");
+
+  // ... (keeping standard hooks)
   const [description, setDescription] = useState("");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
@@ -89,6 +91,13 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [simulatedTickets, setSimulatedTickets] = useState<any[]>([]);
   const [loadingSimTickets, setLoadingSimTickets] = useState(false);
   const [simStatusMsg, setSimStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  // Payout States
+  const [payouts, setPayouts] = useState<any[]>([]);
+  const [payoutAmount, setPayoutAmount] = useState("");
+  const [payoutMethod, setPayoutMethod] = useState("Wave");
+  const [payoutDetails, setPayoutDetails] = useState("");
+  const [submittingPayout, setSubmittingPayout] = useState(false);
 
   // Auto pre-fill Simulator Selected Event state
   useEffect(() => {
@@ -312,12 +321,19 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   // Fetch sales report stats from backend API
   async function fetchStats() {
     try {
-      const response = await fetch(`/api/organizer/stats?organizerId=${user.id}`);
+      const [response, payoutRes] = await Promise.all([
+        fetch(`/api/organizer/stats?organizerId=${user.id}`),
+        fetch(`/api/organizer/payouts?organizerId=${user.id}`)
+      ]);
       if (!response.ok) {
         throw new Error("Impossible de charger les statistiques.");
       }
       const data = await response.json();
       setStats(data);
+
+      if (payoutRes.ok) {
+        setPayouts(await payoutRes.json());
+      }
     } catch (err: any) {
       console.error(err);
     } finally {
@@ -328,6 +344,30 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   useEffect(() => {
     fetchStats();
   }, [user.id, events]);
+
+  async function handleRequestPayout(e: React.FormEvent) {
+    e.preventDefault();
+    if (Number(payoutAmount) <= 0) {
+       alert("Montant invalide.");
+       return;
+    }
+    setSubmittingPayout(true);
+    try {
+      const resp = await fetch("/api/organizer/payouts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ organizerId: user.id, amount: payoutAmount, method: payoutMethod, details: payoutDetails })
+      });
+      if (!resp.ok) throw new Error("Erreur de demande.");
+      
+      const newPayout = await resp.json();
+      setPayouts([newPayout.payout, ...payouts]);
+      setPayoutAmount("");
+      setPayoutDetails("");
+      alert("Demande de retrait effectuée ! Elle sera traitée par l'administration.");
+    } catch(err: any) { alert(err.message); }
+    finally { setSubmittingPayout(false); }
+  }
 
   // Handle building new Event
   async function handleCreateEvent(e: React.FormEvent) {
@@ -445,8 +485,20 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                 : "bg-orange-50/70 border-orange-200 hover:bg-orange-100"
             }`}
           >
-            <Hammer className="h-4 w-4 text-orange-700" />
+            <Hammer className="h-4 w-4" />
             <span>🧪 Simulateur Sandbox</span>
+          </button>
+          <button
+            id="orga-payouts-view-tab"
+            onClick={() => setSubTab("payouts")}
+            className={`flex items-center space-x-1.5 rounded-xl px-4 py-2.5 text-xs font-black transition-all active:scale-95 ${
+              subTab === "payouts"
+                ? "bg-slate-950 text-white shadow-md"
+                : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-150"
+            }`}
+          >
+            <DollarSign className="h-4 w-4" />
+            <span>Retraits & Soldes</span>
           </button>
         </div>
       </section>
@@ -625,7 +677,16 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                           referrerPolicy="no-referrer"
                         />
                         <div>
-                          <h5 className="text-xs font-extrabold text-gray-950 max-w-sm truncate">{evt.title}</h5>
+                          <div className="flex items-center space-x-2">
+                             <h5 className="text-xs font-extrabold text-gray-950 max-w-sm truncate">{evt.title}</h5>
+                             {evt.status === "pending" ? (
+                               <span className="px-1.5 bg-amber-50 text-amber-600 rounded text-[8px] font-bold uppercase">En Attente</span>
+                             ) : evt.status === "rejected" ? (
+                               <span className="px-1.5 bg-red-50 text-red-600 rounded text-[8px] font-bold uppercase">Rejeté</span>
+                             ) : (
+                               <span className="px-1.5 bg-emerald-50 text-emerald-600 rounded text-[8px] font-bold uppercase">Approuvé</span>
+                             )}
+                          </div>
                           <div className="flex items-center space-x-2 text-[10px] text-gray-400 mt-1">
                             <span className="bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded-sm font-bold uppercase">{evt.category}</span>
                             <span>{new Date(evt.date).toLocaleDateString("fr-FR")} à {evt.time}</span>
@@ -1379,6 +1440,96 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Payouts subtab */}
+      {subTab === "payouts" && (
+        <div className="space-y-6">
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+              <h3 className="text-sm font-black text-gray-900 border-b border-gray-100 pb-3 mb-4">Solde & Retrait</h3>
+              <div className="mb-6">
+                <span className="block text-[10px] uppercase font-bold text-gray-400">Solde Net Disponible (XOF)</span>
+                <span className="text-3xl font-black text-gray-900">{stats?.totalRevenue ? Number(stats.totalRevenue).toLocaleString("fr-FR") : 0} F</span>
+              </div>
+              
+              <form onSubmit={handleRequestPayout} className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-gray-700">Montant à retirer (XOF)</label>
+                  <input
+                    type="number"
+                    max={stats?.totalRevenue || 0}
+                    value={payoutAmount}
+                    onChange={(e) => setPayoutAmount(e.target.value)}
+                    required
+                    className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2 text-xs"
+                    placeholder="Ex: 50000"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-700">Moyen de réception</label>
+                  <select
+                    value={payoutMethod}
+                    onChange={(e) => setPayoutMethod(e.target.value)}
+                    className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2 text-xs bg-white text-gray-700"
+                  >
+                    <option value="Wave">Wave</option>
+                    <option value="Orange Money">Orange Money</option>
+                    <option value="MTN MoMo">MTN MoMo</option>
+                    <option value="Virement Bancaire">Virement Bancaire</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-700">Détails du compte (Numéro / IBAN)</label>
+                  <input
+                    type="text"
+                    value={payoutDetails}
+                    onChange={(e) => setPayoutDetails(e.target.value)}
+                    required
+                    className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2 text-xs"
+                    placeholder="Numéro ou détails..."
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={submittingPayout || !payoutAmount || Number(payoutAmount) <= 0 || Number(payoutAmount) > (stats?.totalRevenue || 0)}
+                  className="w-full py-2.5 rounded-xl bg-orange-600 text-white font-black text-xs disabled:bg-gray-300 transition-all"
+                >
+                  {submittingPayout ? "Demande en cours..." : "Demander un retrait"}
+                </button>
+              </form>
+            </div>
+            
+            <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm overflow-hidden flex flex-col">
+              <h3 className="text-sm font-black text-gray-900 border-b border-gray-100 pb-3 mb-4 shrink-0">Historique des Retraits</h3>
+              <div className="flex-1 overflow-y-auto pr-2 scrollbar-thin">
+                <div className="space-y-3">
+                  {payouts.map((p: any) => (
+                    <div key={p.id} className="p-3 border border-gray-100 rounded-xl flex justify-between items-center text-xs">
+                      <div>
+                        <span className="font-bold block text-gray-900">{Number(p.amount).toLocaleString("fr-FR")} XOF</span>
+                        <span className="text-[9px] text-gray-400 font-mono">{new Date(p.requestDate).toLocaleString("fr-FR")}</span>
+                      </div>
+                      <div className="text-right">
+                        {p.status === "pending" ? (
+                          <span className="px-2 py-1 bg-amber-50 text-amber-600 font-bold uppercase rounded text-[9px]">En attente</span>
+                        ) : p.status === "completed" ? (
+                          <span className="px-2 py-1 bg-emerald-50 text-emerald-600 font-bold uppercase rounded text-[9px]">Traité</span>
+                        ) : (
+                          <span className="px-2 py-1 bg-red-50 text-red-600 font-bold uppercase rounded text-[9px]">Rejeté</span>
+                        )}
+                        <span className="block text-[9px] uppercase font-bold text-gray-500 mt-1">{p.method}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {payouts.length === 0 && (
+                     <p className="text-gray-400 text-center py-6">Aucun retrait.</p>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
