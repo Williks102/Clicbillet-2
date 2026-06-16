@@ -12,7 +12,11 @@ interface CheckoutModalProps {
 
 export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenAuth }: CheckoutModalProps) {
   const [step, setStep] = useState<"configure" | "details" | "processing" | "success">("configure");
-  const [tier, setTier] = useState<"standard" | "vip">("standard");
+  const activeTicketTypes = (event.ticketTypes && event.ticketTypes.length > 0) 
+    ? event.ticketTypes 
+    : [{ name: "Standard", price: event.price }, { name: "VIP", price: event.price * 2 }];
+  
+  const [tier, setTier] = useState<string>(activeTicketTypes[0].name);
   const [quantity, setQuantity] = useState(1);
   const [method, setMethod] = useState<PaymentMethod>("orange_money");
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
@@ -27,8 +31,8 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
   const [error, setError] = useState<string | null>(null);
 
   // Computed values
-  const basePrice = event.price;
-  const unitPrice = basePrice;
+  const activeTier = activeTicketTypes.find(t => t.name === tier) || activeTicketTypes[0];
+  const unitPrice = activeTier.price;
   const totalPrice = unitPrice * quantity;
 
   // Gateways configurations with logo text & primary CSS theme styles
@@ -227,6 +231,27 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
 
           {step === "configure" && (
             <div className="space-y-6" id="checkout-configure-step">
+              {/* Ticket Tier Selection */}
+              <div className="space-y-2">
+                <label className="text-xs font-black text-gray-700 block">Choisissez votre Type de Billet</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {activeTicketTypes.map((t, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setTier(t.name)}
+                      className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition-all ${
+                        tier === t.name
+                          ? "bg-orange-50/50 border-orange-500 text-orange-700 ring-1 ring-orange-500"
+                          : "border-gray-200 bg-white hover:bg-gray-50 text-gray-600"
+                      }`}
+                    >
+                      <span className="text-[11px] font-black block">{t.name}</span>
+                      <span className="text-[10px] font-bold block mt-0.5">{t.price.toLocaleString("fr-FR")} XOF</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Quantity Selector input logic */}
               <div className="flex items-center justify-between bg-gray-50 p-4 rounded-2xl border border-gray-100">
                 <div>
@@ -294,7 +319,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
           {step === "details" && (
             <form onSubmit={handleConfirmPayment} className="space-y-4" id="checkout-details-step">
               <div className="bg-orange-50/50 p-4 rounded-xl border border-orange-100/30 flex items-center justify-between text-xs mb-3">
-                <span className="text-gray-500 font-semibold uppercase font-mono">Billet: {tier === "vip" ? "VIP" : "Standard"} ({quantity} pos)</span>
+                <span className="text-gray-500 font-semibold uppercase font-mono">Billet: {tier} ({quantity} pos)</span>
                 <span className="text-sm font-extrabold text-orange-650">{totalPrice.toLocaleString("fr-FR")} XOF</span>
               </div>
 

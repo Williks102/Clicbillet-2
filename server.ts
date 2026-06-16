@@ -235,6 +235,31 @@ function saveDB(data: typeof INITIAL_DATABASE) {
   }
 }
 
+// Mock Email Functionality
+async function sendTicketEmail(ticket: any) {
+  if (process.env.RESEND_API_KEY) {
+     console.log(`[Email Service] Sending Real Email via Resend to ${ticket.buyerEmail} with Ticket QR Code`);
+     // Example implementation:
+     /* 
+     await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': \`Bearer \${process.env.RESEND_API_KEY}\`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: 'ClicBillet <no-reply@clicbillet.ci>',
+          to: ticket.buyerEmail,
+          subject: 'Vos billets pour ' + ticket.eventTitle,
+          html: \`<h1>Vos billets</h1><p>Merci pour votre achat.</p><img src="\${ticket.qrCodeData}"/ >\`
+        })
+     });
+     */
+  } else {
+     console.log(`[Email Mock Service] ✉️ Sending Email to ${ticket.buyerEmail} for Event: ${ticket.eventTitle} (${ticket.quantity} places).`);
+  }
+}
+
 // Enable parsing middlewares for Webhooks and APIs
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -440,6 +465,7 @@ app.get("/api/events", async (req, res) => {
         date: e.date,
         time: e.time,
         price: Number(e.price),
+        ticketTypes: e.ticket_types,
         venue: e.venue,
         category: e.category,
         banner: e.banner,
@@ -460,7 +486,7 @@ app.get("/api/events", async (req, res) => {
 
 // Create Event Endpoint for Organizers
 app.post("/api/events", validateEvent, async (req, res) => {
-  const { title, description, date, time, price, venue, category, banner, totalTickets, organizerId, organizerName } = req.body;
+  const { title, description, date, time, price, ticketTypes, venue, category, banner, totalTickets, organizerId, organizerName } = req.body;
 
   if (!title || !date || !time || isNaN(price) || !venue || !category || !totalTickets || !organizerId) {
     return res.status(400).json({ error: "Veuillez remplir tous les champs obligatoires correctement." });
@@ -480,6 +506,7 @@ app.post("/api/events", validateEvent, async (req, res) => {
           date,
           time,
           price: Number(price),
+          ticket_types: ticketTypes,
           venue,
           category,
           banner: bannerUrl,
@@ -500,6 +527,7 @@ app.post("/api/events", validateEvent, async (req, res) => {
         date: data.date,
         time: data.time,
         price: Number(data.price),
+        ticketTypes: data.ticket_types,
         venue: data.venue,
         category: data.category,
         banner: data.banner,
@@ -523,6 +551,7 @@ app.post("/api/events", validateEvent, async (req, res) => {
     date,
     time,
     price: Number(price),
+    ticketTypes,
     venue,
     category,
     banner: bannerUrl,
@@ -902,8 +931,9 @@ app.post("/api/checkout", validateCheckout, async (req, res) => {
         return res.status(400).json({ error: "Désolé, il n'y a plus assez de places disponibles." });
       }
 
-      const basePrice = Number(event.price);
-      const unitPrice = tier === "vip" ? basePrice + 10000 : basePrice;
+      const ticketTypes = event.ticket_types || [];
+      const selectedTier = ticketTypes.find((t: any) => t.name === tier);
+      const unitPrice = selectedTier ? Number(selectedTier.price) : Number(event.price);
       const totalPrice = unitPrice * qty;
 
       const gatewayShortNames: Record<string, string> = {
@@ -973,6 +1003,9 @@ app.post("/api/checkout", validateCheckout, async (req, res) => {
         purchaseDate: newTkt.purchase_date,
         quantity: newTkt.quantity
       };
+      
+      // Envoi de l'email
+      await sendTicketEmail(mappedTicket);
 
       return res.status(201).json({
         success: true,
@@ -995,8 +1028,9 @@ app.post("/api/checkout", validateCheckout, async (req, res) => {
     return res.status(400).json({ error: "Désolé, il n'y a plus assez de places disponibles." });
   }
 
-  const basePrice = event.price;
-  const unitPrice = tier === "vip" ? basePrice + 10000 : basePrice; // +10,000 XOF flat for VIP Pass
+  const ticketTypes = event.ticketTypes || [];
+  const selectedTier = ticketTypes.find((t: any) => t.name === tier);
+  const unitPrice = selectedTier ? Number(selectedTier.price) : Number(event.price);
   const totalPrice = unitPrice * qty;
 
   // Simulate payment processing based on provider
@@ -1039,6 +1073,9 @@ app.post("/api/checkout", validateCheckout, async (req, res) => {
   // Record Ticket
   db.tickets.unshift(newTicket);
   saveDB(db);
+  
+  // Envoi de l'email
+  await sendTicketEmail(newTicket);
 
   res.status(201).json({
     success: true,
@@ -1227,6 +1264,74 @@ app.post("/api/verify-ticket", validateVerifyTicket, async (req, res) => {
 });
 
 // Statistics Endpoint for Organizers
+app.get("/api/organizer/export", async (req, res) => {
+  const { organizerId } = req.query;
+
+  if (!organizerId) {
+    return res.status(400).json({ error: "organizerId requis." });
+  }
+
+  try {
+    let matchedTickets: any[] = [];
+    if (isSupabaseEnabled && supabase) {
+      const { data: organizerEvents, error: eventsError } = await supabase
+        .from("events")
+        .select("id")
+        .eq("organizer_id", organizerId);
+      if (eventsError) throw eventsError;
+      
+      const eventIds = (organizerEvents || []).map(e => e.id);
+      if (eventIds.length > 0) {
+        const { data: tkts, error: tktsError } = await supabase
+          .from("tickets")
+          .select("*")
+          .in("event_id", eventIds)
+          .order("purchase_date", { ascending: false });
+        if (tktsError) throw tktsError;
+        matchedTickets = tkts || [];
+      }
+    } else {
+      const db = getDB();
+      const organizerEvents = db.events.filter(e => e.organizerId === organizerId);
+      const eventIds = organizerEvents.map(e => e.id);
+      matchedTickets = db.tickets.filter(t => eventIds.includes(t.eventId));
+    }
+    
+    // Generate CSV
+    const header = [
+      "ID Transaction",
+      "Date d'Achat",
+      "Événement",
+      "Client",
+      "Email Client",
+      "Quantité",
+      "Catégorie",
+      "Prix Payé (XOF)",
+      "Statut"
+    ].join(",");
+
+    const rows = matchedTickets.map(t => [
+      t.transaction_ref || t.transactionRef || "",
+      t.purchase_date || t.purchaseDate || "",
+      `"${(t.event_title || t.eventTitle || "").replace(/"/g, '""')}"`,
+      `"${(t.buyer_name || t.buyerName || "").replace(/"/g, '""')}"`,
+      `"${(t.buyer_email || t.buyerEmail || "").replace(/"/g, '""')}"`,
+      t.quantity || 1,
+      t.tier || "standard",
+      t.price_paid || t.pricePaid || 0,
+      t.payment_status || t.paymentStatus || "paid"
+    ].join(","));
+
+    const csvData = [header, ...rows].join("\n");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="clicbillet_export_${Date.now()}.csv"`);
+    res.status(200).send(csvData);
+  } catch (err: any) {
+    console.error("Export error", err);
+    res.status(500).json({ error: "Erreur lors de l'exportation." });
+  }
+});
+
 app.get("/api/organizer/stats", async (req, res) => {
   const { organizerId } = req.query;
 
@@ -1327,7 +1432,7 @@ app.get("/api/organizer/stats", async (req, res) => {
 // Update/Modify Event Endpoint
 app.put("/api/events/:id", validateEvent, async (req, res) => {
   const { id } = req.params;
-  const { title, description, date, time, price, venue, category, banner, totalTickets, organizerId } = req.body;
+  const { title, description, date, time, price, ticketTypes, venue, category, banner, totalTickets, organizerId } = req.body;
 
   if (!title || !date || !time || isNaN(price) || !venue || !category || !totalTickets) {
     return res.status(400).json({ error: "Veuillez remplir tous les champs obligatoires correctement." });
@@ -1358,6 +1463,7 @@ app.put("/api/events/:id", validateEvent, async (req, res) => {
           date,
           time,
           price: Number(price),
+          ticket_types: ticketTypes,
           venue,
           category,
           banner: bannerUrl,
@@ -1391,6 +1497,7 @@ app.put("/api/events/:id", validateEvent, async (req, res) => {
         date: data.date,
         time: data.time,
         price: Number(data.price),
+        ticketTypes: data.ticket_types,
         venue: data.venue,
         category: data.category,
         banner: data.banner,
@@ -1423,6 +1530,7 @@ app.put("/api/events/:id", validateEvent, async (req, res) => {
   event.date = date;
   event.time = time;
   event.price = Number(price);
+  event.ticketTypes = ticketTypes;
   event.venue = venue;
   event.category = category;
   if (banner) {

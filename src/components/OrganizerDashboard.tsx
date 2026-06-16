@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Plus, LayoutDashboard, Calendar, MapPin, Tag, TrendingUp, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer } from "lucide-react";
+import { Plus, LayoutDashboard, Calendar, MapPin, Tag, TrendingUp, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X } from "lucide-react";
 import { Event, User, SalesStatus } from "../types";
 
 interface OrganizerDashboardProps {
@@ -51,6 +51,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [price, setPrice] = useState("");
+  const [ticketTypes, setTicketTypes] = useState<{name: string; price: string}[]>([{ name: 'Standard', price: '' }]);
   const [venue, setVenue] = useState("");
   const [category, setCategory] = useState("Concert");
   const [totalTickets, setTotalTickets] = useState("");
@@ -68,6 +69,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [editDate, setEditDate] = useState("");
   const [editTime, setEditTime] = useState("");
   const [editPrice, setEditPrice] = useState("");
+  const [editTicketTypes, setEditTicketTypes] = useState<{name: string; price: string}[]>([]);
   const [editVenue, setEditVenue] = useState("");
   const [editCategory, setEditCategory] = useState("Concert");
   const [editTotalTickets, setEditTotalTickets] = useState("");
@@ -342,6 +344,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       date,
       time,
       price: Number(price),
+      ticketTypes: ticketTypes.filter(t => t.name.trim() !== "").map(t => ({ name: t.name, price: Number(t.price) })),
       venue,
       category,
       banner: bannerPath,
@@ -372,6 +375,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       setDate("");
       setTime("");
       setPrice("");
+      setTicketTypes([{ name: 'Standard', price: '' }]);
       setVenue("");
       setTotalTickets("");
       setCustomBannerUrl("");
@@ -449,6 +453,18 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
 
       {subTab === "dashboard" ? (
         <div className="space-y-8" id="orga-sales-dash-view">
+          <div className="flex justify-end">
+            <button
+               onClick={() => {
+                 window.open(`/api/organizer/export?organizerId=${user.id}`, '_blank');
+               }}
+               className="flex items-center space-x-1.5 rounded-xl px-4 py-2 text-xs font-black transition-all bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 active:scale-95 shadow-sm"
+            >
+              <Upload className="h-4 w-4" />
+              <span>Exporter en CSV</span>
+            </button>
+          </div>
+
           {/* Performance Overview Badges */}
           <div className="grid gap-5 grid-cols-1 sm:grid-cols-3">
             <div className="rounded-2xl border border-gray-100 bg-white p-5 flex flex-col justify-between shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
@@ -742,6 +758,55 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                 onChange={(e) => setPrice(e.target.value)}
                 className="w-full rounded-xl border border-gray-200 py-3 px-4 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
               />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-gray-700">Types de billets (Optionnel)</label>
+              <div className="space-y-2">
+                {ticketTypes.map((tier, idx) => (
+                  <div key={idx} className="flex space-x-2">
+                    <input
+                      type="text"
+                      placeholder="Nom (ex: VIP, VIP+)"
+                      value={tier.name}
+                      onChange={(e) => {
+                        const newTiers = [...ticketTypes];
+                        newTiers[idx].name = e.target.value;
+                        setTicketTypes(newTiers);
+                      }}
+                      className="w-1/2 rounded-xl border border-gray-200 py-3 px-4 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      step="500"
+                      placeholder="Prix (ex: 15000)"
+                      value={tier.price}
+                      onChange={(e) => {
+                        const newTiers = [...ticketTypes];
+                        newTiers[idx].price = e.target.value;
+                        setTicketTypes(newTiers);
+                      }}
+                      className="w-1/2 rounded-xl border border-gray-200 py-3 px-4 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setTicketTypes(ticketTypes.filter((_, i) => i !== idx))}
+                      className="px-3 rounded-xl bg-red-50 text-red-500 font-bold hover:bg-red-100"
+                      title="Supprimer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setTicketTypes([...ticketTypes, { name: '', price: '' }])}
+                  className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center mt-2"
+                >
+                  <Plus className="w-3 h-3 mr-1" /> Ajouter un type de billet
+                </button>
+              </div>
             </div>
 
             <div className="space-y-1">

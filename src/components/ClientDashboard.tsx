@@ -413,8 +413,8 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
                     : "bg-white text-gray-700 hover:bg-gray-50 active:scale-95"
                 }`}
               >
-                <Printer className="h-4 w-4 text-gray-400" />
-                <span>Imprimer / PDF</span>
+                <Download className="h-4 w-4 text-gray-400" />
+                <span>Télécharger (PDF) / Imprimer</span>
               </button>
               <button
                 onClick={() => setSelectedTicket(null)}

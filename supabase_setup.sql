@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS public.events (
     date TEXT NOT NULL, -- Format YYYY-MM-DD
     time TEXT NOT NULL, -- Format HH:MM
     price NUMERIC NOT NULL DEFAULT 0,
+    ticket_types JSONB, -- custom tickets tiers
     venue TEXT NOT NULL,
     category TEXT NOT NULL,
     banner TEXT,
