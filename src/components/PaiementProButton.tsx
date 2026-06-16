@@ -104,7 +104,6 @@ export const PaiementProButton: React.FC<PaiementProButtonProps> = ({
       pPro.channel = config.channel;
       pPro.referenceNumber = config.referenceNumber;
       pPro.customerEmail = config.customerEmail;
-      pPro.customerLastName = config.customerLastname; // Le SDK utilise parfois customerLastName ou customerLastname
       pPro.customerLastname = config.customerLastname;
       pPro.customerFirstName = config.customerFirstName;
       pPro.customerPhoneNumber = config.customerPhoneNumber;

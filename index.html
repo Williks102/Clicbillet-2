@@ -5,8 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>clicbillet,la billetterie de référence</title>
     <!-- SDK de paiement professionnel en ligne Paiement Pro -->
-    <script src="https://www.paiementpro.net/webservice/onlinepayment/js/paiementpro.v1.0.1.js" onerror="console.warn('[PaiementPro] Erreur de chargement du CDN externe. Activation automatique du fallback local.')"></script>
+    <script src="https://paiementpro.net/webservice/onlinepayment/js/paiementpro.v1.0.1.js" onerror="console.warn('[PaiementPro] Erreur de chargement du CDN externe.')"></script>
     <script>
+      // Assigner la classe PaiementPro à l'objet window pour qu'il soit accessible globalement dans React
+      if (typeof PaiementPro !== 'undefined') {
+        window.PaiementPro = PaiementPro;
+      }
+      
       // Système de secours résilient : Injecte le constructeur par défaut si le script d'origine échoue à cause du sandbox ou blocage réseau
       (function() {
         var checkInterval = setInterval(function() {
