@@ -12,6 +12,7 @@ export default function QrScannerTab({ organizerId }: QrScannerTabProps) {
   const [manualCode, setManualCode] = useState("");
   const [verifying, setVerifying] = useState(false);
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const isScanningRef = useRef<boolean>(true);
 
   // Initialize camera scanner on mounting
   useEffect(() => {
@@ -35,6 +36,8 @@ export default function QrScannerTab({ organizerId }: QrScannerTabProps) {
         scanner.render(
           (decodedText) => {
             // Success scan handle
+            if (!isScanningRef.current) return;
+            isScanningRef.current = false; // Freeze the scan decoding
             handleVerifyTicket(decodedText);
           },
           (err) => {
@@ -202,7 +205,7 @@ export default function QrScannerTab({ organizerId }: QrScannerTabProps) {
                 <button
                   type="button"
                   id="reset-scanner-btn"
-                  onClick={() => setScanResult(null)}
+                  onClick={() => { setScanResult(null); setErrorResult(null); isScanningRef.current = true; }}
                   className="flex items-center space-x-1.5 mx-auto rounded-xl bg-orange-600 px-5 py-2.5 text-xs font-black text-white hover:bg-orange-700 transition active:scale-95 shadow-sm shadow-orange-100"
                 >
                   <RefreshCw className="h-4 w-4" />
@@ -217,7 +220,7 @@ export default function QrScannerTab({ organizerId }: QrScannerTabProps) {
                 <p className="text-xs text-gray-500 max-w-xs mx-auto leading-relaxed">{errorResult}</p>
                 <button
                   type="button"
-                  onClick={() => setErrorResult(null)}
+                  onClick={() => { setErrorResult(null); isScanningRef.current = true; }}
                   className="rounded-xl border border-gray-200 px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50"
                 >
                   Réessayer

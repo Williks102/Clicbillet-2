@@ -63,6 +63,8 @@ export default function App() {
         }).then(() => {
           // Clean the URL purely for visual purposes
           window.history.replaceState({}, document.title, window.location.pathname);
+          // Fire event so dashboards know to refresh
+          window.dispatchEvent(new CustomEvent("refresh_tickets"));
           // Navigate to tickets page
           if (user?.role === "client") {
             setActiveTab("client-dashboard");

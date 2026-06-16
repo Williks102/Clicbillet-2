@@ -164,7 +164,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({ referenceNumber: data.ticket.id, status: "SUCCESS" })
-            }).catch(e => console.error("Erreur hook de test:", e));
+            }).then(() => window.dispatchEvent(new CustomEvent("refresh_tickets"))).catch(e => console.error("Erreur hook de test:", e));
           }
         } else {
           console.warn("[PaiementPro SDK] SDK non chargé globalement dans l'index.html, utilisation de la simulation locale.");
@@ -172,7 +172,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
               method: "POST",
               headers: {"Content-Type": "application/json"},
               body: JSON.stringify({ referenceNumber: data.ticket.id, status: "SUCCESS" })
-          }).catch(e => console.error("Erreur hook de test:", e));
+          }).then(() => window.dispatchEvent(new CustomEvent("refresh_tickets"))).catch(e => console.error("Erreur hook de test:", e));
         }
       } catch (sdkErr) {
         console.error("[PaiementPro SDK Integration Error]", sdkErr);
@@ -180,7 +180,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({ referenceNumber: data.ticket.id, status: "SUCCESS" })
-        }).catch(e => console.error("Erreur hook de test:", e));
+        }).then(() => window.dispatchEvent(new CustomEvent("refresh_tickets"))).catch(e => console.error("Erreur hook de test:", e));
       }
 
       // Checkout Success! Go to step 4
@@ -401,12 +401,6 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
                   <span>Passerelle Actrice :</span>
                   <span className="text-orange-600 font-extrabold uppercase">Paiement Pro (CI)</span>
                 </div>
-                <div className="flex items-center justify-between text-[10px] text-gray-500 font-semibold">
-                  <span>ID Marchand Connecté :</span>
-                  <span className="font-mono text-gray-800 bg-white px-1.5 py-0.5 rounded border border-gray-150 font-black">
-                    {(import.meta as any).env.VITE_PAIEMENT_PRO_MERCHANT_ID || "MARCHAND_DEMO_DEFAULT"}
-                  </span>
-                </div>
               </div>
 
               {/* Action buttons triggers */}
@@ -478,7 +472,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
               )}
 
               <div className="text-[10px] text-gray-450 font-medium tracking-wide">
-                Passerelle : <strong className="text-gray-600">Paiement Pro (CI)</strong> • ID Marchand : <span className="font-mono font-black text-orange-600">{(import.meta as any).env.VITE_PAIEMENT_PRO_MERCHANT_ID || "MARCHAND_DEMO_DEFAULT"}</span>
+                Passerelle : <strong className="text-gray-600">Paiement Pro (CI)</strong>
               </div>
 
               <button

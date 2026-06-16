@@ -31,6 +31,10 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
 
   useEffect(() => {
     fetchTickets();
+    
+    const handleRefresh = () => fetchTickets();
+    window.addEventListener("refresh_tickets", handleRefresh);
+    return () => window.removeEventListener("refresh_tickets", handleRefresh);
   }, [user.id]);
 
   function handlePrintTicket() {

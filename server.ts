@@ -1070,17 +1070,17 @@ app.all("/api/payment/callback", async (req, res) => {
       const { data: ticket, error: fetchErr } = await supabase
         .from("tickets")
         .select("*")
-        .eq("id", referenceNumber)
+        .or(`id.eq.${referenceNumber},transaction_ref.eq.${referenceNumber}`)
         .maybeSingle();
 
       if (fetchErr || !ticket) {
-        console.warn(`[PaiementPro Callback] Ticket introuvable dans Supabase pour l'ID : ${referenceNumber}`);
+        console.warn(`[PaiementPro Callback] Ticket introuvable dans Supabase pour la référence : ${referenceNumber}`);
       } else {
         console.log(`[PaiementPro Callback] Ticket correspondant trouvé dans Supabase : ${ticket.event_title}`);
         if(status === "SUCCESS" || status === "success" || req.body.status === true) {
           await supabase.from("tickets")
             .update({ transaction_ref: ticket.transaction_ref.replace("PENDING-", "PAID-") })
-            .eq("id", referenceNumber);
+            .eq("id", ticket.id);
         }
       }
     } catch (err: any) {
@@ -1088,9 +1088,9 @@ app.all("/api/payment/callback", async (req, res) => {
     }
   } else {
     const db = getDB();
-    const ticket = db.tickets.find(t => t.id === referenceNumber);
+    const ticket = db.tickets.find(t => t.id === referenceNumber || t.transactionRef === referenceNumber);
     if (!ticket) {
-      console.warn(`[PaiementPro Callback] Ticket local introuvable pour l'id : ${referenceNumber}`);
+      console.warn(`[PaiementPro Callback] Ticket local introuvable pour la référence : ${referenceNumber}`);
     } else {
       console.log(`[PaiementPro Callback] Ticket local de ${ticket.buyerName} mis à jour suite au callback.`);
       if(status === "SUCCESS" || status === "success" || req.body.status === true) {
