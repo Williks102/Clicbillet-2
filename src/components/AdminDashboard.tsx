@@ -33,6 +33,28 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   const [userSearch, setUserSearch] = useState("");
   const [eventSearch, setEventSearch] = useState("");
   const [ticketSearch, setTicketSearch] = useState("");
+
+  const handleValidatePayment = async (referenceNumber: string) => {
+    if (!window.confirm("Valider manuellement ce paiement ? Le client recevra son ticket avec le QR code.")) {
+      return;
+    }
+    
+    try {
+      const resp = await fetch("/api/admin/validate-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ referenceNumber })
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.error || "Erreur de validation manuelle");
+      }
+      alert(data.message || "Paiement validé avec succès");
+      fetchAdminData();
+    } catch (e: any) {
+      alert(e.message || "Impossible de forcer la validation.");
+    }
+  };
   const [roleFilter, setRoleFilter] = useState("Tous");
 
   async function fetchAdminData() {
@@ -318,15 +340,19 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                       <th className="pb-3 pt-1">Réf / Date</th>
                       <th className="pb-3 pt-1">Acheteur</th>
                       <th className="pb-3 pt-1">Événement</th>
-                      <th className="pb-3 pt-1">Quantité</th>
+                      <th className="pb-3 pt-1 text-center">Quantité</th>
                       <th className="pb-3 pt-1 text-right">Montant</th>
+                      <th className="pb-3 pt-1 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {stats.tickets.slice(0, 6).map((tkt) => (
                       <tr key={tkt.id} className="hover:bg-gray-50/50">
                         <td className="py-3 font-mono font-bold">
-                          <span className="block text-gray-950 font-black text-xs">{tkt.transactionRef}</span>
+                          <span className="block text-gray-950 font-black text-xs flex items-center gap-1">
+                            {tkt.paymentStatus === "pending" && <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" title="Paiement en attente"></span>}
+                            {tkt.transactionRef}
+                          </span>
                           <span className="block text-[9px] text-gray-400">{new Date(tkt.purchaseDate).toLocaleDateString("fr-FR")}</span>
                         </td>
                         <td className="py-3 font-medium text-gray-900">
@@ -337,6 +363,15 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                         </td>
                         <td className="py-3 text-center font-bold text-gray-600">{tkt.quantity}</td>
                         <td className="py-3 text-right font-black text-orange-650">{tkt.pricePaid.toLocaleString("fr-FR")} F CFA</td>
+                        <td className="py-3 text-center">
+                          {tkt.paymentStatus === "pending" ? (
+                            <button onClick={() => handleValidatePayment(tkt.id)} className="bg-amber-100 hover:bg-amber-200 text-amber-800 text-[9px] font-bold px-2 py-1 rounded">
+                              Valider
+                            </button>
+                          ) : (
+                            <span className="text-green-600 font-bold text-[10px]">Réglé</span>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -550,13 +585,17 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                     <th className="pb-3">Quantité & Option</th>
                     <th className="pb-3">Date d'achat</th>
                     <th className="pb-3 text-right">Frais d'approvisionnement</th>
+                    <th className="pb-3 text-center">Statut / Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {filteredTickets.map((tkt) => (
                     <tr key={tkt.id} className="hover:bg-gray-50/50">
                       <td className="py-3 font-mono text-[9px] text-gray-400">{tkt.id}</td>
-                      <td className="py-3 font-mono font-black text-xs text-slate-900">{tkt.transactionRef}</td>
+                      <td className="py-3 font-mono font-black text-xs text-slate-900 flex items-center gap-1">
+                        {tkt.paymentStatus === "pending" && <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" title="Paiement en attente"></span>}
+                        {tkt.transactionRef}
+                      </td>
                       <td className="py-3 font-black text-slate-950 truncate max-w-[150px]" title={tkt.eventTitle}>{tkt.eventTitle}</td>
                       <td className="py-3 font-medium text-gray-900 leading-tight">
                         <span>{tkt.buyerName}</span>
@@ -572,11 +611,22 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                       </td>
                       <td className="py-3 text-gray-400 font-mono font-semibold">{new Date(tkt.purchaseDate).toLocaleString("fr-FR")}</td>
                       <td className="py-3 text-right font-black text-orange-650">{tkt.pricePaid.toLocaleString("fr-FR")} XOF</td>
+                      <td className="py-3 text-center">
+                        {tkt.paymentStatus === "pending" ? (
+                          <button onClick={() => handleValidatePayment(tkt.id)} className="bg-amber-100 hover:bg-amber-200 text-amber-800 text-[10px] font-bold px-3 py-1.5 rounded-lg active:scale-95 transition-all">
+                            Valider manuellement
+                          </button>
+                        ) : (
+                          <div className="inline-flex items-center space-x-1 text-green-700 bg-green-50 px-2 py-1 rounded-md">
+                            <span className="text-[10px] font-bold uppercase tracking-wider">Payé</span>
+                          </div>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {filteredTickets.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="text-center text-gray-400 font-semibold py-10">Aucun pass de réservation trouvé.</td>
+                      <td colSpan={8} className="text-center text-gray-400 font-semibold py-10">Aucun pass de réservation trouvé.</td>
                     </tr>
                   )}
                 </tbody>

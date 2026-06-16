@@ -1489,7 +1489,8 @@ app.get("/api/admin/stats", async (req, res) => {
         scannedAt: t.scanned_at,
         transactionRef: t.transaction_ref,
         purchaseDate: t.purchase_date,
-        quantity: t.quantity
+        quantity: t.quantity,
+        paymentStatus: t.transaction_ref?.startsWith("PENDING-") ? "pending" : "paid"
       }));
 
       return res.json({
@@ -1529,8 +1530,53 @@ app.get("/api/admin/stats", async (req, res) => {
     totalEvents,
     users: db.users.map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role })),
     events: db.events,
-    tickets: db.tickets
+    tickets: db.tickets.map(t => ({
+      ...t,
+      paymentStatus: t.transactionRef?.startsWith("PENDING-") ? "pending" : "paid"
+    }))
   });
+});
+
+app.post("/api/admin/validate-payment", async (req, res) => {
+  const { referenceNumber } = req.body;
+  if (!referenceNumber) {
+    return res.status(400).json({ error: "Référence ou ID du billet manquant." });
+  }
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { data: ticket, error: fetchErr } = await supabase.from("tickets")
+        .select()
+        .or(`id.eq.${referenceNumber},transaction_ref.eq.${referenceNumber}`)
+        .single();
+      
+      if (fetchErr || !ticket) {
+        throw new Error("Billet introuvable dans Supabase.");
+      }
+
+      const { error: updateErr } = await supabase.from("tickets")
+        .update({ transaction_ref: ticket.transaction_ref.replace("PENDING-", "PAID-") })
+        .eq("id", ticket.id);
+
+      if (updateErr) throw updateErr;
+
+      return res.json({ success: true, message: "Paiement validé avec succès." });
+    } catch (err: any) {
+      console.error("[Supabase Error] Manual validation, falling back to local file DB:", err.message);
+    }
+  }
+
+  const db = getDB();
+  const ticket = db.tickets.find(t => t.id === referenceNumber || t.transactionRef === referenceNumber);
+  
+  if (!ticket) {
+    return res.status(404).json({ error: "Billet introuvable." });
+  }
+
+  ticket.transactionRef = ticket.transactionRef.replace("PENDING-", "PAID-");
+  saveDB(db);
+
+  res.json({ success: true, message: "Paiement validé localement." });
 });
 
 app.delete("/api/admin/events/:id", async (req, res) => {
