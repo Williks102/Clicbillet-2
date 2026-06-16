@@ -48,7 +48,29 @@ export default function App() {
 
   useEffect(() => {
     fetchEvents();
-  }, []);
+    
+    // Check if coming back from PaiementPro success URL
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("payment_success") === "true") {
+      const ticketId = params.get("ticket_id");
+      if (ticketId) {
+        console.log("Validation du paiement post-redirection pour:", ticketId);
+        // Force the webhook via frontend to mark as SUCCESS because local dev might not receive external webhooks
+        fetch("/api/payment/callback", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ referenceNumber: ticketId, status: "SUCCESS" })
+        }).then(() => {
+          // Clean the URL purely for visual purposes
+          window.history.replaceState({}, document.title, window.location.pathname);
+          // Navigate to tickets page
+          if (user?.role === "client") {
+            setActiveTab("client-dashboard");
+          }
+        }).catch(e => console.error("Could not validate redirect payment:", e));
+      }
+    }
+  }, [user]);
 
   useEffect(() => {
     // Dynamic tab routing after refreshing user session

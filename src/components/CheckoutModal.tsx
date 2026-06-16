@@ -28,7 +28,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
 
   // Computed values
   const basePrice = event.price;
-  const unitPrice = tier === "vip" ? basePrice + 10000 : basePrice;
+  const unitPrice = basePrice;
   const totalPrice = unitPrice * quantity;
 
   // Gateways configurations with logo text & primary CSS theme styles
@@ -60,10 +60,6 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
       const numOnly = phoneNumber.replace(/\s+/g, "");
       if (numOnly.length < 8) {
         setError("Veuillez saisir un numéro de téléphone Mobile Money valide.");
-        return;
-      }
-      if (method === "orange_money" && otp.length < 4) {
-        setError("Veuillez saisir votre code d'autorisation Orange Money (#144*46#).");
         return;
       }
     }
@@ -158,8 +154,9 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
             console.log("[PaiementPro] Lien de paiement généré :", pPro.url);
             setPaymentUrl(pPro.url);
             
-            // Ouvrir la passerelle de paiement dans une nouvelle fenêtre/onglet
-            window.open(pPro.url, "_blank");
+            // Rediriger la page courante vers la passerelle de paiement
+            window.location.href = pPro.url;
+            return; // on arrête le JS ici puisque l'on quitte la page
           } else {
             console.warn("[PaiementPro] Succès de l'initialisation non retourné par l'API, mode simulation actif.");
             // On simule l'appel du webhook en local pour débloquer le ticket
@@ -230,44 +227,6 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
 
           {step === "configure" && (
             <div className="space-y-6" id="checkout-configure-step">
-              {/* Select Seat Tier */}
-              <div className="space-y-2">
-                <label className="text-xs font-black text-gray-700 block">Choisissez la Catégorie du Ticket</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => setTier("standard")}
-                    className={`flex flex-col p-4 rounded-xl border text-left transition-all ${
-                      tier === "standard"
-                        ? "border-orange-500 bg-orange-50/15 ring-1 ring-orange-550"
-                        : "border-gray-200 bg-white hover:bg-gray-50"
-                    }`}
-                  >
-                    <span className="text-xs font-black text-gray-900">Pass Standard</span>
-                    <span className="text-[10px] text-gray-400 font-semibold mt-0.5">Accès général à l'événement</span>
-                    <span className="text-sm font-black text-orange-600 mt-3">{basePrice.toLocaleString("fr-FR")} F XOF</span>
-                  </button>
-
-                  <button
-                    onClick={() => setTier("vip")}
-                    className={`flex flex-col p-4 rounded-xl border text-left transition-all relative overflow-hidden ${
-                      tier === "vip"
-                        ? "border-amber-500 bg-amber-50/15 ring-1 ring-amber-550"
-                        : "border-gray-200 bg-white hover:bg-gray-50"
-                    }`}
-                  >
-                    <div className="absolute top-0 right-0 rounded-bl-lg bg-amber-500 text-[8px] px-1.5 py-0.5 font-bold uppercase text-white tracking-widest">
-                      VIP
-                    </div>
-                    <span className="text-xs font-black text-gray-900 flex items-center space-x-1">
-                      <Sparkles className="h-3 w-3 text-amber-500" />
-                      <span>Pass VIP</span>
-                    </span>
-                    <span className="text-[10px] text-gray-400 font-semibold mt-0.5">Accès Premium aux premiers rangs</span>
-                    <span className="text-sm font-black text-amber-600 mt-3">{(basePrice + 10000).toLocaleString("fr-FR")} F XOF</span>
-                  </button>
-                </div>
-              </div>
-
               {/* Quantity Selector input logic */}
               <div className="flex items-center justify-between bg-gray-50 p-4 rounded-2xl border border-gray-100">
                 <div>
@@ -358,24 +317,12 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
                     <span className="text-[10px] text-gray-400 block font-semibold mt-0.5">Saisissez votre numéro associé au compte {method === "orange_money" ? "Orange Money" : method === "mtn_momo" ? "MTN Money" : method === "moov_money" ? "Moov Money" : "Wave"}.</span>
                   </div>
 
-                  {/* Orange Money OTP specific instruction */}
+                  {/* Orange Money specifics (removed OTP by user request) */}
                   {method === "orange_money" && (
                     <div className="bg-amber-50 rounded-xl p-3 border border-amber-100 space-y-2 mt-2">
                       <p className="text-[10px] text-amber-800 font-bold leading-relaxed">
-                        Pour valider votre règlement Orange Money, veuillez composer le <strong className="text-orange-600">#144*46#</strong> sur votre mobile pour générer un code d'autorisation OTP temporaire.
+                        Pour valider votre règlement Orange Money, suivez les instructions sur votre mobile.
                       </p>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-black text-amber-900 uppercase">Code d'autorisation OTP</label>
-                        <input
-                          type="text"
-                          required
-                          maxLength={6}
-                          placeholder="Ex : 4521"
-                          value={otp}
-                          onChange={(e) => setOtp(e.target.value)}
-                          className="w-full rounded-lg border border-amber-200 bg-white py-2 px-3 text-xs outline-none focus:border-amber-500 placeholder:text-gray-300 font-mono text-center font-bold tracking-widest"
-                        />
-                      </div>
                     </div>
                   )}
 
