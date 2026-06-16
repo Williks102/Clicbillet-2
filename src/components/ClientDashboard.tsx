@@ -37,6 +37,38 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
     return () => window.removeEventListener("refresh_tickets", handleRefresh);
   }, [user.id]);
 
+  // Polling for pending tickets automatically
+  useEffect(() => {
+    const hasPending = tickets.some(t => t.paymentStatus === "pending");
+    let interval: NodeJS.Timeout;
+    
+    if (hasPending) {
+      interval = setInterval(() => {
+        fetch(`/api/my-tickets?buyerId=${user.id}`)
+          .then(res => res.json())
+          .then((data: Ticket[]) => {
+            // Compare the tickets to avoid unnecessary re-renders
+            const pendingBefore = tickets.filter(t => t.paymentStatus === "pending").length;
+            const pendingNow = data.filter(t => t.paymentStatus === "pending").length;
+            if (pendingBefore !== pendingNow) {
+              setTickets(data);
+              
+              // If we have selected a ticket that was pending and is now paid, update selectedTicket too
+              if (selectedTicket && selectedTicket.paymentStatus === "pending") {
+                const refreshedSelected = data.find(t => t.id === selectedTicket.id);
+                if (refreshedSelected) setSelectedTicket(refreshedSelected);
+              }
+            }
+          })
+          .catch(err => console.error("Erreur de rafraîchissement des tickets en attente", err));
+      }, 3000);
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [tickets, selectedTicket, user.id]);
+
   function handlePrintTicket() {
     // Create an isolated iframe for sandboxed iframe compatibility and cross-browser reliability
     const printFrame = document.createElement("iframe");

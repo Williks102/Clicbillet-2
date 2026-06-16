@@ -38,6 +38,9 @@ export default function QrScannerTab({ organizerId }: QrScannerTabProps) {
             // Success scan handle
             if (!isScanningRef.current) return;
             isScanningRef.current = false; // Freeze the scan decoding
+            if (scannerRef.current) {
+              try { scannerRef.current.pause(true); } catch(e) {}
+            }
             handleVerifyTicket(decodedText);
           },
           (err) => {
@@ -205,7 +208,14 @@ export default function QrScannerTab({ organizerId }: QrScannerTabProps) {
                 <button
                   type="button"
                   id="reset-scanner-btn"
-                  onClick={() => { setScanResult(null); setErrorResult(null); isScanningRef.current = true; }}
+                  onClick={() => { 
+                    setScanResult(null); 
+                    setErrorResult(null); 
+                    isScanningRef.current = true; 
+                    if (scannerRef.current) {
+                      try { scannerRef.current.resume(); } catch(e) {}
+                    }
+                  }}
                   className="flex items-center space-x-1.5 mx-auto rounded-xl bg-orange-600 px-5 py-2.5 text-xs font-black text-white hover:bg-orange-700 transition active:scale-95 shadow-sm shadow-orange-100"
                 >
                   <RefreshCw className="h-4 w-4" />
@@ -220,7 +230,13 @@ export default function QrScannerTab({ organizerId }: QrScannerTabProps) {
                 <p className="text-xs text-gray-500 max-w-xs mx-auto leading-relaxed">{errorResult}</p>
                 <button
                   type="button"
-                  onClick={() => { setErrorResult(null); isScanningRef.current = true; }}
+                  onClick={() => { 
+                    setErrorResult(null); 
+                    isScanningRef.current = true; 
+                    if (scannerRef.current) {
+                      try { scannerRef.current.resume(); } catch(e) {}
+                    }
+                  }}
                   className="rounded-xl border border-gray-200 px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50"
                 >
                   Réessayer

@@ -235,8 +235,9 @@ function saveDB(data: typeof INITIAL_DATABASE) {
   }
 }
 
-// Enable JSON parsing middleware
+// Enable parsing middlewares for Webhooks and APIs
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 /**
  * UTILS DE SÉCURITÉ ET D'ASSAINISSEMENT DES ENTRÉES
@@ -1048,18 +1049,27 @@ app.post("/api/checkout", validateCheckout, async (req, res) => {
 
 // Callback / Webhook endpoint pour recevoir les notifications de Paiement Pro (CI)
 app.all("/api/payment/callback", async (req, res) => {
-  console.log("[PaiementPro Webhook] Notification de paiement reçue :", {
-    method: req.method,
-    query: req.query,
-    body: req.body
-  });
+  // Configurer CORS ouvertivement pour empêcher tout blocage du côté Vercel sur la route
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  console.log("=== CALLBACK PAIEMENT PRO REÇU ===");
+  console.log("Headers:", req.headers);
+  console.log("Body reçu:", req.body);
+  console.log("Query parameters:", req.query);
 
   // Extraction des données classiques envoyées par Paiement Pro
-  const referenceNumber = req.body.referenceNumber || req.query.referenceNumber || req.body.ref_command || req.query.ref_command;
-  const status = req.body.status || req.query.status;
+  const referenceNumber = req.body.referenceNumber || req.query.referenceNumber || req.body.ref_command || req.query.ref_command || req.body.id || req.body.custom || req.query.custom || req.body.transaction_id;
+  const status = req.body.status || req.query.status || req.body.response_code || req.query.response_code || req.body.statut;
 
   if (!referenceNumber) {
-    return res.status(400).json({ status: "error", message: "referenceNumber manquant" });
+    console.error("Erreur : Données de ciblage manquantes dans le body");
+    return res.status(400).json({ status: "error", message: "referenceNumber ou champ d'identifiant manquant" });
   }
 
   console.log(`[PaiementPro] Traitement du paiement pour la référence : ${referenceNumber}, statut reçu : ${status}`);
@@ -1077,7 +1087,8 @@ app.all("/api/payment/callback", async (req, res) => {
         console.warn(`[PaiementPro Callback] Ticket introuvable dans Supabase pour la référence : ${referenceNumber}`);
       } else {
         console.log(`[PaiementPro Callback] Ticket correspondant trouvé dans Supabase : ${ticket.event_title}`);
-        if(status === "SUCCESS" || status === "success" || req.body.status === true) {
+        const isSuccess = status === "SUCCESS" || status === "success" || status === "PAID" || status === "0" || status === "00" || status === 0 || req.body.status === true || req.body.success === true;
+        if(isSuccess) {
           await supabase.from("tickets")
             .update({ transaction_ref: ticket.transaction_ref.replace("PENDING-", "PAID-") })
             .eq("id", ticket.id);
@@ -1093,7 +1104,8 @@ app.all("/api/payment/callback", async (req, res) => {
       console.warn(`[PaiementPro Callback] Ticket local introuvable pour la référence : ${referenceNumber}`);
     } else {
       console.log(`[PaiementPro Callback] Ticket local de ${ticket.buyerName} mis à jour suite au callback.`);
-      if(status === "SUCCESS" || status === "success" || req.body.status === true) {
+      const isSuccess = status === "SUCCESS" || status === "success" || status === "PAID" || status === "0" || status === "00" || status === 0 || req.body.status === true || req.body.success === true;
+      if(isSuccess) {
         ticket.transactionRef = ticket.transactionRef.replace("PENDING-", "PAID-");
         saveDB(db);
       }
