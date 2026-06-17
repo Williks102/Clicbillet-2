@@ -97,7 +97,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
         buyerId: user?.id,
         buyerName: user?.name,
         buyerEmail: user?.email,
-        tier,
+        tier: tier.toLowerCase(),
         quantity,
         paymentDetails
       };

@@ -84,7 +84,8 @@ if (rawSupabaseUrl && supabaseServiceKey) {
 }
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
+const HMR_PORT = Number(process.env.HMR_PORT || process.env.WS_PORT) || 24678;
 
 // Path to durable local JSON Database
 const DB_FILE = path.join(process.cwd(), "db.json");
@@ -285,7 +286,7 @@ function sanitizeObject(obj: any): any {
   if (typeof obj === "string") {
     return sanitizeString(obj);
   } else if (Array.isArray(obj)) {
-    return obj.map(item => sanitizeObject(item));
+    return obj.map((item: any) => sanitizeObject(item));
   } else if (obj !== null && typeof obj === "object") {
     const cleanObj: any = {};
     for (const key of Object.keys(obj)) {
@@ -297,7 +298,7 @@ function sanitizeObject(obj: any): any {
 }
 
 // Middleware d'assainissement automatique global (XSS, Injection)
-app.use((req, res, next) => {
+app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (req.body) {
     req.body = sanitizeObject(req.body);
   }
@@ -401,7 +402,10 @@ const validateEvent = (req: express.Request, res: express.Response, next: expres
 
 // Middleware de validation de commande de billet (Checkout)
 const validateCheckout = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const { eventId, buyerId, buyerName, buyerEmail, tier, quantity, paymentDetails } = req.body;
+  let { eventId, buyerId, buyerName, buyerEmail, tier, quantity, paymentDetails } = req.body;
+  const normalizedTier = typeof tier === "string" ? tier.toLowerCase() : tier;
+  req.body.tier = normalizedTier;
+  tier = normalizedTier;
 
   if (!eventId || !buyerId || !buyerName || !buyerEmail || !tier || !quantity || !paymentDetails) {
     return res.status(400).json({ error: "Champs d'achat de billets incomplets." });
@@ -449,7 +453,7 @@ const validateVerifyTicket = (req: express.Request, res: express.Response, next:
 };
 
 // API Endpoints: Event Fetching
-app.get("/api/events", async (req, res) => {
+app.get("/api/events", async (req: express.Request, res: express.Response) => {
   const { includePending } = req.query;
 
   if (isSupabaseEnabled && supabase) {
@@ -500,13 +504,13 @@ app.get("/api/events", async (req, res) => {
   const db = getDB();
   let events = db.events || [];
   if (!includePending) {
-    events = events.filter(e => e.status === "approved" || !e.status);
+    events = events.filter((e: any) => e.status === "approved" || !e.status);
   }
   res.json(events);
 });
 
 // Create Event Endpoint for Organizers
-app.post("/api/events", validateEvent, async (req, res) => {
+app.post("/api/events", validateEvent, async (req: express.Request, res: express.Response) => {
   const { title, description, date, time, price, ticketTypes, venue, category, banner, totalTickets, organizerId, organizerName } = req.body;
 
   if (!title || !date || !time || isNaN(price) || !venue || !category || !totalTickets || !organizerId) {
@@ -619,7 +623,7 @@ app.post("/api/events", validateEvent, async (req, res) => {
 });
 
 // Authentication Endpoints
-app.post("/api/auth/register", validateRegister, async (req, res) => {
+app.post("/api/auth/register", validateRegister, async (req: express.Request, res: express.Response) => {
   const { email, password, name, role } = req.body;
 
   if (!email || !password || !name || !role) {
@@ -720,7 +724,7 @@ app.post("/api/auth/register", validateRegister, async (req, res) => {
 
   // Fallback Database
   const db = getDB();
-  const exists = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+  const exists = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
   if (exists) {
     return res.status(400).json({ error: "Un utilisateur avec cet e-mail existe déjà." });
   }
@@ -741,7 +745,7 @@ app.post("/api/auth/register", validateRegister, async (req, res) => {
   res.status(201).json(userWithoutPassword);
 });
 
-app.post("/api/auth/login", validateLogin, async (req, res) => {
+app.post("/api/auth/login", validateLogin, async (req: express.Request, res: express.Response) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
@@ -890,7 +894,7 @@ app.post("/api/auth/login", validateLogin, async (req, res) => {
 
   // Fallback database lookup
   const db = getDB();
-  const user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
+  const user = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
 
   if (!user) {
     return res.status(401).json({ error: "Identifiants de connexion invalides." });
@@ -901,7 +905,7 @@ app.post("/api/auth/login", validateLogin, async (req, res) => {
 });
 
 // Fetch User Purchased Tickets Endpoint
-app.get("/api/my-tickets", async (req, res) => {
+app.get("/api/my-tickets", async (req: express.Request, res: express.Response) => {
   const { buyerId } = req.query;
 
   if (!buyerId) {
@@ -945,7 +949,7 @@ app.get("/api/my-tickets", async (req, res) => {
   }
 
   const db = getDB();
-  const filtered = db.tickets.filter(t => t.buyerId === buyerId).map(t => ({
+  const filtered = db.tickets.filter((t: any) => t.buyerId === buyerId).map((t: any) => ({
     ...t,
     paymentStatus: t.transactionRef?.startsWith("PENDING-") ? "pending" : "paid"
   }));
@@ -953,7 +957,7 @@ app.get("/api/my-tickets", async (req, res) => {
 });
 
 // Checkout Purchase Ticket Endpoint
-app.post("/api/checkout", validateCheckout, async (req, res) => {
+app.post("/api/checkout", validateCheckout, async (req: express.Request, res: express.Response) => {
   const { eventId, buyerId, buyerName, buyerEmail, tier, quantity, paymentDetails } = req.body;
 
   if (!eventId || !buyerId || !buyerName || !buyerEmail || !tier || !quantity || !paymentDetails) {
@@ -983,7 +987,7 @@ app.post("/api/checkout", validateCheckout, async (req, res) => {
       }
 
       const ticketTypes = event.ticket_types || [];
-      const selectedTier = ticketTypes.find((t: any) => t.name === tier);
+      const selectedTier = ticketTypes.find((t: any) => typeof t.name === "string" && t.name.toLowerCase() === tier);
       const unitPrice = selectedTier ? Number(selectedTier.price) : Number(event.price);
       const totalPrice = unitPrice * qty;
 
@@ -1083,7 +1087,7 @@ app.post("/api/checkout", validateCheckout, async (req, res) => {
   }
 
   const db = getDB();
-  const event = db.events.find(e => e.id === eventId);
+  const event = db.events.find((e: any) => e.id === eventId);
 
   if (!event) {
     return res.status(404).json({ error: "Événement introuvable." });
@@ -1094,7 +1098,7 @@ app.post("/api/checkout", validateCheckout, async (req, res) => {
   }
 
   const ticketTypes = event.ticketTypes || [];
-  const selectedTier = ticketTypes.find((t: any) => t.name === tier);
+  const selectedTier = ticketTypes.find((t: any) => typeof t.name === "string" && t.name.toLowerCase() === tier);
   const unitPrice = selectedTier ? Number(selectedTier.price) : Number(event.price);
   const totalPrice = unitPrice * qty;
 
@@ -1161,7 +1165,14 @@ app.post("/api/checkout", validateCheckout, async (req, res) => {
 });
 
 // Callback / Webhook endpoint pour recevoir les notifications de Paiement Pro (CI)
-app.all("/api/payment/callback", async (req, res) => {
+function normalizeReferenceIdentifier(value: any): string | null {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  return text.split(/[?&]/)[0].trim();
+}
+
+app.all("/api/payment/callback", async (req: express.Request, res: express.Response) => {
   // Configurer CORS ouvertivement pour empêcher tout blocage du côté Vercel sur la route
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
@@ -1177,8 +1188,14 @@ app.all("/api/payment/callback", async (req, res) => {
   console.log("Query parameters:", req.query);
 
   // Extraction des données classiques envoyées par Paiement Pro
-  const referenceNumber = req.body.referenceNumber || req.query.referenceNumber || req.body.ref_command || req.query.ref_command || req.body.id || req.body.custom || req.query.custom || req.body.transaction_id;
+  const rawReferenceNumber = req.body.referenceNumber || req.query.referenceNumber || req.body.reference || req.query.reference || req.body.reference_number || req.query.reference_number || req.body.ref_command || req.query.ref_command || req.body.id || req.body.custom || req.query.custom || req.body.transaction_id || req.body.ticket_id || req.query.ticket_id;
   const status = req.body.status || req.query.status || req.body.response_code || req.query.response_code || req.body.statut;
+
+  const referenceNumber = normalizeReferenceIdentifier(rawReferenceNumber);
+  const rawReferenceNumberDisplay = String(rawReferenceNumber ?? "").trim();
+
+  console.log(`[PaiementPro] Raw reference : ${rawReferenceNumberDisplay}`);
+  console.log(`[PaiementPro] Normalized referenceNumber : ${referenceNumber}`);
 
   if (!referenceNumber) {
     console.error("Erreur : Données de ciblage manquantes dans le body");
@@ -1187,40 +1204,94 @@ app.all("/api/payment/callback", async (req, res) => {
 
   console.log(`[PaiementPro] Traitement du paiement pour la référence : ${referenceNumber}, statut reçu : ${status}`);
 
+  const normalizedStatus = typeof status === "string" ? status.toLowerCase() : status;
+
+  // Try to read numeric response code sent by some providers (responsecode, response_code, responseCode)
+  const rawResponseCode = req.body.responsecode ?? req.query.responsecode ?? req.body.response_code ?? req.query.response_code ?? req.body.responseCode ?? req.query.responseCode ?? req.body.response_code;
+  const numericResponseCode = rawResponseCode !== undefined && rawResponseCode !== null && rawResponseCode !== "" ? Number(String(rawResponseCode).replace(/[^0-9\-]/g, "")) : null;
+
+  // Final success determination:
+  // - If provider sent a numeric response code, require it to be 0 to accept success.
+  // - Otherwise, fall back to checking textual status ('success'|'paid') or explicit boolean flag.
+  let isSuccess: boolean;
+  if (numericResponseCode !== null && !Number.isNaN(numericResponseCode)) {
+    isSuccess = numericResponseCode === 0;
+  } else {
+    isSuccess = normalizedStatus === "success" || normalizedStatus === "paid" || req.body.success === true;
+  }
+
+  console.log(`[PaiementPro] Raw response code: ${rawResponseCode} -> numeric: ${numericResponseCode}, interpreted success: ${isSuccess}`);
+
+  let supabaseTicketFound = false;
   if (isSupabaseEnabled && supabase) {
     try {
-      // Rechercher le ticket correspondant à la référence
-      const { data: ticket, error: fetchErr } = await supabase
-        .from("tickets")
-        .select("*")
-        .or(`id.eq.${referenceNumber},transaction_ref.eq.${referenceNumber}`)
-        .maybeSingle();
+      const refCandidates = [referenceNumber];
+      if (rawReferenceNumberDisplay && rawReferenceNumberDisplay !== referenceNumber) {
+        refCandidates.push(rawReferenceNumberDisplay);
+      }
 
-      if (fetchErr || !ticket) {
-        console.warn(`[PaiementPro Callback] Ticket introuvable dans Supabase pour la référence : ${referenceNumber}`);
-      } else {
-        console.log(`[PaiementPro Callback] Ticket correspondant trouvé dans Supabase : ${ticket.event_title}`);
-        const isSuccess = status === "SUCCESS" || status === "success" || status === "PAID" || status === "0" || status === "00" || status === 0 || req.body.status === true || req.body.success === true;
-        if(isSuccess) {
-          await supabase.from("tickets")
-            .update({ transaction_ref: ticket.transaction_ref.replace("PENDING-", "PAID-") })
-            .eq("id", ticket.id);
+      for (const ref of refCandidates) {
+        if (!ref) continue;
+        // Rechercher le ticket correspondant à la référence
+        console.log(`[PaiementPro Callback] Tentative de recherche Supabase pour référence candidate: ${ref}`);
+        const { data: ticket, error: fetchErr } = await supabase
+          .from("tickets")
+          .select("*")
+          .or(`id.eq.${ref},transaction_ref.eq.${ref}`)
+          .maybeSingle();
+
+        if (fetchErr || !ticket) {
+          console.warn(`[PaiementPro Callback] Ticket introuvable dans Supabase pour la référence : ${ref}`);
+          continue;
         }
+
+        supabaseTicketFound = true;
+        console.log(`[PaiementPro Callback] Ticket trouvé dans Supabase: id=${ticket.id}, event=${ticket.event_title}, transaction_ref=${ticket.transaction_ref}`);
+
+        if (!isSuccess) {
+          console.log(`[PaiementPro Callback] Réception d'un callback NON-succès pour ticket id=${ticket.id} (responsecode=${numericResponseCode}). Aucune mise à jour effectuée.`);
+        } else {
+          const newRef = String(ticket.transaction_ref || "").replace("PENDING-", "PAID-");
+          console.log(`[PaiementPro Callback] Mise à jour Supabase ticket id=${ticket.id} -> transaction_ref: ${ticket.transaction_ref} => ${newRef}`);
+          try {
+            const { data: updated, error: updateErr } = await supabase.from("tickets")
+              .update({ transaction_ref: newRef })
+              .eq("id", ticket.id)
+              .select()
+              .single();
+
+            if (updateErr) {
+              console.error(`[PaiementPro Callback] Erreur lors de la mise à jour Supabase pour id=${ticket.id}:`, updateErr.message || updateErr);
+            } else {
+              console.log(`[PaiementPro Callback] Mise à jour Supabase réussie pour id=${ticket.id}.`);
+            }
+          } catch (uErr: any) {
+            console.error(`[PaiementPro Callback] Exception lors de la mise à jour Supabase pour id=${ticket.id}:`, uErr.message || uErr);
+          }
+        }
+
+        break;
       }
     } catch (err: any) {
       console.error("[PaiementPro Callback Supabase Error]", err.message);
     }
-  } else {
+  }
+
+  if (!supabaseTicketFound) {
     const db = getDB();
-    const ticket = db.tickets.find(t => t.id === referenceNumber || t.transactionRef === referenceNumber);
+    const ticket = db.tickets.find(t => [referenceNumber, rawReferenceNumberDisplay].some(ref => ref && (t.id === ref || t.transactionRef === ref)));
     if (!ticket) {
       console.warn(`[PaiementPro Callback] Ticket local introuvable pour la référence : ${referenceNumber}`);
     } else {
-      console.log(`[PaiementPro Callback] Ticket local de ${ticket.buyerName} mis à jour suite au callback.`);
-      const isSuccess = status === "SUCCESS" || status === "success" || status === "PAID" || status === "0" || status === "00" || status === 0 || req.body.status === true || req.body.success === true;
-      if(isSuccess) {
-        ticket.transactionRef = ticket.transactionRef.replace("PENDING-", "PAID-");
+      console.log(`[PaiementPro Callback] Ticket local trouvé: id=${ticket.id}, buyer=${ticket.buyerName}, transactionRef=${ticket.transactionRef}`);
+      if (!isSuccess) {
+        console.log(`[PaiementPro Callback] Callback NON-succès reçu pour ticket id=${ticket.id} (rawResponseCode=${rawResponseCode}). Aucune modification locale appliquée.`);
+      } else {
+        const oldRef = ticket.transactionRef || "";
+        const newRef = String(oldRef).replace("PENDING-", "PAID-");
+        ticket.transactionRef = newRef;
         saveDB(db);
+        console.log(`[PaiementPro Callback] Ticket local mis à jour: id=${ticket.id}, transactionRef: ${oldRef} -> ${newRef}`);
       }
     }
   }
@@ -1230,7 +1301,7 @@ app.all("/api/payment/callback", async (req, res) => {
 });
 
 // Ticket Verification Endpoint (QR Scanning Verification)
-app.post("/api/verify-ticket", validateVerifyTicket, async (req, res) => {
+app.post("/api/verify-ticket", validateVerifyTicket, async (req: express.Request, res: express.Response) => {
   const { qrCodeData, organizerId } = req.body;
 
   if (!qrCodeData) {
@@ -1311,7 +1382,7 @@ app.post("/api/verify-ticket", validateVerifyTicket, async (req, res) => {
   }
 
   const db = getDB();
-  const ticket = db.tickets.find(t => t.id === ticketId);
+  const ticket = db.tickets.find((t: any) => t.id === ticketId);
 
   if (!ticket) {
     return res.status(404).json({ error: "Billet introuvable dans notre système de sécurité." });
@@ -1340,7 +1411,7 @@ app.post("/api/verify-ticket", validateVerifyTicket, async (req, res) => {
 });
 
 // Statistics Endpoint for Organizers
-app.get("/api/organizer/export", async (req, res) => {
+app.get("/api/organizer/export", async (req: express.Request, res: express.Response) => {
   const { organizerId } = req.query;
 
   if (!organizerId) {
@@ -1356,7 +1427,7 @@ app.get("/api/organizer/export", async (req, res) => {
         .eq("organizer_id", organizerId);
       if (eventsError) throw eventsError;
       
-      const eventIds = (organizerEvents || []).map(e => e.id);
+      const eventIds = (organizerEvents || []).map((e: any) => e.id);
       if (eventIds.length > 0) {
         const { data: tkts, error: tktsError } = await supabase
           .from("tickets")
@@ -1368,9 +1439,9 @@ app.get("/api/organizer/export", async (req, res) => {
       }
     } else {
       const db = getDB();
-      const organizerEvents = db.events.filter(e => e.organizerId === organizerId);
-      const eventIds = organizerEvents.map(e => e.id);
-      matchedTickets = db.tickets.filter(t => eventIds.includes(t.eventId));
+      const organizerEvents = db.events.filter((e: any) => e.organizerId === organizerId);
+      const eventIds = organizerEvents.map((e: any) => e.id);
+      matchedTickets = db.tickets.filter((t: any) => eventIds.includes(t.eventId));
     }
     
     // Generate CSV
@@ -1386,7 +1457,7 @@ app.get("/api/organizer/export", async (req, res) => {
       "Statut"
     ].join(",");
 
-    const rows = matchedTickets.map(t => [
+    const rows = matchedTickets.map((t: any) => [
       t.transaction_ref || t.transactionRef || "",
       t.purchase_date || t.purchaseDate || "",
       `"${(t.event_title || t.eventTitle || "").replace(/"/g, '""')}"`,
@@ -1408,7 +1479,7 @@ app.get("/api/organizer/export", async (req, res) => {
   }
 });
 
-app.get("/api/organizer/stats", async (req, res) => {
+app.get("/api/organizer/stats", async (req: express.Request, res: express.Response) => {
   const { organizerId } = req.query;
 
   if (!organizerId) {
@@ -1425,7 +1496,7 @@ app.get("/api/organizer/stats", async (req, res) => {
 
       if (eventsError) throw eventsError;
 
-      const eventIds = (organizerEvents || []).map(e => e.id);
+      const eventIds = (organizerEvents || []).map((e: any) => e.id);
 
       // 2. Get tickets for those events
       let matchedTickets: any[] = [];
@@ -1440,15 +1511,15 @@ app.get("/api/organizer/stats", async (req, res) => {
         matchedTickets = tkts || [];
       }
 
-      const totalGrossRevenue = matchedTickets.reduce((sum, t) => sum + Number(t.price_paid || 0), 0);
+      const totalGrossRevenue = matchedTickets.reduce((sum: number, t: any) => sum + Number(t.price_paid || 0), 0);
       const commissionRate = 0.10;
       const totalCommission = Math.floor(totalGrossRevenue * commissionRate);
       const totalRevenue = totalGrossRevenue - totalCommission;
       
-      const ticketsSold = matchedTickets.reduce((sum, t) => sum + Number(t.quantity || 1), 0);
+      const ticketsSold = matchedTickets.reduce((sum: number, t: any) => sum + Number(t.quantity || 1), 0);
       const activeEvents = (organizerEvents || []).length;
 
-      const recentSales = matchedTickets.slice(0, 10).map(t => ({
+      const recentSales = matchedTickets.slice(0, 10).map((t: any) => ({
         eventTitle: t.event_title,
         buyerName: t.buyer_name,
         amount: Number(t.price_paid),
@@ -1473,20 +1544,20 @@ app.get("/api/organizer/stats", async (req, res) => {
   const db = getDB();
   
   // Custom filter if and only if organizer created it. (For fallback simulation let's grant view of all tickets of their events!)
-  const organizerEvents = db.events.filter(e => e.organizerId === organizerId);
-  const eventIds = organizerEvents.map(e => e.id);
+  const organizerEvents = db.events.filter((e: any) => e.organizerId === organizerId);
+  const eventIds = organizerEvents.map((e: any) => e.id);
 
-  const matchedTickets = db.tickets.filter(t => eventIds.includes(t.eventId));
+  const matchedTickets = db.tickets.filter((t: any) => eventIds.includes(t.eventId));
 
-  const totalGrossRevenue = matchedTickets.reduce((sum, t) => sum + t.pricePaid, 0);
+  const totalGrossRevenue = matchedTickets.reduce((sum: number, t: any) => sum + t.pricePaid, 0);
   const commissionRate = 0.10; // 10% ClicBillet Plateforme Commission
   const totalCommission = Math.floor(totalGrossRevenue * commissionRate);
   const totalRevenue = totalGrossRevenue - totalCommission; // Le solde chez l'organisateur (après déduction)
   
-  const ticketsSold = matchedTickets.reduce((sum, t) => sum + t.quantity, 0);
+  const ticketsSold = matchedTickets.reduce((sum: number, t: any) => sum + t.quantity, 0);
   const activeEvents = organizerEvents.length;
 
-  const recentSales = matchedTickets.slice(0, 10).map(t => ({
+  const recentSales = matchedTickets.slice(0, 10).map((t: any) => ({
     eventTitle: t.eventTitle,
     buyerName: t.buyerName,
     amount: t.pricePaid,
@@ -1506,7 +1577,7 @@ app.get("/api/organizer/stats", async (req, res) => {
 });
 
 // Update/Modify Event Endpoint
-app.put("/api/events/:id", validateEvent, async (req, res) => {
+app.put("/api/events/:id", validateEvent, async (req: express.Request, res: express.Response) => {
   const { id } = req.params;
   const { title, description, date, time, price, ticketTypes, venue, category, banner, totalTickets, organizerId } = req.body;
 
@@ -1631,7 +1702,7 @@ app.put("/api/events/:id", validateEvent, async (req, res) => {
 });
 
 // Admin-specific Management APIs
-app.get("/api/admin/stats", async (req, res) => {
+app.get("/api/admin/stats", async (req: express.Request, res: express.Response) => {
   if (isSupabaseEnabled && supabase) {
     try {
       const { data: users, error: uErr } = await supabase.from("users").select("*");
@@ -1643,12 +1714,12 @@ app.get("/api/admin/stats", async (req, res) => {
       if (tErr) throw tErr;
 
       const matchedTickets = tickets || [];
-      const totalRevenue = matchedTickets.reduce((sum, t) => sum + Number(t.price_paid || 0), 0);
+      const totalRevenue = matchedTickets.reduce((sum: number, t: any) => sum + Number(t.price_paid || 0), 0);
       const commissionRate = 0.10;
       const totalPlatformCommission = Math.floor(totalRevenue * commissionRate);
       const totalOrganizerPayout = totalRevenue - totalPlatformCommission;
 
-      const totalTicketsSold = matchedTickets.reduce((sum, t) => sum + Number(t.quantity || 1), 0);
+      const totalTicketsSold = matchedTickets.reduce((sum: number, t: any) => sum + Number(t.quantity || 1), 0);
       const totalUsers = (users || []).length;
       const totalEvents = (events || []).length;
 
@@ -1707,12 +1778,12 @@ app.get("/api/admin/stats", async (req, res) => {
   }
 
   const db = getDB();
-  const totalRevenue = db.tickets.reduce((sum, t) => sum + t.pricePaid, 0); // Total Gross XOF
+  const totalRevenue = db.tickets.reduce((sum: number, t: any) => sum + t.pricePaid, 0); // Total Gross XOF
   const commissionRate = 0.10;
   const totalPlatformCommission = Math.floor(totalRevenue * commissionRate); // Total collected by platform
   const totalOrganizerPayout = totalRevenue - totalPlatformCommission;
   
-  const totalTicketsSold = db.tickets.reduce((sum, t) => sum + t.quantity, 0);
+  const totalTicketsSold = db.tickets.reduce((sum: number, t: any) => sum + t.quantity, 0);
   const totalUsers = db.users.length;
   const totalEvents = db.events.length;
 
@@ -1733,7 +1804,7 @@ app.get("/api/admin/stats", async (req, res) => {
   });
 });
 
-app.post("/api/admin/validate-payment", async (req, res) => {
+app.post("/api/admin/validate-payment", async (req: express.Request, res: express.Response) => {
   const { referenceNumber } = req.body;
   if (!referenceNumber) {
     return res.status(400).json({ error: "Référence ou ID du billet manquant." });
@@ -1775,7 +1846,7 @@ app.post("/api/admin/validate-payment", async (req, res) => {
   res.json({ success: true, message: "Paiement validé localement." });
 });
 
-app.delete("/api/admin/events/:id", async (req, res) => {
+app.delete("/api/admin/events/:id", async (req: express.Request, res: express.Response) => {
   const { id } = req.params;
 
   if (isSupabaseEnabled && supabase) {
@@ -1802,7 +1873,7 @@ app.delete("/api/admin/events/:id", async (req, res) => {
   res.status(404).json({ error: "Événement introuvable." });
 });
 
-app.delete("/api/admin/users/:id", async (req, res) => {
+app.delete("/api/admin/users/:id", async (req: express.Request, res: express.Response) => {
   const { id } = req.params;
   if (id === "usr-admin") {
     return res.status(400).json({ error: "Le compte administrateur principal ne peut pas être révoqué ou supprimé." });
@@ -1833,7 +1904,7 @@ app.delete("/api/admin/users/:id", async (req, res) => {
 });
 
 // --- Modération Events ---
-app.patch("/api/admin/events/:id/status", async (req, res) => {
+app.patch("/api/admin/events/:id/status", async (req: express.Request, res: express.Response) => {
   const { id } = req.params;
   const { status } = req.body;
   if (!status || !["approved", "rejected"].includes(status)) return res.status(400).json({ error: "Statut invalide" });
@@ -1864,7 +1935,7 @@ app.patch("/api/admin/events/:id/status", async (req, res) => {
 });
 
 // --- Payouts (Demandes de retrait) ---
-app.post("/api/organizer/payouts", async (req, res) => {
+app.post("/api/organizer/payouts", async (req: express.Request, res: express.Response) => {
   const { organizerId, amount, method, details } = req.body;
   if (!organizerId || !amount || !method) return res.status(400).json({ error: "Champs manquants" });
 
@@ -1891,7 +1962,7 @@ app.post("/api/organizer/payouts", async (req, res) => {
   res.json({ success: true, payout });
 });
 
-app.get("/api/organizer/payouts", async (req, res) => {
+app.get("/api/organizer/payouts", async (req: express.Request, res: express.Response) => {
   const { organizerId } = req.query;
   if (isSupabaseEnabled && supabase) {
     try {
@@ -1903,7 +1974,7 @@ app.get("/api/organizer/payouts", async (req, res) => {
   res.json((db.payouts || []).filter(p => p.organizerId === organizerId || (p as any).organizer_id === organizerId));
 });
 
-app.get("/api/admin/payouts", async (req, res) => {
+app.get("/api/admin/payouts", async (req: express.Request, res: express.Response) => {
   if (isSupabaseEnabled && supabase) {
     try {
       const { data, error } = await supabase.from("payouts").select("*").order("request_date", { ascending: false });
@@ -1914,7 +1985,7 @@ app.get("/api/admin/payouts", async (req, res) => {
   res.json(db.payouts || []);
 });
 
-app.patch("/api/admin/payouts/:id/status", async (req, res) => {
+app.patch("/api/admin/payouts/:id/status", async (req: express.Request, res: express.Response) => {
   const { status } = req.body;
   if (isSupabaseEnabled && supabase) {
     try {
@@ -1934,7 +2005,7 @@ app.patch("/api/admin/payouts/:id/status", async (req, res) => {
 });
 
 // --- Transactions History ---
-app.get("/api/admin/transactions", async (req, res) => {
+app.get("/api/admin/transactions", async (req: express.Request, res: express.Response) => {
   if (isSupabaseEnabled && supabase) {
     try {
       const { data, error } = await supabase.from("transactions").select("*").order("date", { ascending: false });
@@ -1950,25 +2021,61 @@ async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        strictPort: false,
+        hmr: {
+          host: "127.0.0.1",
+          port: HMR_PORT
+        }
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    app.get("*", (req: express.Request, res: express.Response) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
   if (!process.env.VERCEL) {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`ClicBillet server running on http://0.0.0.0:${PORT}`);
-    });
+    await listenOnAvailablePort(PORT);
   } else {
     console.log("[Vercel] En cours d'exécution dans un environnement Serverless - app.listen ignoré.");
   }
+}
+
+async function listenOnAvailablePort(startPort: number) {
+  const maxAttempts = 5;
+  let port = startPort;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const server = app.listen(port, "0.0.0.0", () => {
+          console.log(`ClicBillet server running on http://0.0.0.0:${port}`);
+          resolve();
+        });
+
+        server.on("error", (err: any) => {
+          reject(err);
+        });
+      });
+      return;
+    } catch (err: any) {
+      if (err?.code === "EADDRINUSE") {
+        console.warn(`Port ${port} occupé, tentative sur ${port + 1}...`);
+        port += 1;
+        continue;
+      }
+      console.error("Erreur de démarrage du serveur :", err);
+      throw err;
+    }
+  }
+
+  throw new Error(`Impossible d'écouter sur un port libre après ${maxAttempts} tentatives (début: ${startPort}).`);
 }
 
 startServer();
