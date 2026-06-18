@@ -31,6 +31,17 @@ const supabaseAdmin = useSupabaseAdmin ? createClient(SUPABASE_URL, SUPABASE_SER
 const supabase = supabaseAdmin;
 const isSupabaseEnabled = Boolean(supabase);
 
+// supabase-js attache automatiquement le token de la session active aux requêtes de table
+// dès qu'on appelle auth.signUp/signInWithPassword sur un client (cf. SupabaseClient._getAccessToken).
+// Si on appelait ces méthodes sur `supabaseAdmin`, ce dernier perdrait son accès service_role
+// pour toutes les requêtes .from(...) suivantes et se ferait bloquer par RLS. On utilise donc
+// un client jetable, sans session persistée, uniquement pour vérifier/créer les identifiants.
+function createEphemeralAuthClient() {
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+}
+
 const LOCAL_ADMIN_PASSWORD = process.env.LOCAL_ADMIN_PASSWORD || crypto.randomBytes(12).toString("hex");
 const LOCAL_CLIENT_PASSWORD = process.env.LOCAL_CLIENT_PASSWORD || crypto.randomBytes(12).toString("hex");
 const LOCAL_ORGANIZER_PASSWORD = process.env.LOCAL_ORGANIZER_PASSWORD || crypto.randomBytes(12).toString("hex");
@@ -837,8 +848,10 @@ app.post("/api/auth/register", validateRegister, async (req: express.Request, re
       }
 
       if (isSignUpFallbackNeeded) {
-        // Fallback to client-side signUp if the service role key is not active on this environment
-        const { data: clientData, error: clientError } = await supabase.auth.signUp({
+        // Fallback to client-side signUp if the service role key is not active on this environment.
+        // Utilise un client jetable pour ne pas faire perdre à `supabase`/`supabaseAdmin` son
+        // accès service_role sur les requêtes de table suivantes (cf. createEphemeralAuthClient).
+        const { data: clientData, error: clientError } = await createEphemeralAuthClient().auth.signUp({
           email: normalizedEmail,
           password: password,
           options: {
@@ -921,8 +934,10 @@ app.post("/api/auth/login", validateLogin, async (req: express.Request, res: exp
 
   if (isSupabaseEnabled && supabase) {
     try {
-      // 1. Authenticate using Supabase Auth (Native cryptographic match)
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      // 1. Authenticate using Supabase Auth (Native cryptographic match).
+      // Utilise un client jetable pour ne pas faire perdre à `supabase`/`supabaseAdmin` son
+      // accès service_role sur les requêtes de table suivantes (cf. createEphemeralAuthClient).
+      const { data: authData, error: authError } = await createEphemeralAuthClient().auth.signInWithPassword({
         email: normalizedEmail,
         password: password,
       });
