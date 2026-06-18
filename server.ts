@@ -1931,7 +1931,8 @@ app.get("/api/admin/stats", async (req: express.Request, res: express.Response) 
         ticketsSold: e.tickets_sold ?? 0,
         totalTickets: e.total_tickets,
         organizerId: e.organizer_id,
-        organizerName: e.organizer_name
+        organizerName: e.organizer_name,
+        status: e.status || "approved"
       }));
       const mappedTickets = matchedTickets.map(t => ({
         id: t.id,
