@@ -66,20 +66,38 @@ const PORT = Number(process.env.PORT) || 3000;
 const HMR_PORT = Number(process.env.HMR_PORT || process.env.WS_PORT) || 24678;
 
 // Basic security headers
+// Origines des passerelles de paiement (Paiement Pro et les opérateurs mobile money qu'il
+// route en arrière-plan) ainsi que le domaine de production, à autoriser pour les redirections,
+// requêtes XHR et formulaires de paiement.
+const PAYMENT_GATEWAY_ORIGINS = [
+  "https://clicbillet.com",
+  "https://www.clicbillet.com",
+  "https://*.paiementpro.net",
+  "https://paiementpro.net",
+  "https://mpayment.orange-money.com",
+  "https://multi.app.orange-money.com",
+  "https://maxit-link.com",
+  "https://pay.wave.com",
+  "https://www.wave.com",
+  "https://*.confirm.wave.com",
+  "https://promo.wave.com",
+];
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "https://paiementpro.net"],
       scriptSrcAttr: ["'unsafe-inline'"],
-      connectSrc: ["'self'", `ws://127.0.0.1:${HMR_PORT}`, `ws://localhost:${HMR_PORT}`],
+      connectSrc: ["'self'", `ws://127.0.0.1:${HMR_PORT}`, `ws://localhost:${HMR_PORT}`, ...PAYMENT_GATEWAY_ORIGINS],
       styleSrc: ["'self'", "https:", "'unsafe-inline'"],
       imgSrc: ["'self'", "https:", "data:"],
       fontSrc: ["'self'", "https:", "data:"],
       objectSrc: ["'none'"],
+      frameSrc: ["'self'", ...PAYMENT_GATEWAY_ORIGINS],
       frameAncestors: ["'self'"],
       baseUri: ["'self'"],
-      formAction: ["'self'"],
+      formAction: ["'self'", ...PAYMENT_GATEWAY_ORIGINS],
       upgradeInsecureRequests: [],
     },
   },
