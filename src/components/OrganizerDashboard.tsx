@@ -342,8 +342,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   async function fetchStats() {
     try {
       const [response, payoutRes] = await Promise.all([
-        fetch(`/api/organizer/stats?organizerId=${user.id}`),
-        fetch(`/api/organizer/payouts?organizerId=${user.id}`)
+        fetch(`/api/organizer/stats?organizerId=${user.id}`, { headers: authHeaders }),
+        fetch(`/api/organizer/payouts?organizerId=${user.id}`, { headers: authHeaders })
       ]);
       if (!response.ok) {
         throw new Error("Impossible de charger les statistiques.");
