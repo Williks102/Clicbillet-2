@@ -1738,6 +1738,21 @@ app.get("/api/organizer/stats", async (req: express.Request, res: express.Respon
         tier: t.tier
       }));
 
+      const tickets = matchedTickets.map((t: any) => ({
+        id: t.id,
+        eventId: t.event_id,
+        eventTitle: t.event_title,
+        buyerName: t.buyer_name,
+        buyerEmail: t.buyer_email,
+        tier: t.tier,
+        pricePaid: Number(t.price_paid),
+        scanned: t.scanned,
+        scannedAt: t.scanned_at,
+        transactionRef: t.transaction_ref,
+        purchaseDate: t.purchase_date,
+        quantity: t.quantity
+      }));
+
       return res.json({
         totalRevenue,
         totalGrossRevenue,
@@ -1745,7 +1760,8 @@ app.get("/api/organizer/stats", async (req: express.Request, res: express.Respon
         commissionRate,
         ticketsSold,
         activeEvents,
-        recentSales
+        recentSales,
+        tickets
       });
     } catch (err: any) {
       console.error("[Supabase Error] Organizer statistics, falling back to local file DB:", err.message);
@@ -1783,7 +1799,8 @@ app.get("/api/organizer/stats", async (req: express.Request, res: express.Respon
     commissionRate,
     ticketsSold,
     activeEvents,
-    recentSales
+    recentSales,
+    tickets: matchedTickets
   });
 });
 

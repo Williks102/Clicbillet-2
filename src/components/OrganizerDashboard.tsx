@@ -114,16 +114,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     try {
       const response = await fetch(`/api/organizer/stats?organizerId=${user.id}`, { headers: authHeaders });
       if (response.ok) {
-        // Since get stats endpoint computes match tickets, we can fetch tickets of these events
-        const responseStats = await fetch("/api/admin/stats", { headers: authHeaders });
-        if (responseStats.ok) {
-          const allData = await responseStats.json();
-          const myEvts = events.filter(e => e.organizerId === user.id);
-          const eIds = myEvts.map(e => e.id);
-          // Filter tickets that belong to my events
-          const mine = (allData.tickets || []).filter((t: any) => eIds.includes(t.eventId));
-          setSimulatedTickets(mine);
-        }
+        const data = await response.json();
+        setSimulatedTickets(data.tickets || []);
       }
     } catch (e) {
       console.error(e);
