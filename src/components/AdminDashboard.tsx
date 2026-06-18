@@ -36,6 +36,8 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   const [eventSearch, setEventSearch] = useState("");
   const [ticketSearch, setTicketSearch] = useState("");
 
+  const authHeaders = user.token ? { Authorization: `Bearer ${user.token}` } : {};
+
   const handleValidatePayment = async (referenceNumber: string) => {
     if (!window.confirm("Valider manuellement ce paiement ? Le client recevra son ticket avec le QR code.")) {
       return;
@@ -44,7 +46,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
     try {
       const resp = await fetch("/api/admin/validate-payment", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({ referenceNumber })
       });
       const data = await resp.json();
@@ -64,9 +66,9 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
     setError(null);
     try {
       const [response, respPayouts, respTx] = await Promise.all([
-        fetch("/api/admin/stats"),
-        fetch("/api/admin/payouts"),
-        fetch("/api/admin/transactions")
+        fetch("/api/admin/stats", { headers: authHeaders }),
+        fetch("/api/admin/payouts", { headers: authHeaders }),
+        fetch("/api/admin/transactions", { headers: authHeaders })
       ]);
       if (!response.ok) {
         throw new Error("Impossible de communiquer avec l'interface d'administration.");
@@ -93,7 +95,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
     try {
       const response = await fetch(`/api/admin/events/${id}/status`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({ status })
       });
       if (!response.ok) throw new Error("Erreur de mise à jour.");
@@ -106,7 +108,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
     try {
       const response = await fetch(`/api/admin/payouts/${id}/status`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({ status })
       });
       if (!response.ok) throw new Error("Erreur de mise à jour.");
@@ -117,7 +119,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   async function handleDeleteEvent(id: string) {
     if (!confirm("Êtes-vous sûr de vouloir supprimer cet événement de la plateforme ? Cette action est irréversible.")) return;
     try {
-      const response = await fetch(`/api/admin/events/${id}`, { method: "DELETE" });
+      const response = await fetch(`/api/admin/events/${id}`, { method: "DELETE", headers: authHeaders });
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || "Erreur de suppression.");
@@ -131,7 +133,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   async function handleDeleteUser(id: string) {
     if (!confirm("Êtes-vous sûr de vouloir révoquer ce compte utilisateur de ClicBillet ? Cette action est irréversible.")) return;
     try {
-      const response = await fetch(`/api/admin/users/${id}`, { method: "DELETE" });
+      const response = await fetch(`/api/admin/users/${id}`, { method: "DELETE", headers: authHeaders });
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || "Erreur de révocation.");

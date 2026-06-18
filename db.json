@@ -3,23 +3,30 @@
     {
       "id": "usr-admin",
       "email": "admin@clicbillet.ci",
-      "password": "password123",
+      "password": "$2a$10$2t..Z3etPSXOvhZWOBokcOv8uilgN5YSNf6JCoSF8OD0jDNB/.x5O",
       "name": "Administrateur ClicBillet",
       "role": "admin"
     },
     {
       "id": "usr-client",
       "email": "client@clicbillet.ci",
-      "password": "password123",
+      "password": "$2a$10$EK8PHUq8sPZghzhscmcn2uIQS38JbXWswsZeCB6VCGyS/6SO1tYCq",
       "name": "Jean-Eudes Koffi",
       "role": "client"
     },
     {
       "id": "org-1",
       "email": "orga@clicbillet.ci",
-      "password": "password123",
+      "password": "$2a$10$B7s08nLPDWEggbl8t6.RNOeH1xIm4LSdcY6O5uTNo4c5vJh5Na2Li",
       "name": "Overcom Production",
       "role": "organizer"
+    },
+    {
+      "id": "usr-1781803315351",
+      "email": "admin@simeplebillet.com",
+      "password": "$2a$10$MpEmhf8Dy.p8opsTDACg5.wJKLSauieObKyPoyH93UChEU9V1AVmu",
+      "name": "pj",
+      "role": "client"
     }
   ],
   "events": [

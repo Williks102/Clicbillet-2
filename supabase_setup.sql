@@ -34,6 +34,13 @@ CREATE TABLE IF NOT EXISTS public.events (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+-- 2bis. Colonnes ajoutées après la création initiale de la table : si "public.events"
+-- existait déjà avant leur introduction dans ce script, CREATE TABLE IF NOT EXISTS ne les
+-- aurait pas ajoutées. On les rattrape ici de façon idempotente (cause du précédent
+-- "column events.status does not exist").
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS ticket_types JSONB;
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
+
 -- 3. Table des RETRAITS (Payouts)
 CREATE TABLE IF NOT EXISTS public.payouts (
     id TEXT PRIMARY KEY,
@@ -79,13 +86,19 @@ CREATE TABLE IF NOT EXISTS public.tickets (
     quantity INTEGER DEFAULT 1
 );
 
+-- 5bis. Même rattrapage que pour events (cf. section 2bis) pour "quantity", ajoutée
+-- après la création initiale de "public.tickets".
+ALTER TABLE public.tickets ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1;
+
 -- 6. Insertion d'utilisateurs par défaut pour tester les connexions
-INSERT INTO public.users (id, name, email, password, role)
-VALUES 
-('usr-admin', 'Administrateur ClicBillet', 'admin@clicbillet.ci', 'password123', 'admin'),
-('usr-client', 'Jean-Eudes Koffi', 'client@clicbillet.ci', 'password123', 'client'),
-('org-1', 'Overcom Production', 'orga@clicbillet.ci', 'password123', 'organizer')
-ON CONFLICT (id) DO NOTHING;
+-- NOTE: Pour des raisons de sécurité, les comptes de démonstration ne sont pas insérés avec des mots de passe en clair dans ce script.
+-- Créez plutôt les utilisateurs via Supabase Auth ou lancez un processus d'inscription sécurisé.
+-- INSERT INTO public.users (id, name, email, password, role)
+-- VALUES 
+-- ('usr-admin', 'Administrateur ClicBillet', 'admin@clicbillet.ci', '<hash>', 'admin'),
+-- ('usr-client', 'Jean-Eudes Koffi', 'client@clicbillet.ci', '<hash>', 'client'),
+-- ('org-1', 'Overcom Production', 'orga@clicbillet.ci', '<hash>', 'organizer')
+-- ON CONFLICT (id) DO NOTHING;
 
 -- 7. Insertion de quelques événements de démonstration initiaux
 INSERT INTO public.events (id, title, description, date, time, price, venue, category, banner, tickets_sold, total_tickets, organizer_id, organizer_name, status)
@@ -96,9 +109,26 @@ VALUES
 ('evt-4', 'Super Classico Maracana : Abidjan vs Yamoussoukro', 'La grande finale de la ligue nationale de Maracana de Côte d''Ivoire.', '2026-07-12', '15:00', 2000, 'Forum de l''Université de Cocody, Abidjan', 'Sport', 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=800&auto=format&fit=crop&q=60', 67, 800, 'org-2', 'Fédération Maracana CI', 'approved')
 ON CONFLICT (id) DO NOTHING;
 
--- 8. Désactivez temporairement RLS (Row Level Security) ou configurez des règles ouvertes pour le prototypage rapide :
-ALTER TABLE public.users DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.events DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.tickets DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.payouts DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.transactions DISABLE ROW LEVEL SECURITY;
+-- 8. Row Level Security (RLS)
+-- Le serveur applicatif (server.ts) accède toujours à ces tables via la clé service_role,
+-- qui contourne RLS par conception. Le frontend n'utilise jamais le client Supabase
+-- directement (toutes les requêtes passent par server.ts). RLS est donc activé ici en
+-- défense en profondeur : si la clé anon venait à fuiter ou à être mal utilisée un jour,
+-- elle ne doit donner accès à rien d'autre que le catalogue public d'événements approuvés.
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tickets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.payouts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public read access to approved events" ON public.events;
+CREATE POLICY "Public read access to approved events"
+  ON public.events
+  FOR SELECT
+  TO anon, authenticated
+  USING (status = 'approved');
+
+-- Aucune autre policy n'est définie pour anon/authenticated sur users, events (écriture),
+-- tickets, payouts et transactions : RLS sans policy correspondante revient à un refus
+-- par défaut pour ces clients. Seule la clé service_role (utilisée exclusivement par
+-- server.ts, jamais exposée au frontend) peut lire/écrire ces données.

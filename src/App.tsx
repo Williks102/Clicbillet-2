@@ -49,27 +49,24 @@ export default function App() {
   useEffect(() => {
     fetchEvents();
     
-    // Check if coming back from PaiementPro success URL
     const params = new URLSearchParams(window.location.search);
-    if (params.get("payment_success") === "true") {
+    if ((import.meta as any).env?.DEV && params.get("payment_success") === "true") {
       const ticketId = params.get("ticket_id");
       if (ticketId) {
-        console.log("Validation du paiement post-redirection pour:", ticketId);
-        // Force the webhook via frontend to mark as SUCCESS because local dev might not receive external webhooks
-        fetch("/api/payment/callback", {
+        console.log("Validation du paiement post-redirection en développement pour:", ticketId);
+        fetch("/api/dev/simulate-payment", {
           method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({ referenceNumber: ticketId, status: "SUCCESS" })
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ referenceNumber: ticketId })
         }).then(() => {
-          // Clean the URL purely for visual purposes
           window.history.replaceState({}, document.title, window.location.pathname);
-          // Fire event so dashboards know to refresh
           window.dispatchEvent(new CustomEvent("refresh_tickets"));
-          // Navigate to tickets page
           if (user?.role === "client") {
             setActiveTab("client-dashboard");
           }
-        }).catch(e => console.error("Could not validate redirect payment:", e));
+        }).catch(e => console.error("Could not simulate redirect payment:", e));
       }
     }
   }, [user]);

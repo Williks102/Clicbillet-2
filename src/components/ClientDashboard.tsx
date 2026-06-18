@@ -12,10 +12,12 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const authHeaders = user.token ? { Authorization: `Bearer ${user.token}` } : {};
+
   // Fetch tickets for this user from backend
   async function fetchTickets() {
     try {
-      const response = await fetch(`/api/my-tickets?buyerId=${user.id}`);
+      const response = await fetch(`/api/my-tickets`, { headers: authHeaders });
       if (!response.ok) {
         throw new Error("Impossible de récupérer vos billets.");
       }
@@ -44,7 +46,7 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
     
     if (hasPending) {
       interval = setInterval(() => {
-        fetch(`/api/my-tickets?buyerId=${user.id}`)
+        fetch(`/api/my-tickets`, { headers: authHeaders })
           .then(res => res.json())
           .then((data: Ticket[]) => {
             // Compare the tickets to avoid unnecessary re-renders

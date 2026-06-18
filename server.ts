@@ -1,6 +1,9 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
+import helmet from "helmet";
+import bcrypt from "bcryptjs";
 import { fileURLToPath } from "url";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
@@ -12,80 +15,67 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Supabase Connection initialization with graceful safety checks and auto-correction of user typos
-const allEnvValues = [
-  process.env.SUPABASE_URL,
-  process.env.VITE_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
-  process.env.SUPABASE_ANON_KEY,
-  process.env.VITE_SUPABASE_PUBLISHABLE_KEY
-].map(val => (val || "").trim()).filter(Boolean);
+const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
+const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+const PAYMENT_PRO_CALLBACK_SECRET = (process.env.PAYMENT_PRO_CALLBACK_SECRET || "").trim();
+const PAYMENT_WEBHOOK_SECRET = (process.env.PAYMENT_WEBHOOK_SECRET || "").trim();
+const PAYMENT_PRO_CALLBACK_ORIGIN = (process.env.PAYMENT_PRO_CALLBACK_ORIGIN || "https://paiementpro.net").trim();
 
-let rawSupabaseUrl = "";
-let supabaseServiceKey = "";
+// Le serveur n'utilise que la clé service_role : toutes les routes qui touchent à des
+// données sensibles sont déjà protégées par requireAuth/requireRole côté Express, donc un
+// client "anon" séparé (qui ne ferait que retomber sur service_role en pratique) n'apporte
+// rien ici et n'est jamais sollicité par le frontend (qui ne parle jamais à Supabase
+// directement).
+const useSupabaseAdmin = Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
+const supabaseAdmin = useSupabaseAdmin ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) : null;
+const supabase = supabaseAdmin;
+const isSupabaseEnabled = Boolean(supabase);
 
-// Smart search: Find the value that is actually an HTTP/HTTPS URL
-for (const val of allEnvValues) {
-  const cleaned = val.replace(/\s+/g, "");
-  if (/^https?:\/\//i.test(cleaned)) {
-    rawSupabaseUrl = cleaned;
-    break;
-  }
+const LOCAL_ADMIN_PASSWORD = process.env.LOCAL_ADMIN_PASSWORD || crypto.randomBytes(12).toString("hex");
+const LOCAL_CLIENT_PASSWORD = process.env.LOCAL_CLIENT_PASSWORD || crypto.randomBytes(12).toString("hex");
+const LOCAL_ORGANIZER_PASSWORD = process.env.LOCAL_ORGANIZER_PASSWORD || crypto.randomBytes(12).toString("hex");
+
+if (process.env.NODE_ENV !== "production") {
+  console.info("[Dev login] Local fallback passwords are available only in development mode:");
+  console.info(`  admin: ${LOCAL_ADMIN_PASSWORD}`);
+  console.info(`  client: ${LOCAL_CLIENT_PASSWORD}`);
+  console.info(`  organizer: ${LOCAL_ORGANIZER_PASSWORD}`);
 }
 
-// Smart search: Find the value that looks like a Supabase API key (starts with sb_ or JWT signature 'eyJ')
-for (const val of allEnvValues) {
-  const cleaned = val.replace(/\s+/g, "");
-  if (cleaned !== rawSupabaseUrl && (cleaned.startsWith("sb_") || cleaned.startsWith("eyJ"))) {
-    supabaseServiceKey = cleaned;
-    break;
-  }
+if (!isSupabaseEnabled) {
+  console.warn("[Supabase Warning] Configuration Supabase incomplète (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY manquante). Le backend bascule vers db.json en local.");
 }
 
-// Fallback to classic sequential resolution if smart detection didn't find clear pairs
-if (!rawSupabaseUrl) {
-  const possibleUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim().replace(/\s+/g, "");
-  if (/^https?:\/\//i.test(possibleUrl)) {
-    rawSupabaseUrl = possibleUrl;
-  }
-}
-if (!supabaseServiceKey) {
-  supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "").trim().replace(/\s+/g, "");
-}
-
-let isSupabaseEnabled = false;
-let supabase: any = null;
-
-if (rawSupabaseUrl && supabaseServiceKey) {
-  if (/^https?:\/\//i.test(rawSupabaseUrl)) {
-    try {
-      supabase = createClient(rawSupabaseUrl, supabaseServiceKey);
-      isSupabaseEnabled = true;
-      console.log("==================================================");
-      console.log(`[Supabase] Activé ! Connexion en cours vers : ${rawSupabaseUrl}`);
-      console.log("==================================================");
-    } catch (err: any) {
-      console.error("==================================================");
-      console.error("[Supabase Error] Échec de l'initialisation du client :", err.message);
-      console.error("[Supabase] Repli automatique sur : db.json");
-      console.error("==================================================");
-    }
-  } else {
-    console.warn("==================================================");
-    console.warn("[Supabase Warning] L'URL Supabase configurée semble invalide (n'est pas une URL HTTP/HTTPS) :", rawSupabaseUrl);
-    console.warn("[Supabase] Repli automatique sur : db.json");
-    console.warn("==================================================");
-  }
-} else {
-  console.log("==================================================");
-  console.log("[Supabase] Configuration absente ou incomplète (URL ou Clé manquante).");
-  console.log("[Supabase] Repli automatique sur la base locale : db.json");
-  console.log("==================================================");
+if (!isSupabaseEnabled && process.env.NODE_ENV === "production") {
+  console.error("[Security] Aucune connexion Supabase valide détectée en production. Le serveur continuera, mais cela est dangereux.");
 }
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const HMR_PORT = Number(process.env.HMR_PORT || process.env.WS_PORT) || 24678;
+
+// Basic security headers
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://paiementpro.net"],
+      scriptSrcAttr: ["'unsafe-inline'"],
+      connectSrc: ["'self'", `ws://127.0.0.1:${HMR_PORT}`, `ws://localhost:${HMR_PORT}`],
+      styleSrc: ["'self'", "https:", "'unsafe-inline'"],
+      imgSrc: ["'self'", "https:", "data:"],
+      fontSrc: ["'self'", "https:", "data:"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'self'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      upgradeInsecureRequests: [],
+    },
+  },
+  // Le SDK Paiement Pro est chargé en cross-origin sans header CORP ; le COEP par défaut
+  // de helmet ("require-corp") le bloque silencieusement (NotSameOriginAfterDefaultedToSameOriginByCoep).
+  crossOriginEmbedderPolicy: false,
+}));
 
 // Path to durable local JSON Database
 const DB_FILE = path.join(process.cwd(), "db.json");
@@ -96,21 +86,21 @@ const INITIAL_DATABASE = {
     {
       id: "usr-admin",
       email: "admin@clicbillet.ci",
-      password: "password123",
+      password: bcrypt.hashSync(LOCAL_ADMIN_PASSWORD, 10),
       name: "Administrateur ClicBillet",
       role: "admin"
     },
     {
       id: "usr-client",
       email: "client@clicbillet.ci",
-      password: "password123",
+      password: bcrypt.hashSync(LOCAL_CLIENT_PASSWORD, 10),
       name: "Jean-Eudes Koffi",
       role: "client"
     },
     {
       id: "org-1",
       email: "orga@clicbillet.ci",
-      password: "password123",
+      password: bcrypt.hashSync(LOCAL_ORGANIZER_PASSWORD, 10),
       name: "Overcom Production",
       role: "organizer"
     }
@@ -217,11 +207,27 @@ function getDB() {
       db.users.unshift({
         id: "usr-admin",
         email: "admin@clicbillet.ci",
-        password: "password123",
+        password: bcrypt.hashSync(LOCAL_ADMIN_PASSWORD, 10),
         name: "Administrateur ClicBillet",
         role: "admin"
       });
       fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf8");
+    }
+
+    // Migrate any plaintext passwords to bcrypt-hashed values
+    let migrated = false;
+    for (const u of db.users) {
+      if (u.password && typeof u.password === "string" && !/^\$2[aby]\$/.test(u.password)) {
+        u.password = bcrypt.hashSync(String(u.password), 10);
+        migrated = true;
+      }
+    }
+    if (migrated) {
+      try {
+        fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf8");
+      } catch (e) {
+        console.warn("Failed to persist migrated hashed passwords:", e);
+      }
     }
     return db;
   } catch (error) {
@@ -264,8 +270,155 @@ async function sendTicketEmail(ticket: any) {
 }
 
 // Enable parsing middlewares for Webhooks and APIs
-app.use(express.json());
+app.use(express.json({
+  verify(req, res, buf) {
+    (req as any).rawBody = buf;
+  }
+}));
 app.use(express.urlencoded({ extended: true }));
+
+function extractBearerToken(req: express.Request): string | null {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || typeof authHeader !== "string") return null;
+  const parts = authHeader.split(" ");
+  if (parts.length !== 2 || parts[0] !== "Bearer") return null;
+  return parts[1];
+}
+
+async function getAuthenticatedUser(req: express.Request): Promise<any | null> {
+  const token = extractBearerToken(req);
+  if (!token) return null;
+
+  // Les tokens "local-<id>" sont émis par le repli db.json (signup/login), qui peut être
+  // utilisé même quand Supabase est configuré (si l'appel Supabase échoue ponctuellement).
+  // Ils ne sont jamais des JWT Supabase valides, donc on les distingue en premier plutôt
+  // que de laisser la branche Supabase ci-dessous les rejeter systématiquement.
+  const localPrefix = "local-";
+  if (token.startsWith(localPrefix)) {
+    const localUserId = token.substring(localPrefix.length);
+    if (!localUserId) return null;
+    const db = getDB();
+    const localUser = db.users.find((u: any) => u.id === localUserId);
+    if (!localUser) return null;
+    return {
+      id: localUser.id,
+      email: localUser.email,
+      role: localUser.role
+    };
+  }
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const authClient = supabase;
+      const { data, error } = await authClient.auth.getUser(token);
+      if (error || !data.user) {
+        return null;
+      }
+      const userId = data.user.id;
+      const { data: profile, error: profileError } = await authClient
+        .from("users")
+        .select("id,email,role")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (profileError || !profile) {
+        return null;
+      }
+
+      return {
+        id: profile.id,
+        email: profile.email,
+        role: profile.role
+      };
+    } catch (err) {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+async function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const user = await getAuthenticatedUser(req);
+  if (!user) {
+    return res.status(401).json({ error: "Token d'authentification manquant ou invalide." });
+  }
+  (req as any).user = user;
+  next();
+}
+
+function requireRole(...allowedRoles: string[]) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const user = (req as any).user;
+    if (!user || !allowedRoles.includes(user.role)) {
+      return res.status(403).json({ error: "Accès refusé : rôle insuffisant." });
+    }
+    next();
+  };
+}
+
+function getPaymentSignature(req: express.Request): string | null {
+  const headerValue = req.headers["x-paiementpro-signature"] || req.headers["x-signature"] || req.headers["x-webhook-signature"];
+  if (!headerValue) return null;
+  if (Array.isArray(headerValue)) {
+    return headerValue[0];
+  }
+  return headerValue;
+}
+
+function verifyPaymentSignature(req: express.Request): boolean {
+  if (!PAYMENT_PRO_CALLBACK_SECRET) {
+    console.warn("[Payment Callback] Clé de signature manquante : impossibilité de vérifier la signature du webhook.");
+    return false;
+  }
+
+  const signature = getPaymentSignature(req);
+  if (!signature) {
+    return false;
+  }
+
+  const rawBody = (req as any).rawBody;
+  const payload = rawBody ? rawBody.toString("utf8") : JSON.stringify(req.body || {});
+  const expectedSignature = crypto.createHmac("sha256", PAYMENT_PRO_CALLBACK_SECRET)
+    .update(payload)
+    .digest("hex");
+
+  const cleanedSignature = signature.replace(/^sha256=/i, "");
+  try {
+    return crypto.timingSafeEqual(Buffer.from(cleanedSignature), Buffer.from(expectedSignature));
+  } catch {
+    return false;
+  }
+}
+
+function corsAllowedOrigin(req: express.Request): string | undefined {
+  const origin = (req.headers.origin || "").toString();
+  if (!origin) return undefined;
+  if (origin === PAYMENT_PRO_CALLBACK_ORIGIN) return origin;
+  return undefined;
+}
+
+function getWebhookSecretFromRequest(req: express.Request): string | null {
+  const querySecret = req.query.wh;
+  if (typeof querySecret === "string") return querySecret;
+  if (Array.isArray(querySecret)) return querySecret[0];
+  const bodySecret = req.body?.wh;
+  if (typeof bodySecret === "string") return bodySecret;
+  if (typeof bodySecret === "number") return String(bodySecret);
+  return null;
+}
+
+function buildWebhookNotificationUrl(req: express.Request): string {
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  const scheme = typeof forwardedProto === "string" ? forwardedProto : req.protocol;
+  const host = req.get("host") || "localhost:3000";
+  const origin = req.get("origin") || `${scheme}://${host}`;
+  const baseUrl = `${origin.replace(/\/$/, "")}/api/payment/callback`;
+  if (PAYMENT_WEBHOOK_SECRET) {
+    return `${baseUrl}?wh=${encodeURIComponent(PAYMENT_WEBHOOK_SECRET)}`;
+  }
+  return baseUrl;
+}
 
 /**
  * UTILS DE SÉCURITÉ ET D'ASSAINISSEMENT DES ENTRÉES
@@ -310,6 +463,10 @@ app.use((req: express.Request, res: express.Response, next: express.NextFunction
   }
   next();
 });
+
+// Sécurisation des endpoints administrateurs et organisateurs
+app.use("/api/admin", requireAuth, requireRole("admin"));
+app.use("/api/organizer", requireAuth);
 
 // Middleware de validation de structure pour l'inscription d'utilisateurs
 const validateRegister = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -652,23 +809,28 @@ app.post("/api/auth/register", validateRegister, async (req: express.Request, re
       let isSignUpFallbackNeeded = false;
 
       try {
-        const { data: adminData, error: adminError } = await supabase.auth.admin.createUser({
-          email: normalizedEmail,
-          password: password,
-          email_confirm: true,
-          user_metadata: { name, role }
-        });
-
-        if (adminError) {
-          // If the error says it's not authorized, this means we only have the anon API key, not service_role.
-          // In that case we will fallback to the normal signUp.
-          if (adminError.status === 401 || adminError.status === 403 || adminError.message.includes("authorized")) {
-            isSignUpFallbackNeeded = true;
-          } else {
-            throw adminError;
-          }
+        const adminAuthClient = supabaseAdmin;
+        if (!adminAuthClient) {
+          isSignUpFallbackNeeded = true;
         } else {
-          authUser = adminData?.user;
+          const { data: adminData, error: adminError } = await adminAuthClient.auth.admin.createUser({
+            email: normalizedEmail,
+            password: password,
+            email_confirm: true,
+            user_metadata: { name, role }
+          });
+
+          if (adminError) {
+            // If the error says it's not authorized, this means we only have the anon API key, not service_role.
+            // In that case we will fallback to the normal signUp.
+            if (adminError.status === 401 || adminError.status === 403 || adminError.message.includes("authorized")) {
+              isSignUpFallbackNeeded = true;
+            } else {
+              throw adminError;
+            }
+          } else {
+            authUser = adminData?.user;
+          }
         }
       } catch (adminException) {
         isSignUpFallbackNeeded = true;
@@ -732,7 +894,7 @@ app.post("/api/auth/register", validateRegister, async (req: express.Request, re
   const newUser = {
     id: `usr-${Date.now()}`,
     email: email.toLowerCase(),
-    password,
+    password: bcrypt.hashSync(password, 10),
     name,
     role: role === "organizer" ? ("organizer" as const) : ("client" as const)
   };
@@ -740,9 +902,12 @@ app.post("/api/auth/register", validateRegister, async (req: express.Request, re
   db.users.push(newUser);
   saveDB(db);
 
-  // Return user without password
+  // Return user without password and include a local development token.
   const { password: _, ...userWithoutPassword } = newUser;
-  res.status(201).json(userWithoutPassword);
+  res.status(201).json({
+    ...userWithoutPassword,
+    token: `local-${newUser.id}`
+  });
 });
 
 app.post("/api/auth/login", validateLogin, async (req: express.Request, res: express.Response) => {
@@ -763,74 +928,6 @@ app.post("/api/auth/login", validateLogin, async (req: express.Request, res: exp
       });
 
       if (authError) {
-        // Essayer de migrer à la volée un utilisateur inséré par script SQL vers Supabase Auth
-        try {
-          const { data: dbUser, error: dbUserError } = await supabase
-            .from("users")
-            .select("*")
-            .eq("email", normalizedEmail)
-            .eq("password", password)
-            .maybeSingle();
-
-          if (dbUser && !dbUserError) {
-            console.log(`[Supabase Auth Migration] Profil trouvé pour ${normalizedEmail}. Tentative de migration à la volée vers l'authentification native.`);
-            
-            // Créer le compte en mode Admin authentifié s'il n'existe pas encore sous l'Auth
-            const { data: adminData, error: createAuthError } = await supabase.auth.admin.createUser({
-              email: normalizedEmail,
-              password: password,
-              email_confirm: true,
-              user_metadata: { name: dbUser.name, role: dbUser.role }
-            });
-
-            if (createAuthError) {
-              console.error("[Supabase Auth Migration Error] Impossible de créer le compte dans Auth :", createAuthError.message);
-            } else if (adminData?.user) {
-              const newUuid = adminData.user.id;
-              console.log(`[Supabase Auth Migration] Compte auth créé avec UUID : ${newUuid}. Remplacement dans la table public.`);
-              
-              // Supprimer l'ancienne ligne avec l'ID statique (pour éviter les conflits d'émail)
-              await supabase.from("users").delete().eq("id", dbUser.id);
-              
-              // Insérer la nouvelle ligne reliée à l'UUID sécurisé
-              const { data: newProfile, error: profileInsertError } = await supabase
-                .from("users")
-                .insert({
-                  id: newUuid,
-                  email: normalizedEmail,
-                  password: "[SECURE_SUPABASE_AUTH]",
-                  name: dbUser.name,
-                  role: dbUser.role
-                })
-                .select()
-                .single();
-
-              if (profileInsertError) {
-                console.error("[Supabase Auth Migration Error] Impossible de mettre à jour le profil public :", profileInsertError.message);
-              } else {
-                // Tenter une reconnexion avec les identifiants migrés
-                const { data: authDataRetry, error: authErrorRetry } = await supabase.auth.signInWithPassword({
-                  email: normalizedEmail,
-                  password: password,
-                });
-
-                if (!authErrorRetry && authDataRetry?.user && newProfile) {
-                  console.log(`[Supabase Auth Migration] Migration réussie avec succès et connexion établie pour ${normalizedEmail} !`);
-                  return res.json({
-                    id: newProfile.id,
-                    email: newProfile.email,
-                    name: newProfile.name,
-                    role: newProfile.role,
-                    token: authDataRetry?.session?.access_token
-                  });
-                }
-              }
-            }
-          }
-        } catch (migrationFail) {
-          console.error("[Supabase Auth Migration Crash]", migrationFail);
-        }
-
         return res.status(401).json({ error: "Identifiant ou mot de passe incorrect. " + authError.message });
       }
 
@@ -894,22 +991,26 @@ app.post("/api/auth/login", validateLogin, async (req: express.Request, res: exp
 
   // Fallback database lookup
   const db = getDB();
-  const user = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
+  const user = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
 
-  if (!user) {
+  if (!user || !bcrypt.compareSync(password, user.password)) {
     return res.status(401).json({ error: "Identifiants de connexion invalides." });
   }
 
   const { password: _, ...userWithoutPassword } = user;
-  res.json(userWithoutPassword);
+  res.json({
+    ...userWithoutPassword,
+    token: `local-${user.id}`
+  });
 });
 
 // Fetch User Purchased Tickets Endpoint
-app.get("/api/my-tickets", async (req: express.Request, res: express.Response) => {
-  const { buyerId } = req.query;
+app.get("/api/my-tickets", requireAuth, async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
+  const buyerId = authUser?.id;
 
   if (!buyerId) {
-    return res.status(400).json({ error: "buyerId requis." });
+    return res.status(500).json({ error: "Impossible de récupérer l'identité de l'utilisateur." });
   }
 
   if (isSupabaseEnabled && supabase) {
@@ -1079,7 +1180,8 @@ app.post("/api/checkout", validateCheckout, async (req: express.Request, res: ex
       return res.status(201).json({
         success: true,
         message: "Achat de billet effectué avec succès !",
-        ticket: mappedTicket
+        ticket: mappedTicket,
+        notificationUrl: buildWebhookNotificationUrl(req)
       });
     } catch (err: any) {
       console.error("[Supabase Error] Checkout, falling back to local file DB:", err.message);
@@ -1160,7 +1262,8 @@ app.post("/api/checkout", validateCheckout, async (req: express.Request, res: ex
   res.status(201).json({
     success: true,
     message: "Achat de billet effectué avec succès !",
-    ticket: newTicket
+    ticket: newTicket,
+    notificationUrl: buildWebhookNotificationUrl(req)
   });
 });
 
@@ -1172,20 +1275,48 @@ function normalizeReferenceIdentifier(value: any): string | null {
   return text.split(/[?&]/)[0].trim();
 }
 
-app.all("/api/payment/callback", async (req: express.Request, res: express.Response) => {
-  // Configurer CORS ouvertivement pour empêcher tout blocage du côté Vercel sur la route
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+app.options("/api/payment/callback", (req: express.Request, res: express.Response) => {
+  const origin = corsAllowedOrigin(req);
+  if (origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-PaiementPro-Signature, X-Signature, X-Webhook-Signature");
+  return res.status(200).end();
+});
 
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
+app.post("/api/payment/callback", async (req: express.Request, res: express.Response) => {
+  const origin = corsAllowedOrigin(req);
+  if (origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  res.setHeader("Access-Control-Allow-Methods", "POST");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-PaiementPro-Signature, X-Signature, X-Webhook-Signature");
+
+  const providedWebhookSecret = getWebhookSecretFromRequest(req);
+  if (!PAYMENT_WEBHOOK_SECRET) {
+    console.error("[PaiementPro Callback] PAYMENT_WEBHOOK_SECRET non configuré.");
+    return res.status(500).json({ status: "error", message: "Webhook secret manquant." });
+  }
+
+  if (providedWebhookSecret !== PAYMENT_WEBHOOK_SECRET) {
+    console.warn("[PaiementPro Callback] Tentative rejetée : token webhook absent ou invalide.", {
+      providedWebhookSecret,
+      ip: req.ip,
+      query: req.query
+    });
+    return res.status(401).json({ status: "error", message: "Non autorisé." });
   }
 
   console.log("=== CALLBACK PAIEMENT PRO REÇU ===");
   console.log("Headers:", req.headers);
   console.log("Body reçu:", req.body);
   console.log("Query parameters:", req.query);
+
+  if (PAYMENT_PRO_CALLBACK_SECRET && !verifyPaymentSignature(req)) {
+    console.error("[PaiementPro Callback] Signature invalide ou absente.");
+    return res.status(401).json({ status: "error", message: "Signature invalide." });
+  }
 
   // Extraction des données classiques envoyées par Paiement Pro
   const rawReferenceNumber = req.body.referenceNumber || req.query.referenceNumber || req.body.reference || req.query.reference || req.body.reference_number || req.query.reference_number || req.body.ref_command || req.query.ref_command || req.body.id || req.body.custom || req.query.custom || req.body.transaction_id || req.body.ticket_id || req.query.ticket_id;
@@ -1207,12 +1338,9 @@ app.all("/api/payment/callback", async (req: express.Request, res: express.Respo
   const normalizedStatus = typeof status === "string" ? status.toLowerCase() : status;
 
   // Try to read numeric response code sent by some providers (responsecode, response_code, responseCode)
-  const rawResponseCode = req.body.responsecode ?? req.query.responsecode ?? req.body.response_code ?? req.query.response_code ?? req.body.responseCode ?? req.query.responseCode ?? req.body.response_code;
+  const rawResponseCode = req.body.responsecode ?? req.query.responsecode ?? req.body.response_code ?? req.query.response_code ?? req.body.responseCode ?? req.query.responseCode;
   const numericResponseCode = rawResponseCode !== undefined && rawResponseCode !== null && rawResponseCode !== "" ? Number(String(rawResponseCode).replace(/[^0-9\-]/g, "")) : null;
 
-  // Final success determination:
-  // - If provider sent a numeric response code, require it to be 0 to accept success.
-  // - Otherwise, fall back to checking textual status ('success'|'paid') or explicit boolean flag.
   let isSuccess: boolean;
   if (numericResponseCode !== null && !Number.isNaN(numericResponseCode)) {
     isSuccess = numericResponseCode === 0;
@@ -1232,7 +1360,6 @@ app.all("/api/payment/callback", async (req: express.Request, res: express.Respo
 
       for (const ref of refCandidates) {
         if (!ref) continue;
-        // Rechercher le ticket correspondant à la référence
         console.log(`[PaiementPro Callback] Tentative de recherche Supabase pour référence candidate: ${ref}`);
         const { data: ticket, error: fetchErr } = await supabase
           .from("tickets")
@@ -1296,8 +1423,56 @@ app.all("/api/payment/callback", async (req: express.Request, res: express.Respo
     }
   }
 
-  // Renvoie un succès HTTP 200 à Paiement Pro pour confirmer la bonne réception
   res.status(200).json({ status: "success", message: "Notification traitée" });
+});
+
+app.post("/api/dev/simulate-payment", async (req: express.Request, res: express.Response) => {
+  if (process.env.NODE_ENV === "production") {
+    return res.status(404).json({ error: "Route disponible uniquement en développement." });
+  }
+
+  const { referenceNumber } = req.body;
+  if (!referenceNumber) {
+    return res.status(400).json({ error: "referenceNumber requis pour la simulation." });
+  }
+
+  const rawReferenceNumber = normalizeReferenceIdentifier(referenceNumber);
+  if (!rawReferenceNumber) {
+    return res.status(400).json({ error: "Référence invalide." });
+  }
+
+  let updated = false;
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { data: ticket, error: fetchErr } = await supabase.from("tickets")
+        .select("*")
+        .or(`id.eq.${rawReferenceNumber},transaction_ref.eq.${rawReferenceNumber}`)
+        .maybeSingle();
+
+      if (ticket && !fetchErr) {
+        updated = true;
+        await supabase.from("tickets").update({ transaction_ref: String(ticket.transaction_ref || "").replace("PENDING-", "PAID-") }).eq("id", ticket.id);
+      }
+    } catch (err: any) {
+      console.error("[Dev Simulation] Erreur Supabase lors de la simulation de paiement :", err.message || err);
+    }
+  }
+
+  if (!updated) {
+    const db = getDB();
+    const ticket = db.tickets.find((t: any) => t.id === rawReferenceNumber || t.transactionRef === rawReferenceNumber);
+    if (ticket) {
+      ticket.transactionRef = String(ticket.transactionRef || "").replace("PENDING-", "PAID-");
+      saveDB(db);
+      updated = true;
+    }
+  }
+
+  if (!updated) {
+    return res.status(404).json({ error: "Billet introuvable pour simulation." });
+  }
+
+  res.json({ success: true, message: "Simulation de paiement effectuée." });
 });
 
 // Ticket Verification Endpoint (QR Scanning Verification)
@@ -1411,20 +1586,22 @@ app.post("/api/verify-ticket", validateVerifyTicket, async (req: express.Request
 });
 
 // Statistics Endpoint for Organizers
-app.get("/api/organizer/export", async (req: express.Request, res: express.Response) => {
-  const { organizerId } = req.query;
+app.get("/api/organizer/export", requireRole("organizer", "admin"), async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
+  const requestedOrganizerId = String(req.query.organizerId || authUser.id || "");
 
-  if (!organizerId) {
-    return res.status(400).json({ error: "organizerId requis." });
+  if (authUser.role !== "admin" && requestedOrganizerId !== authUser.id) {
+    return res.status(403).json({ error: "Accès refusé : vous ne pouvez exporter que vos propres événements." });
   }
 
   try {
     let matchedTickets: any[] = [];
-    if (isSupabaseEnabled && supabase) {
-      const { data: organizerEvents, error: eventsError } = await supabase
+    const backendClient = supabaseAdmin || supabase;
+    if (backendClient) {
+      const { data: organizerEvents, error: eventsError } = await backendClient
         .from("events")
         .select("id")
-        .eq("organizer_id", organizerId);
+        .eq("organizer_id", requestedOrganizerId);
       if (eventsError) throw eventsError;
       
       const eventIds = (organizerEvents || []).map((e: any) => e.id);
@@ -1439,7 +1616,7 @@ app.get("/api/organizer/export", async (req: express.Request, res: express.Respo
       }
     } else {
       const db = getDB();
-      const organizerEvents = db.events.filter((e: any) => e.organizerId === organizerId);
+      const organizerEvents = db.events.filter((e: any) => e.organizerId === requestedOrganizerId);
       const eventIds = organizerEvents.map((e: any) => e.id);
       matchedTickets = db.tickets.filter((t: any) => eventIds.includes(t.eventId));
     }
@@ -1486,10 +1663,11 @@ app.get("/api/organizer/stats", async (req: express.Request, res: express.Respon
     return res.status(400).json({ error: "organizerId requis." });
   }
 
-  if (isSupabaseEnabled && supabase) {
+  if (supabase) {
     try {
+      const backendClient = supabaseAdmin || supabase;
       // 1. Get organizer events
-      const { data: organizerEvents, error: eventsError } = await supabase
+      const { data: organizerEvents, error: eventsError } = await backendClient
         .from("events")
         .select("*")
         .eq("organizer_id", organizerId);
@@ -1703,11 +1881,12 @@ app.put("/api/events/:id", validateEvent, async (req: express.Request, res: expr
 
 // Admin-specific Management APIs
 app.get("/api/admin/stats", async (req: express.Request, res: express.Response) => {
-  if (isSupabaseEnabled && supabase) {
+  const adminClient = supabaseAdmin;
+  if (adminClient) {
     try {
-      const { data: users, error: uErr } = await supabase.from("users").select("*");
-      const { data: events, error: eErr } = await supabase.from("events").select("*");
-      const { data: tickets, error: tErr } = await supabase.from("tickets").select("*");
+      const { data: users, error: uErr } = await adminClient.from("users").select("*");
+      const { data: events, error: eErr } = await adminClient.from("events").select("*");
+      const { data: tickets, error: tErr } = await adminClient.from("tickets").select("*");
 
       if (uErr) throw uErr;
       if (eErr) throw eErr;
@@ -1804,15 +1983,16 @@ app.get("/api/admin/stats", async (req: express.Request, res: express.Response) 
   });
 });
 
-app.post("/api/admin/validate-payment", async (req: express.Request, res: express.Response) => {
+app.post("/api/admin/validate-payment", requireAuth, requireRole("admin"), async (req: express.Request, res: express.Response) => {
   const { referenceNumber } = req.body;
   if (!referenceNumber) {
     return res.status(400).json({ error: "Référence ou ID du billet manquant." });
   }
 
-  if (isSupabaseEnabled && supabase) {
+  const adminClient = supabaseAdmin;
+  if (adminClient) {
     try {
-      const { data: ticket, error: fetchErr } = await supabase.from("tickets")
+      const { data: ticket, error: fetchErr } = await adminClient.from("tickets")
         .select()
         .or(`id.eq.${referenceNumber},transaction_ref.eq.${referenceNumber}`)
         .single();
@@ -1848,10 +2028,11 @@ app.post("/api/admin/validate-payment", async (req: express.Request, res: expres
 
 app.delete("/api/admin/events/:id", async (req: express.Request, res: express.Response) => {
   const { id } = req.params;
+  const adminClient = supabaseAdmin;
 
-  if (isSupabaseEnabled && supabase) {
+  if (adminClient) {
     try {
-      const { error } = await supabase
+      const { error } = await adminClient
         .from("events")
         .delete()
         .eq("id", id);
@@ -1879,9 +2060,10 @@ app.delete("/api/admin/users/:id", async (req: express.Request, res: express.Res
     return res.status(400).json({ error: "Le compte administrateur principal ne peut pas être révoqué ou supprimé." });
   }
 
-  if (isSupabaseEnabled && supabase) {
+  const adminClient = supabaseAdmin;
+  if (adminClient) {
     try {
-      const { error } = await supabase
+      const { error } = await adminClient
         .from("users")
         .delete()
         .eq("id", id);
@@ -1909,9 +2091,10 @@ app.patch("/api/admin/events/:id/status", async (req: express.Request, res: expr
   const { status } = req.body;
   if (!status || !["approved", "rejected"].includes(status)) return res.status(400).json({ error: "Statut invalide" });
 
-  if (isSupabaseEnabled && supabase) {
+  const adminClient = supabaseAdmin;
+  if (adminClient) {
     try {
-      const { error } = await supabase.from("events").update({ status }).eq("id", id);
+      const { error } = await adminClient.from("events").update({ status }).eq("id", id);
       if (error) {
          if (error.message.includes('status')) {
             throw new Error('Supabase column events.status is missing. Update supabase_setup.sql');
@@ -1944,9 +2127,10 @@ app.post("/api/organizer/payouts", async (req: express.Request, res: express.Res
     requestDate: new Date().toISOString(), method, details
   };
 
-  if (isSupabaseEnabled && supabase) {
+  const backendClient = supabaseAdmin || supabase;
+  if (backendClient) {
     try {
-      const { error } = await supabase.from("payouts").insert({
+      const { error } = await backendClient.from("payouts").insert({
         id: payout.id, organizer_id: payout.organizerId, amount: payout.amount,
         status: payout.status, request_date: payout.requestDate, method: payout.method, details: payout.details
       });
@@ -1964,9 +2148,10 @@ app.post("/api/organizer/payouts", async (req: express.Request, res: express.Res
 
 app.get("/api/organizer/payouts", async (req: express.Request, res: express.Response) => {
   const { organizerId } = req.query;
-  if (isSupabaseEnabled && supabase) {
+  const backendClient = supabaseAdmin || supabase;
+  if (backendClient) {
     try {
-      const { data, error } = await supabase.from("payouts").select("*").eq("organizer_id", organizerId);
+      const { data, error } = await backendClient.from("payouts").select("*").eq("organizer_id", organizerId);
       if (!error) return res.json(data.map((p: any) => ({...p, organizerId: p.organizer_id, requestDate: p.request_date})));
     } catch(e) {}
   }
@@ -1975,9 +2160,10 @@ app.get("/api/organizer/payouts", async (req: express.Request, res: express.Resp
 });
 
 app.get("/api/admin/payouts", async (req: express.Request, res: express.Response) => {
-  if (isSupabaseEnabled && supabase) {
+  const adminClient = supabaseAdmin;
+  if (adminClient) {
     try {
-      const { data, error } = await supabase.from("payouts").select("*").order("request_date", { ascending: false });
+      const { data, error } = await adminClient.from("payouts").select("*").order("request_date", { ascending: false });
       if (!error) return res.json(data.map((p: any) => ({...p, organizerId: p.organizer_id, requestDate: p.request_date})));
     } catch(e) {}
   }
@@ -2006,9 +2192,10 @@ app.patch("/api/admin/payouts/:id/status", async (req: express.Request, res: exp
 
 // --- Transactions History ---
 app.get("/api/admin/transactions", async (req: express.Request, res: express.Response) => {
-  if (isSupabaseEnabled && supabase) {
+  const adminClient = supabaseAdmin;
+  if (adminClient) {
     try {
-      const { data, error } = await supabase.from("transactions").select("*").order("date", { ascending: false });
+      const { data, error } = await adminClient.from("transactions").select("*").order("date", { ascending: false });
       if (!error) return res.json(data.map((t: any) => ({...t, eventId: t.event_id, buyerEmail: t.buyer_email, errorDetails: t.error_details})));
     } catch(e) {}
   }

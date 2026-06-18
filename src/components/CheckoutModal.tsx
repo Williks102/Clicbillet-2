@@ -76,6 +76,10 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
     }
 
     setStep("processing");
+    const devSimulateHeaders = {
+      "Content-Type": "application/json",
+      ...(user?.token ? { Authorization: `Bearer ${user.token}` } : {})
+    };
 
     // Initiate backend express purchase sequence
     const paymentDetails: PaymentDetails = {
@@ -147,9 +151,8 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
           pPro.customerPhoneNumber = phoneNumber || "0700000000";
           pPro.description = `Billet ${tier.toUpperCase()} - ${event.title}`;
           
-          const appUrl = window.location.origin;
-          pPro.notificationURL = `${appUrl}/api/payment/callback`;
-          pPro.returnURL = `${appUrl}/?payment_success=true&ticket_id=${data.ticket.id}`;
+          pPro.notificationURL = data.notificationUrl || `${window.location.origin}/api/payment/callback`;
+          pPro.returnURL = `${window.location.origin}/?payment_success=true&ticket_id=${data.ticket.id}`;
           pPro.returnContext = JSON.stringify({ ticketId: data.ticket.id, userId: user?.id });
           
           await pPro.getUrlPayment();
@@ -164,26 +167,26 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
           } else {
             console.warn("[PaiementPro] Succès de l'initialisation non retourné par l'API, mode simulation actif.");
             // On simule l'appel du webhook en local pour débloquer le ticket
-            fetch("/api/payment/callback", {
+            fetch("/api/dev/simulate-payment", {
                 method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ referenceNumber: data.ticket.id, status: "SUCCESS" })
+                headers: devSimulateHeaders,
+                body: JSON.stringify({ referenceNumber: data.ticket.id })
             }).then(() => window.dispatchEvent(new CustomEvent("refresh_tickets"))).catch(e => console.error("Erreur hook de test:", e));
           }
         } else {
           console.warn("[PaiementPro SDK] SDK non chargé globalement dans l'index.html, utilisation de la simulation locale.");
-          fetch("/api/payment/callback", {
+          fetch("/api/dev/simulate-payment", {
               method: "POST",
-              headers: {"Content-Type": "application/json"},
-              body: JSON.stringify({ referenceNumber: data.ticket.id, status: "SUCCESS" })
+              headers: devSimulateHeaders,
+              body: JSON.stringify({ referenceNumber: data.ticket.id })
           }).then(() => window.dispatchEvent(new CustomEvent("refresh_tickets"))).catch(e => console.error("Erreur hook de test:", e));
         }
       } catch (sdkErr) {
         console.error("[PaiementPro SDK Integration Error]", sdkErr);
-        fetch("/api/payment/callback", {
+        fetch("/api/dev/simulate-payment", {
             method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({ referenceNumber: data.ticket.id, status: "SUCCESS" })
+            headers: devSimulateHeaders,
+            body: JSON.stringify({ referenceNumber: data.ticket.id })
         }).then(() => window.dispatchEvent(new CustomEvent("refresh_tickets"))).catch(e => console.error("Erreur hook de test:", e));
       }
 

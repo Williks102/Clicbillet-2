@@ -44,6 +44,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [subTab, setSubTab] = useState<"dashboard" | "create" | "simulator" | "payouts">("dashboard");
   const [stats, setStats] = useState<SalesStatus | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
+  const authHeaders = user.token ? { Authorization: `Bearer ${user.token}` } : {};
 
   // Form Fields for Creation
   const [title, setTitle] = useState("");
@@ -111,10 +112,10 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   async function fetchSimulatedTickets() {
     setLoadingSimTickets(true);
     try {
-      const response = await fetch(`/api/organizer/stats?organizerId=${user.id}`);
+      const response = await fetch(`/api/organizer/stats?organizerId=${user.id}`, { headers: authHeaders });
       if (response.ok) {
         // Since get stats endpoint computes match tickets, we can fetch tickets of these events
-        const responseStats = await fetch("/api/admin/stats");
+        const responseStats = await fetch("/api/admin/stats", { headers: authHeaders });
         if (responseStats.ok) {
           const allData = await responseStats.json();
           const myEvts = events.filter(e => e.organizerId === user.id);
@@ -131,15 +132,34 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     }
   }
 
-  useEffect(() => {
-    if (subTab === "simulator") {
-      fetchSimulatedTickets();
+    async function downloadOrganizerExport() {
+      try {
+        const response = await fetch(`/api/organizer/export?organizerId=${user.id}`, {
+          method: "GET",
+          headers: authHeaders
+        });
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || "Impossible de générer l'export.");
+        }
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `clicbillet_organizer_export_${Date.now()}.csv`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.URL.revokeObjectURL(url);
+      } catch (err: any) {
+        console.error(err);
+        alert(err.message || "Impossible de télécharger l'export.");
+      }
     }
-  }, [subTab, events]);
 
-  function startEditing(evt: Event) {
-    setEditingEvent(evt);
-    setEditTitle(evt.title);
+    function openEdit(evt: Event) {
+      setEditingEvent(evt);
+      setEditTitle(evt.title);
     setEditDescription(evt.description);
     setEditDate(evt.date);
     setEditTime(evt.time);
@@ -507,9 +527,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         <div className="space-y-8" id="orga-sales-dash-view">
           <div className="flex justify-end">
             <button
-               onClick={() => {
-                 window.open(`/api/organizer/export?organizerId=${user.id}`, '_blank');
-               }}
+               onClick={downloadOrganizerExport}
                className="flex items-center space-x-1.5 rounded-xl px-4 py-2 text-xs font-black transition-all bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 active:scale-95 shadow-sm"
             >
               <Upload className="h-4 w-4" />
@@ -716,7 +734,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                         </div>
                         <button
                           type="button"
-                          onClick={() => startEditing(evt)}
+                          onClick={() => openEdit(evt)}
                           className="rounded-xl border border-gray-200 hover:border-orange-500 hover:text-orange-600 bg-white p-2 text-xs text-gray-500 font-bold transition flex items-center space-x-1"
                           title="Modifier les détails de l'événement"
                         >
