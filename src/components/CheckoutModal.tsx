@@ -108,7 +108,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
 
       const response = await fetch("/api/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: devSimulateHeaders,
         body: JSON.stringify(payload),
       });
 

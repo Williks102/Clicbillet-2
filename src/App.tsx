@@ -214,7 +214,7 @@ export default function App() {
             )}
 
             {activeTab === "scanner" && user && user.role === "organizer" && (
-              <QrScannerTab organizerId={user.id} />
+              <QrScannerTab user={user} onTokenRefresh={handleTokenRefresh} />
             )}
           </>
         )}
