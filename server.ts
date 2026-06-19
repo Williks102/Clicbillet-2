@@ -62,7 +62,8 @@ if (!isSupabaseEnabled) {
 }
 
 if (!isSupabaseEnabled && process.env.NODE_ENV === "production") {
-  console.error("[Security] Aucune connexion Supabase valide détectée en production. Le serveur continuera, mais cela est dangereux.");
+  console.error("[Security] Aucune connexion Supabase valide détectée en production. Arrêt du serveur : le repli db.json ne doit jamais servir de base en production.");
+  process.exit(1);
 }
 
 const app = express();
@@ -519,12 +520,13 @@ async function getAuthenticatedUser(req: express.Request): Promise<any | null> {
   const token = extractBearerToken(req);
   if (!token) return null;
 
-  // Les tokens "local-<id>" sont émis par le repli db.json (signup/login), qui peut être
-  // utilisé même quand Supabase est configuré (si l'appel Supabase échoue ponctuellement).
-  // Ils ne sont jamais des JWT Supabase valides, donc on les distingue en premier plutôt
-  // que de laisser la branche Supabase ci-dessous les rejeter systématiquement.
+  // Les tokens "local-<id>" sont émis par le repli db.json (signup/login) quand Supabase
+  // n'est pas configuré. Ils ne sont jamais des JWT signés : un id deviné/connu (ex.
+  // "usr-admin") suffirait à les forger. On ne les honore donc QUE si Supabase est
+  // indisponible — dès que Supabase est configuré (cas normal de prod), ils sont rejetés.
   const localPrefix = "local-";
   if (token.startsWith(localPrefix)) {
+    if (isSupabaseEnabled) return null;
     const localUserId = token.substring(localPrefix.length);
     if (!localUserId) return null;
     const db = getDB();
@@ -897,8 +899,12 @@ app.get("/api/events", async (req: express.Request, res: express.Response) => {
 });
 
 // Create Event Endpoint for Organizers
-app.post("/api/events", validateEvent, async (req: express.Request, res: express.Response) => {
-  const { title, description, date, time, price, ticketTypes, venue, category, banner, totalTickets, organizerId, organizerName } = req.body;
+app.post("/api/events", requireAuth, requireRole("organizer", "admin"), validateEvent, async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
+  const { title, description, date, time, price, ticketTypes, venue, category, banner, totalTickets, organizerName } = req.body;
+  // Un organisateur ne peut créer un événement que pour lui-même ; un admin peut le créer
+  // au nom d'un organisateur précis (organizerId du body), sinon pour lui-même par défaut.
+  const organizerId = authUser.role === "admin" ? (req.body.organizerId || authUser.id) : authUser.id;
 
   if (!title || !date || !time || isNaN(price) || !venue || !category || !totalTickets || !organizerId) {
     return res.status(400).json({ error: "Veuillez remplir tous les champs obligatoires correctement." });
@@ -1347,8 +1353,13 @@ app.get("/api/my-tickets", requireAuth, async (req: express.Request, res: expres
 });
 
 // Checkout Purchase Ticket Endpoint
-app.post("/api/checkout", validateCheckout, async (req: express.Request, res: express.Response) => {
-  const { eventId, buyerId, buyerName, buyerEmail, tier, quantity, paymentDetails } = req.body;
+app.post("/api/checkout", requireAuth, validateCheckout, async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
+  const { eventId, buyerName, tier, quantity, paymentDetails } = req.body;
+  // L'identité de l'acheteur vient toujours du token authentifié, jamais du body :
+  // sinon n'importe qui pourrait créer un billet "payé" au nom d'un autre utilisateur.
+  const buyerId = authUser.id;
+  const buyerEmail = authUser.email;
 
   if (!eventId || !buyerId || !buyerName || !buyerEmail || !tier || !quantity || !paymentDetails) {
     return res.status(400).json({ error: "Informations de commande incomplètes." });
@@ -1821,7 +1832,7 @@ app.post("/api/dev/simulate-payment", async (req: express.Request, res: express.
 });
 
 // Ticket Verification Endpoint (QR Scanning Verification)
-app.post("/api/verify-ticket", validateVerifyTicket, async (req: express.Request, res: express.Response) => {
+app.post("/api/verify-ticket", requireAuth, requireRole("organizer", "admin"), validateVerifyTicket, async (req: express.Request, res: express.Response) => {
   const { qrCodeData, organizerId } = req.body;
 
   if (!qrCodeData) {
@@ -1876,6 +1887,17 @@ app.post("/api/verify-ticket", validateVerifyTicket, async (req: express.Request
         });
       }
 
+      // Un billet créé via /api/checkout reste en "PENDING-" tant que le paiement n'a
+      // pas été confirmé (callback PaiementPro ou validation manuelle admin). On refuse
+      // le scan tant que ce n'est pas le cas, quelle que soit la fiabilité du webhook.
+      if (String(ticket.transaction_ref || "").startsWith("PENDING-")) {
+        return res.status(409).json({
+          success: false,
+          error: "Paiement non confirmé pour ce billet : entrée refusée.",
+          ticket: mappedTicket
+        });
+      }
+
       // Mark as verified
       const verifiedAt = new Date().toISOString();
       const { error: updateError } = await supabase
@@ -1914,6 +1936,17 @@ app.post("/api/verify-ticket", validateVerifyTicket, async (req: express.Request
       success: false,
       alreadyScanned: true,
       scannedAt: ticket.scannedAt,
+      ticket
+    });
+  }
+
+  // Un billet créé via /api/checkout reste en "PENDING-" tant que le paiement n'a pas
+  // été confirmé (callback PaiementPro ou validation manuelle admin). On refuse le scan
+  // tant que ce n'est pas le cas, quelle que soit la fiabilité du webhook.
+  if (String(ticket.transactionRef || "").startsWith("PENDING-")) {
+    return res.status(409).json({
+      success: false,
+      error: "Paiement non confirmé pour ce billet : entrée refusée.",
       ticket
     });
   }
@@ -2002,10 +2035,17 @@ app.get("/api/organizer/export", requireRole("organizer", "admin"), async (req: 
 });
 
 app.get("/api/organizer/stats", async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
   const { organizerId } = req.query;
 
   if (!organizerId) {
     return res.status(400).json({ error: "organizerId requis." });
+  }
+
+  // Anti-IDOR : un organisateur ne peut consulter que ses propres statistiques
+  // (chiffre d'affaires, ventes, emails clients), pas celles d'un confrère.
+  if (authUser.role !== "admin" && String(organizerId) !== authUser.id) {
+    return res.status(403).json({ error: "Accès refusé : ressource d'un autre organisateur." });
   }
 
   if (supabase) {
@@ -2117,9 +2157,10 @@ app.get("/api/organizer/stats", async (req: express.Request, res: express.Respon
 });
 
 // Update/Modify Event Endpoint
-app.put("/api/events/:id", validateEvent, async (req: express.Request, res: express.Response) => {
+app.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), validateEvent, async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
   const { id } = req.params;
-  const { title, description, date, time, price, ticketTypes, venue, category, banner, totalTickets, organizerId } = req.body;
+  const { title, description, date, time, price, ticketTypes, venue, category, banner, totalTickets } = req.body;
 
   if (!title || !date || !time || isNaN(price) || !venue || !category || !totalTickets) {
     return res.status(400).json({ error: "Veuillez remplir tous les champs obligatoires correctement." });
@@ -2137,7 +2178,9 @@ app.put("/api/events/:id", validateEvent, async (req: express.Request, res: expr
         return res.status(404).json({ error: "Événement introuvable." });
       }
 
-      if (organizerId && originalEvent.organizer_id !== organizerId && organizerId !== "usr-admin") {
+      // L'ownership se vérifie sur l'identité authentifiée, jamais sur un organizerId
+      // fourni par le client (qui pourrait sinon usurper n'importe quel organisateur).
+      if (authUser.role !== "admin" && originalEvent.organizer_id !== authUser.id) {
         return res.status(403).json({ error: "Vous n'êtes pas autorisé à modifier cet événement." });
       }
 
@@ -2208,7 +2251,7 @@ app.put("/api/events/:id", validateEvent, async (req: express.Request, res: expr
   }
 
   // Security check: must belong to correct organizer unless it is admin
-  if (organizerId && event.organizerId !== organizerId && organizerId !== "usr-admin") {
+  if (authUser.role !== "admin" && event.organizerId !== authUser.id) {
     return res.status(403).json({ error: "Vous n'êtes pas autorisé à modifier cet événement." });
   }
 
@@ -2504,8 +2547,16 @@ app.patch("/api/admin/events/:id/status", async (req: express.Request, res: expr
 
 // --- Payouts (Demandes de retrait) ---
 app.post("/api/organizer/payouts", async (req: express.Request, res: express.Response) => {
-  const { organizerId, amount, method, details } = req.body;
-  if (!organizerId || !amount || !method) return res.status(400).json({ error: "Champs manquants" });
+  const authUser = (req as any).user;
+  const { amount, method, details } = req.body;
+  if (!amount || !method) return res.status(400).json({ error: "Champs manquants" });
+
+  // Anti-IDOR : un organisateur ne peut poser une demande de retrait que pour lui-même.
+  const requestedOrganizerId = String(req.body.organizerId || authUser.id || "");
+  if (authUser.role !== "admin" && requestedOrganizerId !== authUser.id) {
+    return res.status(403).json({ error: "Accès refusé : ressource d'un autre organisateur." });
+  }
+  const organizerId = requestedOrganizerId;
 
   const payout = {
     id: `pay-${Date.now()}`, organizerId, amount: Number(amount), status: "pending" as const,
@@ -2544,7 +2595,15 @@ app.post("/api/organizer/payouts", async (req: express.Request, res: express.Res
 });
 
 app.get("/api/organizer/payouts", async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
   const { organizerId } = req.query;
+
+  // Anti-IDOR : un organisateur ne peut consulter que ses propres demandes de retrait
+  // (qui contiennent des coordonnées bancaires/mobile money sensibles).
+  if (authUser.role !== "admin" && String(organizerId) !== authUser.id) {
+    return res.status(403).json({ error: "Accès refusé : ressource d'un autre organisateur." });
+  }
+
   const backendClient = supabaseAdmin || supabase;
   if (backendClient) {
     try {

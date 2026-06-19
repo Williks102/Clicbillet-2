@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Camera, CheckCircle, XCircle, AlertTriangle, RefreshCw, Smartphone, Key, Ticket as TicketIcon } from "lucide-react";
 import { Html5QrcodeScanner } from "html5-qrcode";
+import { User } from "../types";
+import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 
 interface QrScannerTabProps {
-  organizerId: string;
+  user: User;
+  onTokenRefresh: TokenRefreshHandler;
 }
 
-export default function QrScannerTab({ organizerId }: QrScannerTabProps) {
+export default function QrScannerTab({ user, onTokenRefresh }: QrScannerTabProps) {
+  const organizerId = user.id;
   const [scanResult, setScanResult] = useState<any | null>(null);
   const [errorResult, setErrorResult] = useState<string | null>(null);
   const [manualCode, setManualCode] = useState("");
@@ -72,14 +76,14 @@ export default function QrScannerTab({ organizerId }: QrScannerTabProps) {
     setErrorResult(null);
 
     try {
-      const response = await fetch("/api/verify-ticket", {
+      const response = await authFetch("/api/verify-ticket", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           qrCodeData: token,
           organizerId
         })
-      });
+      }, user, onTokenRefresh);
 
       const data = await response.json();
       if (!response.ok) {

@@ -191,11 +191,11 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     };
 
     try {
-      const response = await fetch(`/api/events/${editingEvent.id}`, {
+      const response = await authFetch(`/api/events/${editingEvent.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
-      });
+      }, user, onTokenRefresh);
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || "Une erreur est survenue lors de la mise à jour.");
@@ -220,7 +220,6 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
 
     const payload = {
       eventId: simSelectedEventId,
-      buyerId: `sim-usr-${Date.now()}`,
       buyerName: simBuyerName,
       buyerEmail: simBuyerEmail,
       tier: simTier,
@@ -232,11 +231,11 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     };
 
     try {
-      const response = await fetch("/api/checkout", {
+      const response = await authFetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
-      });
+      }, user, onTokenRefresh);
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || "Échec de simuler le checkout.");
@@ -262,11 +261,11 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
 
   async function handleSimulateScan(qrCodeData: string) {
     try {
-      const response = await fetch("/api/verify-ticket", {
+      const response = await authFetch("/api/verify-ticket", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ qrCodeData, organizerId: user.id })
-      });
+      }, user, onTokenRefresh);
       const data = await response.json();
       if (!response.ok || data.error) {
         alert(data.error || "Erreur de validation de scan.");
@@ -406,11 +405,11 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     };
 
     try {
-      const response = await fetch("/api/events", {
+      const response = await authFetch("/api/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      });
+      }, user, onTokenRefresh);
 
       const data = await response.json();
       if (!response.ok) {
