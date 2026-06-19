@@ -630,12 +630,20 @@ function corsAllowedOrigin(req: express.Request): string | undefined {
   return undefined;
 }
 
+// PaiementPro concatène parfois ses propres paramètres (ex. "?merchantId=...") directement
+// à la suite de notificationURL avec un "?" au lieu d'un "&", ce qui pollue la valeur du
+// dernier paramètre de la query string existante. On applique la même normalisation que
+// normalizeReferenceIdentifier() : tout ce qui suit un "?"/"&" supplémentaire est coupé.
+function normalizeWebhookSecretValue(value: string): string {
+  return value.trim().split(/[?&]/)[0].trim();
+}
+
 function getWebhookSecretFromRequest(req: express.Request): string | null {
   const querySecret = req.query.wh;
-  if (typeof querySecret === "string") return querySecret;
-  if (Array.isArray(querySecret)) return querySecret[0];
+  if (typeof querySecret === "string") return normalizeWebhookSecretValue(querySecret);
+  if (Array.isArray(querySecret)) return normalizeWebhookSecretValue(String(querySecret[0]));
   const bodySecret = req.body?.wh;
-  if (typeof bodySecret === "string") return bodySecret;
+  if (typeof bodySecret === "string") return normalizeWebhookSecretValue(bodySecret);
   if (typeof bodySecret === "number") return String(bodySecret);
   return null;
 }
