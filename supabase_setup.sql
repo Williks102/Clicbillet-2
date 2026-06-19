@@ -90,6 +90,57 @@ CREATE TABLE IF NOT EXISTS public.tickets (
 -- après la création initiale de "public.tickets".
 ALTER TABLE public.tickets ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1;
 
+-- 5ter. Salle d'attente virtuelle (activable par événement, pour les pics de trafic sur
+-- une vente très demandée). Désactivée par défaut : aucun changement de comportement pour
+-- les événements existants.
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS waiting_room_enabled BOOLEAN DEFAULT false;
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS waiting_room_capacity INTEGER DEFAULT 50;
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS waiting_room_active_minutes INTEGER DEFAULT 10;
+
+CREATE TABLE IF NOT EXISTS public.waiting_room_entries (
+    id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'waiting', -- 'waiting' | 'active' | 'expired'
+    joined_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    active_until TIMESTAMP WITH TIME ZONE,
+    UNIQUE (event_id, user_id)
+);
+
+ALTER TABLE public.waiting_room_entries ENABLE ROW LEVEL SECURITY;
+-- Pas de policy anon/authenticated : accès exclusif via la clé service_role (server.ts),
+-- comme les autres tables sensibles (cf. section 8 ci-dessous).
+
+-- Fait progresser la file d'attente d'un événement de façon atomique : expire les sessions
+-- "active" dont le créneau est dépassé, puis promeut les entrées "waiting" les plus
+-- anciennes pour remplir les places libérées. Appelée à chaque join/poll de statut côté
+-- server.ts (pas de cron nécessaire) ; FOR UPDATE SKIP LOCKED évite les doubles promotions
+-- si plusieurs requêtes arrivent en même temps.
+CREATE OR REPLACE FUNCTION public.advance_waiting_room(p_event_id TEXT, p_capacity INT, p_active_minutes INT)
+RETURNS void AS $$
+BEGIN
+  UPDATE public.waiting_room_entries
+  SET status = 'expired'
+  WHERE event_id = p_event_id AND status = 'active' AND active_until < now();
+
+  WITH free_slots AS (
+    SELECT GREATEST(p_capacity - COUNT(*), 0)::int AS n
+    FROM public.waiting_room_entries
+    WHERE event_id = p_event_id AND status = 'active'
+  ),
+  to_promote AS (
+    SELECT id FROM public.waiting_room_entries
+    WHERE event_id = p_event_id AND status = 'waiting'
+    ORDER BY joined_at ASC
+    LIMIT (SELECT n FROM free_slots)
+    FOR UPDATE SKIP LOCKED
+  )
+  UPDATE public.waiting_room_entries
+  SET status = 'active', active_until = now() + (p_active_minutes || ' minutes')::interval
+  WHERE id IN (SELECT id FROM to_promote);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- 6. Insertion d'utilisateurs par défaut pour tester les connexions
 -- NOTE: Pour des raisons de sécurité, les comptes de démonstration ne sont pas insérés avec des mots de passe en clair dans ce script.
 -- Créez plutôt les utilisateurs via Supabase Auth ou lancez un processus d'inscription sécurisé.

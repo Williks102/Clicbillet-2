@@ -7,9 +7,24 @@ import bcrypt from "bcryptjs";
 import { fileURLToPath } from "url";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
+import { waitUntil } from "@vercel/functions";
 
 // Load environment variables from .env file
 dotenv.config();
+
+// Exécute une tâche non-critique (email, notification...) sans bloquer la réponse HTTP.
+// Sur Vercel, une fonction serverless peut être gelée dès la réponse envoyée, ce qui coupe
+// les promesses "fire-and-forget" non attendues avant qu'elles n'aboutissent — waitUntil()
+// garde l'instance active jusqu'à la fin de la tâche. Hors Vercel (dev local, npm start), le
+// process Node ne se gèle pas entre requêtes : la promesse continue de tourner normalement.
+function runInBackground(promise: Promise<unknown>): void {
+  const safePromise = promise.catch((err) => {
+    console.error("[Background Job] Échec :", err);
+  });
+  if (process.env.VERCEL) {
+    waitUntil(safePromise);
+  }
+}
 
 // Emulate __dirname/__filename for ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -897,7 +912,9 @@ app.get("/api/events", async (req: express.Request, res: express.Response) => {
         totalTickets: e.total_tickets,
         organizerId: e.organizer_id,
         organizerName: e.organizer_name,
-        status: e.status || "approved"
+        status: e.status || "approved",
+        waitingRoomEnabled: e.waiting_room_enabled,
+        waitingRoomCapacity: e.waiting_room_capacity
       }));
       return res.json(mappedEvents);
     } catch (err: any) {
@@ -916,7 +933,7 @@ app.get("/api/events", async (req: express.Request, res: express.Response) => {
 // Create Event Endpoint for Organizers
 app.post("/api/events", requireAuth, requireRole("organizer", "admin"), validateEvent, async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
-  const { title, description, date, time, price, ticketTypes, venue, category, banner, totalTickets, organizerName } = req.body;
+  const { title, description, date, time, price, ticketTypes, venue, category, banner, totalTickets, organizerName, waitingRoomEnabled, waitingRoomCapacity } = req.body;
   // Un organisateur ne peut créer un événement que pour lui-même ; un admin peut le créer
   // au nom d'un organisateur précis (organizerId du body), sinon pour lui-même par défaut.
   const organizerId = authUser.role === "admin" ? (req.body.organizerId || authUser.id) : authUser.id;
@@ -948,7 +965,9 @@ app.post("/api/events", requireAuth, requireRole("organizer", "admin"), validate
           total_tickets: Number(totalTickets),
           organizer_id: organizerId,
           organizer_name: organizerName || "Organisateur ClicBillet",
-          status: 'pending'
+          status: 'pending',
+          waiting_room_enabled: Boolean(waitingRoomEnabled),
+          waiting_room_capacity: Number(waitingRoomCapacity) || 50
         })
         .select()
         .single();
@@ -997,7 +1016,9 @@ app.post("/api/events", requireAuth, requireRole("organizer", "admin"), validate
         ticketsSold: data.tickets_sold,
         totalTickets: data.total_tickets,
         organizerId: data.organizer_id,
-        organizerName: data.organizer_name
+        organizerName: data.organizer_name,
+        waitingRoomEnabled: data.waiting_room_enabled,
+        waitingRoomCapacity: data.waiting_room_capacity
       };
 
       return res.status(201).json(mappedEvent);
@@ -1175,9 +1196,9 @@ app.post("/api/auth/register", validateRegister, async (req: express.Request, re
 
   // Webhook DB Supabase indisponible sur ce repli local : on envoie directement
   // l'email de bienvenue (+ notification admin si organisateur) en filet de sécurité.
-  sendWelcomeEmail({ email: newUser.email, name: newUser.name, role: newUser.role }).catch(() => {});
+  runInBackground(sendWelcomeEmail({ email: newUser.email, name: newUser.name, role: newUser.role }));
   if (newUser.role === "organizer") {
-    sendAdminNewOrganizerEmail({ name: newUser.name, email: newUser.email }).catch(() => {});
+    runInBackground(sendAdminNewOrganizerEmail({ name: newUser.name, email: newUser.email }));
   }
 
   // Return user without password and include a local development token.
@@ -1367,6 +1388,130 @@ app.get("/api/my-tickets", requireAuth, async (req: express.Request, res: expres
   res.json(filtered);
 });
 
+// ==========================================
+// SALLE D'ATTENTE VIRTUELLE (pics de trafic billetterie)
+// ==========================================
+// Activable par événement (events.waiting_room_enabled, désactivée par défaut). Pas besoin de
+// cron : chaque appel join/status fait avancer la file via la fonction Postgres
+// advance_waiting_room (atomique, FOR UPDATE SKIP LOCKED côté SQL), qui expire les sessions
+// "active" dépassées et promeut les plus anciens en attente pour remplir les places libérées.
+async function getWaitingRoomEventConfig(eventId: string): Promise<{ enabled: boolean; capacity: number; activeMinutes: number } | null> {
+  if (!isSupabaseEnabled || !supabase) return null;
+  const { data, error } = await supabase
+    .from("events")
+    .select("waiting_room_enabled, waiting_room_capacity, waiting_room_active_minutes")
+    .eq("id", eventId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return {
+    enabled: Boolean(data.waiting_room_enabled),
+    capacity: Number(data.waiting_room_capacity) || 50,
+    activeMinutes: Number(data.waiting_room_active_minutes) || 10
+  };
+}
+
+async function advanceAndGetWaitingRoomStatus(eventId: string, userId: string, config: { capacity: number; activeMinutes: number }): Promise<{ status: "waiting" | "active" | "expired"; position: number } | null> {
+  if (!supabase) return null;
+
+  const { error: rpcError } = await supabase.rpc("advance_waiting_room", {
+    p_event_id: eventId,
+    p_capacity: config.capacity,
+    p_active_minutes: config.activeMinutes
+  });
+  if (rpcError) {
+    console.error("[Waiting Room] Erreur advance_waiting_room:", rpcError.message);
+  }
+
+  const { data: entry, error: entryError } = await supabase
+    .from("waiting_room_entries")
+    .select("*")
+    .eq("event_id", eventId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (entryError || !entry) return null;
+
+  if (entry.status === "waiting") {
+    const { count } = await supabase
+      .from("waiting_room_entries")
+      .select("id", { count: "exact", head: true })
+      .eq("event_id", eventId)
+      .eq("status", "waiting")
+      .lt("joined_at", entry.joined_at);
+    return { status: "waiting", position: (count || 0) + 1 };
+  }
+
+  return { status: entry.status, position: 0 };
+}
+
+app.post("/api/waiting-room/join", requireAuth, async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
+  const eventId = req.body?.eventId;
+  if (!eventId) {
+    return res.status(400).json({ error: "eventId requis." });
+  }
+
+  const config = await getWaitingRoomEventConfig(eventId);
+  if (!config || !config.enabled) {
+    // Pas de salle d'attente sur cet événement : accès direct au checkout.
+    return res.json({ status: "active", position: 0 });
+  }
+  if (!supabase) {
+    return res.status(503).json({ error: "Salle d'attente indisponible." });
+  }
+
+  const { data: existing } = await supabase
+    .from("waiting_room_entries")
+    .select("status")
+    .eq("event_id", eventId)
+    .eq("user_id", authUser.id)
+    .maybeSingle();
+
+  if (!existing) {
+    const { error: insertError } = await supabase.from("waiting_room_entries").insert({
+      id: `wr-${eventId}-${authUser.id}`,
+      event_id: eventId,
+      user_id: authUser.id,
+      status: "waiting"
+    });
+    if (insertError) {
+      console.warn("[Waiting Room] Erreur insertion entrée:", insertError.message);
+    }
+  } else if (existing.status === "expired") {
+    // Son créneau précédent a expiré sans achat finalisé : on le remet en file, à la fin.
+    await supabase.from("waiting_room_entries").update({
+      status: "waiting",
+      joined_at: new Date().toISOString(),
+      active_until: null
+    }).eq("event_id", eventId).eq("user_id", authUser.id);
+  }
+
+  const status = await advanceAndGetWaitingRoomStatus(eventId, authUser.id, config);
+  if (!status) {
+    return res.status(500).json({ error: "Impossible de rejoindre la salle d'attente." });
+  }
+  res.json(status);
+});
+
+app.get("/api/waiting-room/status", requireAuth, async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
+  const eventId = String(req.query.eventId || "");
+  if (!eventId) {
+    return res.status(400).json({ error: "eventId requis." });
+  }
+
+  const config = await getWaitingRoomEventConfig(eventId);
+  if (!config || !config.enabled) {
+    return res.json({ status: "active", position: 0 });
+  }
+
+  const status = await advanceAndGetWaitingRoomStatus(eventId, authUser.id, config);
+  if (!status) {
+    return res.status(404).json({ error: "Aucune entrée de salle d'attente trouvée. Rejoignez-la d'abord." });
+  }
+  res.json(status);
+});
+
 // Checkout Purchase Ticket Endpoint
 app.post("/api/checkout", requireAuth, validateCheckout, async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
@@ -1393,6 +1538,23 @@ app.post("/api/checkout", requireAuth, validateCheckout, async (req: express.Req
 
       if (eventError || !event) {
         return res.status(404).json({ error: "Événement introuvable." });
+      }
+
+      // Si la salle d'attente est activée sur cet événement, l'acheteur doit avoir une
+      // entrée "active" non expirée (obtenue via /api/waiting-room/join puis /status) avant
+      // de pouvoir passer commande.
+      if (event.waiting_room_enabled) {
+        const { data: wrEntry } = await supabase
+          .from("waiting_room_entries")
+          .select("status, active_until")
+          .eq("event_id", eventId)
+          .eq("user_id", buyerId)
+          .maybeSingle();
+
+        const isActive = wrEntry?.status === "active" && wrEntry.active_until && new Date(wrEntry.active_until) > new Date();
+        if (!isActive) {
+          return res.status(403).json({ error: "Veuillez passer par la salle d'attente avant d'acheter ce billet." });
+        }
       }
 
       const ticketsSold = Number(event.tickets_sold || 0);
@@ -1500,7 +1662,7 @@ app.post("/api/checkout", requireAuth, validateCheckout, async (req: express.Req
           .select("email")
           .eq("id", event.organizer_id)
           .maybeSingle();
-        await sendOrganizerSaleEmail(organizerUser?.email, event.organizer_name, event.title, mappedTicket);
+        runInBackground(sendOrganizerSaleEmail(organizerUser?.email, event.organizer_name, event.title, mappedTicket));
       } catch (e: any) {
         console.warn("[Email] Notification organisateur (vente) échouée :", e.message);
       }
@@ -1591,7 +1753,7 @@ app.post("/api/checkout", requireAuth, validateCheckout, async (req: express.Req
   // Notification organisateur (best-effort, ne doit jamais bloquer la réponse)
   try {
     const organizerUser = db.users.find((u: any) => u.id === event.organizerId);
-    await sendOrganizerSaleEmail(organizerUser?.email, event.organizerName, event.title, newTicket);
+    runInBackground(sendOrganizerSaleEmail(organizerUser?.email, event.organizerName, event.title, newTicket));
   } catch (e: any) {
     console.warn("[Email] Notification organisateur (vente) échouée :", e.message);
   }
@@ -1626,13 +1788,9 @@ app.post("/api/webhooks/supabase/new-user", async (req: express.Request, res: ex
     return res.status(200).json({ status: "ignored" });
   }
 
-  try {
-    await sendWelcomeEmail({ email: record.email, name: record.name, role: record.role });
-    if (record.role === "organizer") {
-      await sendAdminNewOrganizerEmail({ name: record.name, email: record.email });
-    }
-  } catch (err: any) {
-    console.error("[Supabase Webhook] Erreur lors de l'envoi des emails de bienvenue :", err.message || err);
+  runInBackground(sendWelcomeEmail({ email: record.email, name: record.name, role: record.role }));
+  if (record.role === "organizer") {
+    runInBackground(sendAdminNewOrganizerEmail({ name: record.name, email: record.email }));
   }
 
   res.status(200).json({ status: "success" });
@@ -1755,7 +1913,7 @@ app.post("/api/payment/callback", async (req: express.Request, res: express.Resp
 
         if (!isSuccess) {
           console.log(`[PaiementPro Callback] Réception d'un callback NON-succès pour ticket id=${ticket.id} (responsecode=${numericResponseCode}). Aucune mise à jour effectuée.`);
-          sendPaymentFailedEmail(ticket).catch(() => {});
+          runInBackground(sendPaymentFailedEmail(ticket));
         } else {
           const newRef = String(ticket.transaction_ref || "").replace("PENDING-", "PAID-");
           console.log(`[PaiementPro Callback] Mise à jour Supabase ticket id=${ticket.id} -> transaction_ref: ${ticket.transaction_ref} => ${newRef}`);
@@ -1771,7 +1929,7 @@ app.post("/api/payment/callback", async (req: express.Request, res: express.Resp
             } else {
               console.log(`[PaiementPro Callback] Mise à jour Supabase réussie pour id=${ticket.id}.`);
               const paidTicket = updated || ticket;
-              sendTicketEmail({
+              runInBackground(sendTicketEmail({
                 buyerEmail: paidTicket.buyer_email,
                 buyerName: paidTicket.buyer_name,
                 eventTitle: paidTicket.event_title,
@@ -1781,7 +1939,7 @@ app.post("/api/payment/callback", async (req: express.Request, res: express.Resp
                 tier: paidTicket.tier,
                 quantity: paidTicket.quantity,
                 qrCodeData: paidTicket.qr_code_data
-              }).catch(() => {});
+              }));
             }
           } catch (uErr: any) {
             console.error(`[PaiementPro Callback] Exception lors de la mise à jour Supabase pour id=${ticket.id}:`, uErr.message || uErr);
@@ -1804,14 +1962,14 @@ app.post("/api/payment/callback", async (req: express.Request, res: express.Resp
       console.log(`[PaiementPro Callback] Ticket local trouvé: id=${ticket.id}, buyer=${ticket.buyerName}, transactionRef=${ticket.transactionRef}`);
       if (!isSuccess) {
         console.log(`[PaiementPro Callback] Callback NON-succès reçu pour ticket id=${ticket.id} (rawResponseCode=${rawResponseCode}). Aucune modification locale appliquée.`);
-        sendPaymentFailedEmail(ticket).catch(() => {});
+        runInBackground(sendPaymentFailedEmail(ticket));
       } else {
         const oldRef = ticket.transactionRef || "";
         const newRef = String(oldRef).replace("PENDING-", "PAID-");
         ticket.transactionRef = newRef;
         saveDB(db);
         console.log(`[PaiementPro Callback] Ticket local mis à jour: id=${ticket.id}, transactionRef: ${oldRef} -> ${newRef}`);
-        sendTicketEmail(ticket).catch(() => {});
+        runInBackground(sendTicketEmail(ticket));
       }
     }
   }
@@ -1845,7 +2003,7 @@ app.post("/api/dev/simulate-payment", async (req: express.Request, res: express.
       if (ticket && !fetchErr) {
         updated = true;
         await supabase.from("tickets").update({ transaction_ref: String(ticket.transaction_ref || "").replace("PENDING-", "PAID-") }).eq("id", ticket.id);
-        sendTicketEmail({
+        runInBackground(sendTicketEmail({
           buyerEmail: ticket.buyer_email,
           buyerName: ticket.buyer_name,
           eventTitle: ticket.event_title,
@@ -1855,7 +2013,7 @@ app.post("/api/dev/simulate-payment", async (req: express.Request, res: express.
           tier: ticket.tier,
           quantity: ticket.quantity,
           qrCodeData: ticket.qr_code_data
-        }).catch(() => {});
+        }));
       }
     } catch (err: any) {
       console.error("[Dev Simulation] Erreur Supabase lors de la simulation de paiement :", err.message || err);
@@ -1869,7 +2027,7 @@ app.post("/api/dev/simulate-payment", async (req: express.Request, res: express.
       ticket.transactionRef = String(ticket.transactionRef || "").replace("PENDING-", "PAID-");
       saveDB(db);
       updated = true;
-      sendTicketEmail(ticket).catch(() => {});
+      runInBackground(sendTicketEmail(ticket));
     }
   }
 
@@ -2209,7 +2367,7 @@ app.get("/api/organizer/stats", async (req: express.Request, res: express.Respon
 app.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), validateEvent, async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
   const { id } = req.params;
-  const { title, description, date, time, price, ticketTypes, venue, category, banner, totalTickets } = req.body;
+  const { title, description, date, time, price, ticketTypes, venue, category, banner, totalTickets, waitingRoomEnabled, waitingRoomCapacity } = req.body;
 
   if (!title || !date || !time || isNaN(price) || !venue || !category || !totalTickets) {
     return res.status(400).json({ error: "Veuillez remplir tous les champs obligatoires correctement." });
@@ -2246,7 +2404,9 @@ app.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), valid
           venue,
           category,
           banner: bannerUrl,
-          total_tickets: Number(totalTickets)
+          total_tickets: Number(totalTickets),
+          ...(waitingRoomEnabled !== undefined ? { waiting_room_enabled: Boolean(waitingRoomEnabled) } : {}),
+          ...(waitingRoomCapacity !== undefined ? { waiting_room_capacity: Number(waitingRoomCapacity) || 50 } : {})
         })
         .eq("id", id)
         .select()
@@ -2283,7 +2443,9 @@ app.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), valid
         ticketsSold: data.tickets_sold,
         totalTickets: data.total_tickets,
         organizerId: data.organizer_id,
-        organizerName: data.organizer_name
+        organizerName: data.organizer_name,
+        waitingRoomEnabled: data.waiting_room_enabled,
+        waitingRoomCapacity: data.waiting_room_capacity
       };
 
       return res.json({ success: true, message: "Événement modifié avec succès !", event: mappedEvent });
@@ -2371,7 +2533,9 @@ app.get("/api/admin/stats", async (req: express.Request, res: express.Response) 
         totalTickets: e.total_tickets,
         organizerId: e.organizer_id,
         organizerName: e.organizer_name,
-        status: e.status || "approved"
+        status: e.status || "approved",
+        waitingRoomEnabled: e.waiting_room_enabled,
+        waitingRoomCapacity: e.waiting_room_capacity
       }));
       const mappedTickets = matchedTickets.map(t => ({
         id: t.id,
@@ -2462,7 +2626,7 @@ app.post("/api/admin/validate-payment", requireAuth, requireRole("admin"), async
 
       if (updateErr) throw updateErr;
 
-      sendTicketEmail({
+      runInBackground(sendTicketEmail({
         buyerEmail: ticket.buyer_email,
         buyerName: ticket.buyer_name,
         eventTitle: ticket.event_title,
@@ -2472,7 +2636,7 @@ app.post("/api/admin/validate-payment", requireAuth, requireRole("admin"), async
         tier: ticket.tier,
         quantity: ticket.quantity,
         qrCodeData: ticket.qr_code_data
-      }).catch(() => {});
+      }));
 
       return res.json({ success: true, message: "Paiement validé avec succès." });
     } catch (err: any) {
@@ -2489,7 +2653,7 @@ app.post("/api/admin/validate-payment", requireAuth, requireRole("admin"), async
 
   ticket.transactionRef = ticket.transactionRef.replace("PENDING-", "PAID-");
   saveDB(db);
-  sendTicketEmail(ticket).catch(() => {});
+  runInBackground(sendTicketEmail(ticket));
 
   res.json({ success: true, message: "Paiement validé localement." });
 });
@@ -2577,7 +2741,7 @@ app.patch("/api/admin/events/:id/status", async (req: express.Request, res: expr
             .select("email")
             .eq("id", updatedEvent.organizer_id)
             .maybeSingle();
-          await sendOrganizerEventStatusEmail(organizerUser?.email, updatedEvent.organizer_name, updatedEvent.title, status);
+          runInBackground(sendOrganizerEventStatusEmail(organizerUser?.email, updatedEvent.organizer_name, updatedEvent.title, status));
         } catch (e: any) {
           console.warn("[Email] Notification organisateur (statut événement) échouée :", e.message);
         }
@@ -2597,7 +2761,7 @@ app.patch("/api/admin/events/:id/status", async (req: express.Request, res: expr
 
     try {
       const organizerUser = db.users.find((u: any) => u.id === event.organizerId);
-      sendOrganizerEventStatusEmail(organizerUser?.email, event.organizerName, event.title, status).catch(() => {});
+      runInBackground(sendOrganizerEventStatusEmail(organizerUser?.email, event.organizerName, event.title, status));
     } catch (e: any) {
       console.warn("[Email] Notification organisateur (statut événement) échouée :", e.message);
     }
@@ -2648,7 +2812,7 @@ app.post("/api/organizer/payouts", async (req: express.Request, res: express.Res
       const { data: organizerUser } = await backendClient.from("users").select("name").eq("id", organizerId).maybeSingle();
       organizerName = organizerUser?.name;
     }
-    sendAdminPayoutRequestEmail(organizerName || organizerId, payout).catch(() => {});
+    runInBackground(sendAdminPayoutRequestEmail(organizerName || organizerId, payout));
   } catch (e: any) {
     console.warn("[Email] Notification admin (demande de retrait) échouée :", e.message);
   }
@@ -2699,7 +2863,7 @@ app.patch("/api/admin/payouts/:id/status", async (req: express.Request, res: exp
           try {
             const { data: organizerUser } = await supabase.from("users").select("email,name").eq("id", updatedPayout.organizer_id).maybeSingle();
             const mappedPayout = { ...updatedPayout, organizerId: updatedPayout.organizer_id, requestDate: updatedPayout.request_date };
-            await sendOrganizerPayoutStatusEmail(organizerUser?.email, organizerUser?.name || updatedPayout.organizer_id, mappedPayout);
+            runInBackground(sendOrganizerPayoutStatusEmail(organizerUser?.email, organizerUser?.name || updatedPayout.organizer_id, mappedPayout));
           } catch (e: any) {
             console.warn("[Email] Notification organisateur (statut retrait) échouée :", e.message);
           }
@@ -2717,7 +2881,7 @@ app.patch("/api/admin/payouts/:id/status", async (req: express.Request, res: exp
 
     try {
       const organizerUser = db.users.find((u: any) => u.id === (p as any).organizerId);
-      sendOrganizerPayoutStatusEmail(organizerUser?.email, organizerUser?.name || (p as any).organizerId, p).catch(() => {});
+      runInBackground(sendOrganizerPayoutStatusEmail(organizerUser?.email, organizerUser?.name || (p as any).organizerId, p));
     } catch (e: any) {
       console.warn("[Email] Notification organisateur (statut retrait) échouée :", e.message);
     }

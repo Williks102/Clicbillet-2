@@ -25,6 +25,13 @@ export interface Event {
   organizerId: string;
   organizerName: string;
   status?: "pending" | "approved" | "rejected";
+  waitingRoomEnabled?: boolean;
+  waitingRoomCapacity?: number;
+}
+
+export interface WaitingRoomStatus {
+  status: "waiting" | "active" | "expired";
+  position: number;
 }
 
 export interface PayoutRequest {

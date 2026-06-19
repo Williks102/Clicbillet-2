@@ -7,6 +7,7 @@ import OrganizerDashboard from "./components/OrganizerDashboard";
 import QrScannerTab from "./components/QrScannerTab";
 import CheckoutModal from "./components/CheckoutModal";
 import AdminDashboard from "./components/AdminDashboard";
+import WaitingRoom from "./components/WaitingRoom";
 import { User, Event } from "./types";
 import { Calendar, Compass, ShieldAlert, Sparkles } from "lucide-react";
 
@@ -24,6 +25,7 @@ export default function App() {
   const [events, setEvents] = useState<Event[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [checkoutEvent, setCheckoutEvent] = useState<Event | null>(null);
+  const [waitingRoomEvent, setWaitingRoomEvent] = useState<Event | null>(null);
   const [pendingEvent, setPendingEvent] = useState<Event | null>(null);
   const [authModalVisible, setAuthModalVisible] = useState(false);
   const [systemAlert, setSystemAlert] = useState<string | null>(null);
@@ -97,7 +99,7 @@ export default function App() {
     } else {
       // If client logging in after clicking "Acheter", we resume checkout!
       if (pendingEvent) {
-        setCheckoutEvent(pendingEvent);
+        openCheckoutFlow(pendingEvent);
         setPendingEvent(null);
       } else {
         setActiveTab("client-dashboard");
@@ -118,9 +120,19 @@ export default function App() {
     setUser(null);
     localStorage.removeItem("clicbillet-user");
     setCheckoutEvent(null);
+    setWaitingRoomEvent(null);
     setPendingEvent(null);
     setAuthModalVisible(false);
     setActiveTab("home");
+  }
+
+  // Route vers la salle d'attente si l'événement est en forte affluence, sinon checkout direct.
+  function openCheckoutFlow(event: Event) {
+    if (event.waitingRoomEnabled) {
+      setWaitingRoomEvent(event);
+    } else {
+      setCheckoutEvent(event);
+    }
   }
 
   function handleBuyTicketTrigger(event: Event) {
@@ -129,7 +141,7 @@ export default function App() {
       setPendingEvent(event);
       setAuthModalVisible(true);
     } else {
-      setCheckoutEvent(event);
+      openCheckoutFlow(event);
     }
   }
 
@@ -219,6 +231,20 @@ export default function App() {
           </>
         )}
       </main>
+
+      {/* Salle d'attente virtuelle, avant l'accès au checkout sur un événement à forte affluence */}
+      {waitingRoomEvent && user && (
+        <WaitingRoom
+          event={waitingRoomEvent}
+          user={user}
+          onTokenRefresh={handleTokenRefresh}
+          onGranted={() => {
+            setCheckoutEvent(waitingRoomEvent);
+            setWaitingRoomEvent(null);
+          }}
+          onCancel={() => setWaitingRoomEvent(null)}
+        />
+      )}
 
       {/* Ticket purchases interactive modal */}
       {checkoutEvent && (
