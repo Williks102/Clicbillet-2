@@ -1474,8 +1474,9 @@ app.post("/api/checkout", requireAuth, validateCheckout, async (req: express.Req
         quantity: newTkt.quantity
       };
       
-      // Envoi de l'email
-      await sendTicketEmail(mappedTicket);
+      // L'email de confirmation de billet (avec QR code) n'est envoyé qu'une fois le
+      // paiement réellement confirmé (cf. /api/payment/callback, /api/dev/simulate-payment,
+      // /api/admin/validate-payment) — pas à la création du ticket encore PENDING-.
 
       // Notification organisateur (best-effort, ne doit jamais bloquer la réponse)
       try {
@@ -1568,8 +1569,9 @@ app.post("/api/checkout", requireAuth, validateCheckout, async (req: express.Req
   db.tickets.unshift(newTicket);
   saveDB(db);
   
-  // Envoi de l'email
-  await sendTicketEmail(newTicket);
+  // L'email de confirmation de billet (avec QR code) n'est envoyé qu'une fois le
+  // paiement réellement confirmé (cf. /api/payment/callback, /api/dev/simulate-payment,
+  // /api/admin/validate-payment) — pas à la création du ticket encore PENDING-.
 
   // Notification organisateur (best-effort, ne doit jamais bloquer la réponse)
   try {
@@ -1746,6 +1748,18 @@ app.post("/api/payment/callback", async (req: express.Request, res: express.Resp
               console.error(`[PaiementPro Callback] Erreur lors de la mise à jour Supabase pour id=${ticket.id}:`, updateErr.message || updateErr);
             } else {
               console.log(`[PaiementPro Callback] Mise à jour Supabase réussie pour id=${ticket.id}.`);
+              const paidTicket = updated || ticket;
+              sendTicketEmail({
+                buyerEmail: paidTicket.buyer_email,
+                buyerName: paidTicket.buyer_name,
+                eventTitle: paidTicket.event_title,
+                eventDate: paidTicket.event_date,
+                eventTime: paidTicket.event_time,
+                eventVenue: paidTicket.event_venue,
+                tier: paidTicket.tier,
+                quantity: paidTicket.quantity,
+                qrCodeData: paidTicket.qr_code_data
+              }).catch(() => {});
             }
           } catch (uErr: any) {
             console.error(`[PaiementPro Callback] Exception lors de la mise à jour Supabase pour id=${ticket.id}:`, uErr.message || uErr);
@@ -1775,6 +1789,7 @@ app.post("/api/payment/callback", async (req: express.Request, res: express.Resp
         ticket.transactionRef = newRef;
         saveDB(db);
         console.log(`[PaiementPro Callback] Ticket local mis à jour: id=${ticket.id}, transactionRef: ${oldRef} -> ${newRef}`);
+        sendTicketEmail(ticket).catch(() => {});
       }
     }
   }
@@ -1808,6 +1823,17 @@ app.post("/api/dev/simulate-payment", async (req: express.Request, res: express.
       if (ticket && !fetchErr) {
         updated = true;
         await supabase.from("tickets").update({ transaction_ref: String(ticket.transaction_ref || "").replace("PENDING-", "PAID-") }).eq("id", ticket.id);
+        sendTicketEmail({
+          buyerEmail: ticket.buyer_email,
+          buyerName: ticket.buyer_name,
+          eventTitle: ticket.event_title,
+          eventDate: ticket.event_date,
+          eventTime: ticket.event_time,
+          eventVenue: ticket.event_venue,
+          tier: ticket.tier,
+          quantity: ticket.quantity,
+          qrCodeData: ticket.qr_code_data
+        }).catch(() => {});
       }
     } catch (err: any) {
       console.error("[Dev Simulation] Erreur Supabase lors de la simulation de paiement :", err.message || err);
@@ -1821,6 +1847,7 @@ app.post("/api/dev/simulate-payment", async (req: express.Request, res: express.
       ticket.transactionRef = String(ticket.transactionRef || "").replace("PENDING-", "PAID-");
       saveDB(db);
       updated = true;
+      sendTicketEmail(ticket).catch(() => {});
     }
   }
 
@@ -2413,6 +2440,18 @@ app.post("/api/admin/validate-payment", requireAuth, requireRole("admin"), async
 
       if (updateErr) throw updateErr;
 
+      sendTicketEmail({
+        buyerEmail: ticket.buyer_email,
+        buyerName: ticket.buyer_name,
+        eventTitle: ticket.event_title,
+        eventDate: ticket.event_date,
+        eventTime: ticket.event_time,
+        eventVenue: ticket.event_venue,
+        tier: ticket.tier,
+        quantity: ticket.quantity,
+        qrCodeData: ticket.qr_code_data
+      }).catch(() => {});
+
       return res.json({ success: true, message: "Paiement validé avec succès." });
     } catch (err: any) {
       console.error("[Supabase Error] Manual validation, falling back to local file DB:", err.message);
@@ -2428,6 +2467,7 @@ app.post("/api/admin/validate-payment", requireAuth, requireRole("admin"), async
 
   ticket.transactionRef = ticket.transactionRef.replace("PENDING-", "PAID-");
   saveDB(db);
+  sendTicketEmail(ticket).catch(() => {});
 
   res.json({ success: true, message: "Paiement validé localement." });
 });
