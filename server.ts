@@ -20,6 +20,10 @@ const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").
 const PAYMENT_PRO_CALLBACK_SECRET = (process.env.PAYMENT_PRO_CALLBACK_SECRET || "").trim();
 const PAYMENT_WEBHOOK_SECRET = (process.env.PAYMENT_WEBHOOK_SECRET || "").trim();
 const PAYMENT_PRO_CALLBACK_ORIGIN = (process.env.PAYMENT_PRO_CALLBACK_ORIGIN || "https://paiementpro.net").trim();
+const RESEND_API_KEY = (process.env.RESEND_API_KEY || "").trim();
+const RESEND_FROM_EMAIL = (process.env.RESEND_FROM_EMAIL || "ClicBillet <no-reply@monticket.online>").trim();
+const ADMIN_NOTIFICATION_EMAIL = (process.env.ADMIN_NOTIFICATION_EMAIL || "admin@monticket.online").trim();
+const SUPABASE_WEBHOOK_SECRET = (process.env.SUPABASE_WEBHOOK_SECRET || "").trim();
 
 // Le serveur n'utilise que la clé service_role : toutes les routes qui touchent à des
 // données sensibles sont déjà protégées par requireAuth/requireRole côté Express, donc un
@@ -273,29 +277,226 @@ function saveDB(data: typeof INITIAL_DATABASE) {
   }
 }
 
-// Mock Email Functionality
-async function sendTicketEmail(ticket: any) {
-  if (process.env.RESEND_API_KEY) {
-     console.log(`[Email Service] Sending Real Email via Resend to ${ticket.buyerEmail} with Ticket QR Code`);
-     // Example implementation:
-     /* 
-     await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': \`Bearer \${process.env.RESEND_API_KEY}\`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          from: 'ClicBillet <no-reply@clicbillet.ci>',
-          to: ticket.buyerEmail,
-          subject: 'Vos billets pour ' + ticket.eventTitle,
-          html: \`<h1>Vos billets</h1><p>Merci pour votre achat.</p><img src="\${ticket.qrCodeData}"/ >\`
-        })
-     });
-     */
-  } else {
-     console.log(`[Email Mock Service] ✉️ Sending Email to ${ticket.buyerEmail} for Event: ${ticket.eventTitle} (${ticket.quantity} places).`);
+// ==========================================
+// SERVICE D'ENVOI D'EMAILS (Resend)
+// ==========================================
+// Best-effort partout : un échec d'envoi d'email ne doit jamais faire échouer
+// la route métier qui l'a déclenché (achat de billet, inscription, etc.).
+async function sendEmail({ to, subject, html }: { to: string; subject: string; html: string }): Promise<boolean> {
+  if (!to) return false;
+
+  if (!RESEND_API_KEY) {
+    console.log(`[Email Mock Service] ✉️ (Resend non configuré) Sujet="${subject}" -> ${to}`);
+    return false;
   }
+
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: RESEND_FROM_EMAIL,
+        to,
+        subject,
+        html
+      })
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "");
+      console.error(`[Email Service] Échec d'envoi Resend (${response.status}) à ${to} :`, errorBody);
+      return false;
+    }
+
+    console.log(`[Email Service] ✉️ Email envoyé via Resend à ${to} ("${subject}")`);
+    return true;
+  } catch (err: any) {
+    console.error(`[Email Service] Erreur réseau lors de l'envoi à ${to} :`, err.message || err);
+    return false;
+  }
+}
+
+function emailLayout(title: string, bodyHtml: string): string {
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; color: #1f2937;">
+      <h1 style="color: #ea580c;">ClicBillet</h1>
+      <h2 style="font-size: 18px;">${title}</h2>
+      ${bodyHtml}
+      <p style="margin-top: 32px; font-size: 12px; color: #6b7280;">
+        Cet email a été envoyé automatiquement par ClicBillet, ne pas répondre directement.
+      </p>
+    </div>
+  `;
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  client: "Acheteur",
+  organizer: "Organisateur",
+  admin: "Administrateur"
+};
+
+// --- Bienvenue (inscription) ---
+function buildWelcomeEmailHtml(name: string, role: string): string {
+  const roleLabel = ROLE_LABELS[role] || "Membre";
+  return emailLayout("Bienvenue sur ClicBillet !", `
+    <p>Bonjour ${name},</p>
+    <p>Votre compte <strong>${roleLabel}</strong> a bien été créé sur ClicBillet, la plateforme de billetterie événementielle en Côte d'Ivoire.</p>
+    <p>Vous pouvez dès à présent vous connecter et profiter de la plateforme.</p>
+  `);
+}
+
+async function sendWelcomeEmail(user: { email: string; name: string; role: string }): Promise<void> {
+  await sendEmail({
+    to: user.email,
+    subject: "Bienvenue sur ClicBillet !",
+    html: buildWelcomeEmailHtml(user.name, user.role)
+  });
+}
+
+// --- Acheteur : confirmation de billet ---
+function buildTicketConfirmationHtml(ticket: any): string {
+  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(ticket.qrCodeData)}`;
+  return emailLayout("Votre billet est confirmé !", `
+    <p>Bonjour ${ticket.buyerName},</p>
+    <p>Merci pour votre achat. Voici les détails de votre commande :</p>
+    <ul>
+      <li><strong>Événement :</strong> ${ticket.eventTitle}</li>
+      <li><strong>Date :</strong> ${ticket.eventDate} à ${ticket.eventTime}</li>
+      <li><strong>Lieu :</strong> ${ticket.eventVenue}</li>
+      <li><strong>Quantité :</strong> ${ticket.quantity}</li>
+      <li><strong>Catégorie :</strong> ${ticket.tier}</li>
+    </ul>
+    <p>Présentez ce QR code à l'entrée :</p>
+    <img src="${qrImageUrl}" alt="QR Code billet" width="220" height="220" />
+  `);
+}
+
+async function sendTicketEmail(ticket: any): Promise<void> {
+  await sendEmail({
+    to: ticket.buyerEmail,
+    subject: `Vos billets pour ${ticket.eventTitle}`,
+    html: buildTicketConfirmationHtml(ticket)
+  });
+}
+
+// --- Acheteur : échec de paiement ---
+function buildPaymentFailedHtml(ticket: any): string {
+  return emailLayout("Échec de votre paiement", `
+    <p>Bonjour ${ticket.buyerName || ticket.buyer_name},</p>
+    <p>Le paiement de votre commande pour l'événement <strong>${ticket.eventTitle || ticket.event_title}</strong> n'a pas pu être validé.</p>
+    <p>Aucun montant n'a été débité de façon définitive. Vous pouvez retenter votre achat depuis la plateforme.</p>
+  `);
+}
+
+async function sendPaymentFailedEmail(ticket: any): Promise<void> {
+  const to = ticket.buyerEmail || ticket.buyer_email;
+  await sendEmail({
+    to,
+    subject: `Échec du paiement pour ${ticket.eventTitle || ticket.event_title}`,
+    html: buildPaymentFailedHtml(ticket)
+  });
+}
+
+// --- Organisateur : nouvelle vente ---
+function buildOrganizerSaleHtml(eventTitle: string, organizerName: string, ticket: any): string {
+  return emailLayout("Nouvelle vente de billet !", `
+    <p>Bonjour ${organizerName},</p>
+    <p>Une nouvelle vente vient d'avoir lieu sur votre événement <strong>${eventTitle}</strong> :</p>
+    <ul>
+      <li><strong>Acheteur :</strong> ${ticket.buyerName || ticket.buyer_name}</li>
+      <li><strong>Quantité :</strong> ${ticket.quantity}</li>
+      <li><strong>Montant :</strong> ${ticket.pricePaid || ticket.price_paid} FCFA</li>
+    </ul>
+  `);
+}
+
+async function sendOrganizerSaleEmail(organizerEmail: string, organizerName: string, eventTitle: string, ticket: any): Promise<void> {
+  if (!organizerEmail) return;
+  await sendEmail({
+    to: organizerEmail,
+    subject: `Nouvelle vente pour ${eventTitle}`,
+    html: buildOrganizerSaleHtml(eventTitle, organizerName, ticket)
+  });
+}
+
+// --- Organisateur : statut de l'événement ---
+function buildOrganizerEventStatusHtml(eventTitle: string, organizerName: string, status: string): string {
+  const statusLabel = status === "approved" ? "approuvé" : "rejeté";
+  return emailLayout(`Votre événement a été ${statusLabel}`, `
+    <p>Bonjour ${organizerName},</p>
+    <p>Votre événement <strong>${eventTitle}</strong> a été <strong>${statusLabel}</strong> par l'équipe de modération ClicBillet.</p>
+  `);
+}
+
+async function sendOrganizerEventStatusEmail(organizerEmail: string, organizerName: string, eventTitle: string, status: string): Promise<void> {
+  if (!organizerEmail) return;
+  const statusLabel = status === "approved" ? "approuvé" : "rejeté";
+  await sendEmail({
+    to: organizerEmail,
+    subject: `Votre événement "${eventTitle}" a été ${statusLabel}`,
+    html: buildOrganizerEventStatusHtml(eventTitle, organizerName, status)
+  });
+}
+
+// --- Organisateur : statut de retrait (payout) ---
+function buildOrganizerPayoutStatusHtml(organizerName: string, payout: any): string {
+  const statusLabels: Record<string, string> = { completed: "complété", rejected: "rejeté", pending: "en attente" };
+  const statusLabel = statusLabels[payout.status] || payout.status;
+  return emailLayout(`Votre demande de retrait est ${statusLabel}`, `
+    <p>Bonjour ${organizerName},</p>
+    <p>Votre demande de retrait de <strong>${payout.amount} FCFA</strong> (méthode : ${payout.method}) est désormais <strong>${statusLabel}</strong>.</p>
+  `);
+}
+
+async function sendOrganizerPayoutStatusEmail(organizerEmail: string, organizerName: string, payout: any): Promise<void> {
+  if (!organizerEmail) return;
+  await sendEmail({
+    to: organizerEmail,
+    subject: `Statut de votre demande de retrait : ${payout.status}`,
+    html: buildOrganizerPayoutStatusHtml(organizerName, payout)
+  });
+}
+
+// --- Admin : nouvelle inscription organisateur ---
+function buildAdminNewOrganizerHtml(user: { name: string; email: string }): string {
+  return emailLayout("Nouvel organisateur inscrit", `
+    <p>Un nouvel organisateur vient de s'inscrire sur ClicBillet :</p>
+    <ul>
+      <li><strong>Nom :</strong> ${user.name}</li>
+      <li><strong>Email :</strong> ${user.email}</li>
+    </ul>
+  `);
+}
+
+async function sendAdminNewOrganizerEmail(user: { name: string; email: string }): Promise<void> {
+  await sendEmail({
+    to: ADMIN_NOTIFICATION_EMAIL,
+    subject: "Nouvel organisateur inscrit sur ClicBillet",
+    html: buildAdminNewOrganizerHtml(user)
+  });
+}
+
+// --- Admin : nouvelle demande de retrait ---
+function buildAdminPayoutRequestHtml(organizerName: string, payout: any): string {
+  return emailLayout("Nouvelle demande de retrait", `
+    <p>L'organisateur <strong>${organizerName}</strong> a soumis une nouvelle demande de retrait :</p>
+    <ul>
+      <li><strong>Montant :</strong> ${payout.amount} FCFA</li>
+      <li><strong>Méthode :</strong> ${payout.method}</li>
+    </ul>
+    <p>Rendez-vous sur le tableau de bord admin pour la traiter.</p>
+  `);
+}
+
+async function sendAdminPayoutRequestEmail(organizerName: string, payout: any): Promise<void> {
+  await sendEmail({
+    to: ADMIN_NOTIFICATION_EMAIL,
+    subject: `Nouvelle demande de retrait de ${organizerName}`,
+    html: buildAdminPayoutRequestHtml(organizerName, payout)
+  });
 }
 
 // Enable parsing middlewares for Webhooks and APIs
@@ -933,6 +1134,13 @@ app.post("/api/auth/register", validateRegister, async (req: express.Request, re
   db.users.push(newUser);
   saveDB(db);
 
+  // Webhook DB Supabase indisponible sur ce repli local : on envoie directement
+  // l'email de bienvenue (+ notification admin si organisateur) en filet de sécurité.
+  sendWelcomeEmail({ email: newUser.email, name: newUser.name, role: newUser.role }).catch(() => {});
+  if (newUser.role === "organizer") {
+    sendAdminNewOrganizerEmail({ name: newUser.name, email: newUser.email }).catch(() => {});
+  }
+
   // Return user without password and include a local development token.
   const { password: _, ...userWithoutPassword } = newUser;
   res.status(201).json({
@@ -1210,6 +1418,18 @@ app.post("/api/checkout", validateCheckout, async (req: express.Request, res: ex
       // Envoi de l'email
       await sendTicketEmail(mappedTicket);
 
+      // Notification organisateur (best-effort, ne doit jamais bloquer la réponse)
+      try {
+        const { data: organizerUser } = await supabase
+          .from("users")
+          .select("email")
+          .eq("id", event.organizer_id)
+          .maybeSingle();
+        await sendOrganizerSaleEmail(organizerUser?.email, event.organizer_name, event.title, mappedTicket);
+      } catch (e: any) {
+        console.warn("[Email] Notification organisateur (vente) échouée :", e.message);
+      }
+
       return res.status(201).json({
         success: true,
         message: "Achat de billet effectué avec succès !",
@@ -1292,12 +1512,54 @@ app.post("/api/checkout", validateCheckout, async (req: express.Request, res: ex
   // Envoi de l'email
   await sendTicketEmail(newTicket);
 
+  // Notification organisateur (best-effort, ne doit jamais bloquer la réponse)
+  try {
+    const organizerUser = db.users.find((u: any) => u.id === event.organizerId);
+    await sendOrganizerSaleEmail(organizerUser?.email, event.organizerName, event.title, newTicket);
+  } catch (e: any) {
+    console.warn("[Email] Notification organisateur (vente) échouée :", e.message);
+  }
+
   res.status(201).json({
     success: true,
     message: "Achat de billet effectué avec succès !",
     ticket: newTicket,
     notificationUrl: buildWebhookNotificationUrl(req)
   });
+});
+
+// Webhook Supabase Database Webhook : déclenché sur INSERT dans public.users,
+// envoie l'email de bienvenue (+ notification admin si organisateur).
+// Sécurisé par un secret partagé transmis via le header Authorization, configuré
+// côté Supabase (Dashboard > Database > Webhooks) en plus de l'en-tête HTTP.
+app.post("/api/webhooks/supabase/new-user", async (req: express.Request, res: express.Response) => {
+  if (!SUPABASE_WEBHOOK_SECRET) {
+    console.error("[Supabase Webhook] SUPABASE_WEBHOOK_SECRET non configuré.");
+    return res.status(500).json({ status: "error", message: "Webhook secret manquant." });
+  }
+
+  const token = extractBearerToken(req);
+  if (token !== SUPABASE_WEBHOOK_SECRET) {
+    console.warn("[Supabase Webhook] Tentative rejetée : secret absent ou invalide.");
+    return res.status(401).json({ status: "error", message: "Non autorisé." });
+  }
+
+  const { type, table, record } = req.body || {};
+
+  if (type !== "INSERT" || table !== "users" || !record) {
+    return res.status(200).json({ status: "ignored" });
+  }
+
+  try {
+    await sendWelcomeEmail({ email: record.email, name: record.name, role: record.role });
+    if (record.role === "organizer") {
+      await sendAdminNewOrganizerEmail({ name: record.name, email: record.email });
+    }
+  } catch (err: any) {
+    console.error("[Supabase Webhook] Erreur lors de l'envoi des emails de bienvenue :", err.message || err);
+  }
+
+  res.status(200).json({ status: "success" });
 });
 
 // Callback / Webhook endpoint pour recevoir les notifications de Paiement Pro (CI)
@@ -1410,6 +1672,7 @@ app.post("/api/payment/callback", async (req: express.Request, res: express.Resp
 
         if (!isSuccess) {
           console.log(`[PaiementPro Callback] Réception d'un callback NON-succès pour ticket id=${ticket.id} (responsecode=${numericResponseCode}). Aucune mise à jour effectuée.`);
+          sendPaymentFailedEmail(ticket).catch(() => {});
         } else {
           const newRef = String(ticket.transaction_ref || "").replace("PENDING-", "PAID-");
           console.log(`[PaiementPro Callback] Mise à jour Supabase ticket id=${ticket.id} -> transaction_ref: ${ticket.transaction_ref} => ${newRef}`);
@@ -1446,6 +1709,7 @@ app.post("/api/payment/callback", async (req: express.Request, res: express.Resp
       console.log(`[PaiementPro Callback] Ticket local trouvé: id=${ticket.id}, buyer=${ticket.buyerName}, transactionRef=${ticket.transactionRef}`);
       if (!isSuccess) {
         console.log(`[PaiementPro Callback] Callback NON-succès reçu pour ticket id=${ticket.id} (rawResponseCode=${rawResponseCode}). Aucune modification locale appliquée.`);
+        sendPaymentFailedEmail(ticket).catch(() => {});
       } else {
         const oldRef = ticket.transactionRef || "";
         const newRef = String(oldRef).replace("PENDING-", "PAID-");
@@ -2145,13 +2409,27 @@ app.patch("/api/admin/events/:id/status", async (req: express.Request, res: expr
   const adminClient = supabaseAdmin;
   if (adminClient) {
     try {
-      const { error } = await adminClient.from("events").update({ status }).eq("id", id);
+      const { data: updatedEvent, error } = await adminClient.from("events").update({ status }).eq("id", id).select().maybeSingle();
       if (error) {
          if (error.message.includes('status')) {
             throw new Error('Supabase column events.status is missing. Update supabase_setup.sql');
          }
          throw error;
       }
+
+      if (updatedEvent) {
+        try {
+          const { data: organizerUser } = await adminClient
+            .from("users")
+            .select("email")
+            .eq("id", updatedEvent.organizer_id)
+            .maybeSingle();
+          await sendOrganizerEventStatusEmail(organizerUser?.email, updatedEvent.organizer_name, updatedEvent.title, status);
+        } catch (e: any) {
+          console.warn("[Email] Notification organisateur (statut événement) échouée :", e.message);
+        }
+      }
+
       return res.json({ success: true, message: `Événement ${status}` });
     } catch(e: any) {
       console.warn("[Supabase Error] Admin event status update:", e.message);
@@ -2163,6 +2441,14 @@ app.patch("/api/admin/events/:id/status", async (req: express.Request, res: expr
   if (event) {
     event.status = status;
     saveDB(db);
+
+    try {
+      const organizerUser = db.users.find((u: any) => u.id === event.organizerId);
+      sendOrganizerEventStatusEmail(organizerUser?.email, event.organizerName, event.title, status).catch(() => {});
+    } catch (e: any) {
+      console.warn("[Email] Notification organisateur (statut événement) échouée :", e.message);
+    }
+
     return res.json({ success: true, message: `Événement ${status}` });
   }
   res.status(404).json({ error: "Événement introuvable" });
@@ -2194,6 +2480,18 @@ app.post("/api/organizer/payouts", async (req: express.Request, res: express.Res
   db.payouts = db.payouts || [];
   db.payouts.unshift(payout as any);
   saveDB(db);
+
+  try {
+    let organizerName = db.users.find((u: any) => u.id === organizerId)?.name;
+    if (!organizerName && backendClient) {
+      const { data: organizerUser } = await backendClient.from("users").select("name").eq("id", organizerId).maybeSingle();
+      organizerName = organizerUser?.name;
+    }
+    sendAdminPayoutRequestEmail(organizerName || organizerId, payout).catch(() => {});
+  } catch (e: any) {
+    console.warn("[Email] Notification admin (demande de retrait) échouée :", e.message);
+  }
+
   res.json({ success: true, payout });
 });
 
@@ -2226,8 +2524,19 @@ app.patch("/api/admin/payouts/:id/status", async (req: express.Request, res: exp
   const { status } = req.body;
   if (isSupabaseEnabled && supabase) {
     try {
-      const { error } = await supabase.from("payouts").update({ status }).eq("id", req.params.id);
-      if (!error) return res.json({ success: true });
+      const { data: updatedPayout, error } = await supabase.from("payouts").update({ status }).eq("id", req.params.id).select().maybeSingle();
+      if (!error) {
+        if (updatedPayout) {
+          try {
+            const { data: organizerUser } = await supabase.from("users").select("email,name").eq("id", updatedPayout.organizer_id).maybeSingle();
+            const mappedPayout = { ...updatedPayout, organizerId: updatedPayout.organizer_id, requestDate: updatedPayout.request_date };
+            await sendOrganizerPayoutStatusEmail(organizerUser?.email, organizerUser?.name || updatedPayout.organizer_id, mappedPayout);
+          } catch (e: any) {
+            console.warn("[Email] Notification organisateur (statut retrait) échouée :", e.message);
+          }
+        }
+        return res.json({ success: true });
+      }
     } catch(e) {}
   }
   const db = getDB();
@@ -2236,6 +2545,14 @@ app.patch("/api/admin/payouts/:id/status", async (req: express.Request, res: exp
   if (p) {
     p.status = status;
     saveDB(db);
+
+    try {
+      const organizerUser = db.users.find((u: any) => u.id === (p as any).organizerId);
+      sendOrganizerPayoutStatusEmail(organizerUser?.email, organizerUser?.name || (p as any).organizerId, p).catch(() => {});
+    } catch (e: any) {
+      console.warn("[Email] Notification organisateur (statut retrait) échouée :", e.message);
+    }
+
     return res.json({ success: true });
   }
   res.status(404).json({ error: "Introuvable" });

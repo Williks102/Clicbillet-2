@@ -132,3 +132,47 @@ CREATE POLICY "Public read access to approved events"
 -- tickets, payouts et transactions : RLS sans policy correspondante revient à un refus
 -- par défaut pour ces clients. Seule la clé service_role (utilisée exclusivement par
 -- server.ts, jamais exposée au frontend) peut lire/écrire ces données.
+
+-- ==========================================
+-- 9. WEBHOOK DE BIENVENUE (Supabase -> Resend)
+-- ==========================================
+-- Objectif : à chaque INSERT dans public.users, notifier server.ts qui envoie
+-- l'email de bienvenue via Resend (+ notification admin si l'utilisateur est organisateur).
+--
+-- MÉTHODE RECOMMANDÉE (sans SQL) : Dashboard Supabase
+--   1. Database > Webhooks > Create a new webhook
+--   2. Table : public.users      Events : Insert
+--   3. Type : HTTP Request       Method : POST
+--   4. URL : https://<votre-domaine-app>/api/webhooks/supabase/new-user
+--   5. HTTP Headers : Authorization = Bearer <SUPABASE_WEBHOOK_SECRET>
+--      (la même valeur que la variable d'environnement SUPABASE_WEBHOOK_SECRET de server.ts)
+--
+-- ALTERNATIVE (infra-as-code) : trigger SQL utilisant l'extension pg_net.
+-- Décommentez et remplacez les deux placeholders avant exécution.
+--
+-- CREATE EXTENSION IF NOT EXISTS pg_net;
+--
+-- CREATE OR REPLACE FUNCTION public.notify_new_user_webhook()
+-- RETURNS TRIGGER AS $$
+-- BEGIN
+--   PERFORM net.http_post(
+--     url := 'https://<votre-domaine-app>/api/webhooks/supabase/new-user',
+--     headers := jsonb_build_object(
+--       'Content-Type', 'application/json',
+--       'Authorization', 'Bearer <SUPABASE_WEBHOOK_SECRET>'
+--     ),
+--     body := jsonb_build_object(
+--       'type', 'INSERT',
+--       'table', 'users',
+--       'schema', 'public',
+--       'record', to_jsonb(NEW)
+--     )
+--   );
+--   RETURN NEW;
+-- END;
+-- $$ LANGUAGE plpgsql SECURITY DEFINER;
+--
+-- DROP TRIGGER IF EXISTS trg_notify_new_user ON public.users;
+-- CREATE TRIGGER trg_notify_new_user
+-- AFTER INSERT ON public.users
+-- FOR EACH ROW EXECUTE FUNCTION public.notify_new_user_webhook();

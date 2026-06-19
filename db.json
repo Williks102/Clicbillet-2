@@ -111,5 +111,16 @@
       "purchaseDate": "2026-06-08T14:30:00Z",
       "quantity": 1
     }
+  ],
+  "payouts": [
+    {
+      "id": "pay-1781824168002",
+      "organizerId": "80776540-db7e-4a3f-b693-172706693b7a",
+      "amount": 5000,
+      "status": "pending",
+      "requestDate": "2026-06-18T23:09:28.002Z",
+      "method": "orange_money",
+      "details": "test payout"
+    }
   ]
 }
