@@ -5,76 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>clicbillet,la billetterie de référence</title>
     <!-- SDK de paiement professionnel en ligne Paiement Pro -->
-    <script src="https://paiementpro.net/webservice/onlinepayment/js/paiementpro.v1.0.1.js" onerror="console.warn('[PaiementPro] Erreur de chargement du CDN externe.')"></script>
-    <script>
-      // Assigner la classe PaiementPro à l'objet window pour qu'il soit accessible globalement dans React
-      if (typeof PaiementPro !== 'undefined') {
-        window.PaiementPro = PaiementPro;
-      }
-      
-      // Système de secours résilient : Injecte le constructeur par défaut si le script d'origine échoue à cause du sandbox ou blocage réseau
-      (function() {
-        var checkInterval = setInterval(function() {
-          // Si rien n'est encore défini
-          if (typeof window.PaiementPro === 'undefined') {
-            window.PaiementPro = function(merchantId) {
-              this.merchantId = merchantId;
-              this.amount = 0;
-              this.channel = '';
-              this.countryCurrencyCode = '952';
-              this.referenceNumber = '';
-              this.customerEmail = '';
-              this.customerFirstName = '';
-              this.customerLastname = '';
-              this.customerPhoneNumber = '';
-              this.notificationURL = '';
-              this.returnURL = '';
-              this.returnContext = '';
-              this.url = '';
-              this.success = false;
-              this._isFallback = true;
-              
-              this.getUrlPayment = async function() {
-                console.log("[PaiementPro Fallback Actif] Initialisation du paiement simulé pour l'ID marchand :", this.merchantId);
-                // Simulation réaliste de réponse API
-                const queryParams = new URLSearchParams({
-                  merchant: this.merchantId,
-                  amount: this.amount,
-                  reference: this.referenceNumber,
-                  email: this.customerEmail,
-                  phone: this.customerPhoneNumber,
-                  channel: this.channel
-                }).toString();
-                
-                // Préparation de l'URL cible d'après le pattern officiel
-                this.url = this.returnURL || (window.location.origin + "/?payment_success=true&ticket_id=" + this.referenceNumber);
-                if (this.url.indexOf('?') === -1) {
-                  this.url += '?' + queryParams;
-                } else {
-                  this.url += '&' + queryParams;
-                }
-                this.success = true;
-                return true;
-              };
-            };
-            window.PaiementPro.isFallback = true;
-            console.log("[PaiementPro Fallback] Constructeur de secours enregistré avec succès.");
-          } else {
-            // Si PaiementPro existe déjà
-            if (window.PaiementPro.isFallback) {
-              // C'est notre fallback, on continue à surveiller si le vrai script CDN arrive plus tard et l'écrase
-              console.log("[PaiementPro] En attente du chargement du SDK d'origine depuis le réseau...");
-            } else {
-              // C'est le vrai SDK officiel !
-              console.log("[PaiementPro] SDK officiel de paiement en ligne détecté et prêt.");
-              clearInterval(checkInterval);
-            }
-          }
-        }, 1000);
-        // Nettoyage après 12 secondes pour libérer les ressources
-        setTimeout(function() { clearInterval(checkInterval); }, 12000);
-      })();
-    </script>
+    <script src="https://paiementpro.net/webservice/onlinepayment/js/paiementpro.v1.0.1.js"></script>
+    <!-- Logique de secours déplacée en fichier externe (pas de script inline) pour pouvoir
+         retirer 'unsafe-inline' du CSP scriptSrc. Le CDN ci-dessus ne renvoie pas de header
+         CORS, donc pas de SRI possible dessus sans casser le chargement réel du SDK. -->
+    <script src="/paiementpro-fallback.js"></script>
   </head>
   <body>
     <div id="root"></div>

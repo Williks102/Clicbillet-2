@@ -88,12 +88,19 @@ const PAYMENT_GATEWAY_ORIGINS = [
   "https://promo.wave.com",
 ];
 
+// index.html ne contient plus aucun script inline ni attribut d'événement inline
+// (cf. public/paiementpro-fallback.js) — 'unsafe-inline' n'est donc plus nécessaire en
+// production. En dev, Vite/React Fast Refresh injecte un <script type="module"> inline
+// dans la page (preamble HMR) qu'on doit encore autoriser, sinon le rechargement à chaud casse.
+const isProduction = process.env.NODE_ENV === "production";
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://paiementpro.net"],
-      scriptSrcAttr: ["'unsafe-inline'"],
+      scriptSrc: isProduction
+        ? ["'self'", "https://paiementpro.net"]
+        : ["'self'", "'unsafe-inline'", "https://paiementpro.net"],
       connectSrc: ["'self'", `ws://127.0.0.1:${HMR_PORT}`, `ws://localhost:${HMR_PORT}`, ...PAYMENT_GATEWAY_ORIGINS],
       styleSrc: ["'self'", "https:", "'unsafe-inline'"],
       imgSrc: ["'self'", "https:", "data:"],
@@ -1677,6 +1684,13 @@ app.post("/api/payment/callback", async (req: express.Request, res: express.Resp
   console.log("Body reçu:", req.body);
   console.log("Query parameters:", req.query);
 
+  // ATTENTION : le support PaiementPro/XPAYE a confirmé qu'aucune signature HMAC n'est
+  // actuellement émise sur leurs callbacks (cf. WEBHOOK-SECURITY-PATCH.md). Tant que
+  // PAYMENT_PRO_CALLBACK_SECRET reste vide, ce bloc est un no-op : la vraie barrière contre
+  // les requêtes forgées est le secret `wh` ci-dessus, combiné au fait qu'un ticket reste
+  // PENDING- (donc non scannable, cf. /api/verify-ticket) tant qu'aucune confirmation
+  // n'arrive ici. Ne pas configurer PAYMENT_PRO_CALLBACK_SECRET en pensant que ça active une
+  // vérification réelle — ce code n'a d'effet que si PaiementPro ajoute un jour la signature.
   if (PAYMENT_PRO_CALLBACK_SECRET && !verifyPaymentSignature(req)) {
     console.error("[PaiementPro Callback] Signature invalide ou absente.");
     return res.status(401).json({ status: "error", message: "Signature invalide." });
