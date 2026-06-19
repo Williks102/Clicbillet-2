@@ -1105,11 +1105,29 @@ app.post("/api/auth/register", validateRegister, async (req: express.Request, re
         throw profileError;
       }
 
+      // L'admin.createUser ci-dessus ne crée pas de session : on en ouvre une explicitement
+      // pour que le frontend reparte immédiatement avec un token valide (sinon tout appel
+      // requireAuth échoue en 401 jusqu'à ce que l'utilisateur se reconnecte manuellement).
+      let sessionToken: string | undefined;
+      let sessionRefreshToken: string | undefined;
+      try {
+        const { data: signInData } = await createEphemeralAuthClient().auth.signInWithPassword({
+          email: normalizedEmail,
+          password
+        });
+        sessionToken = signInData?.session?.access_token;
+        sessionRefreshToken = signInData?.session?.refresh_token;
+      } catch (signInErr: any) {
+        console.warn("[Supabase Warning] Impossible d'ouvrir une session juste après l'inscription :", signInErr.message);
+      }
+
       return res.status(201).json({
         id: data.id,
         email: data.email,
         name: data.name,
-        role: data.role
+        role: data.role,
+        token: sessionToken,
+        refreshToken: sessionRefreshToken
       });
     } catch (err: any) {
       console.error("[Supabase Error] User registration, falling back to local file DB:", err.message);
@@ -1214,7 +1232,8 @@ app.post("/api/auth/login", validateLogin, async (req: express.Request, res: exp
           email: profile.email,
           name: profile.name,
           role: profile.role,
-          token: authData?.session?.access_token
+          token: authData?.session?.access_token,
+          refreshToken: authData?.session?.refresh_token
         });
       }
 
@@ -1243,6 +1262,35 @@ app.post("/api/auth/login", validateLogin, async (req: express.Request, res: exp
     ...userWithoutPassword,
     token: `local-${user.id}`
   });
+});
+
+// Rafraîchissement de session : les access_token Supabase expirent (par défaut au bout
+// d'1h). Le frontend appelle cette route avec le refresh_token stocké pour obtenir un
+// nouveau access_token sans forcer l'utilisateur à se reconnecter manuellement.
+app.post("/api/auth/refresh", async (req: express.Request, res: express.Response) => {
+  const { refreshToken } = req.body;
+
+  if (!refreshToken) {
+    return res.status(400).json({ error: "refreshToken manquant." });
+  }
+
+  if (!isSupabaseEnabled) {
+    return res.status(400).json({ error: "Rafraîchissement de session non disponible." });
+  }
+
+  try {
+    const { data, error } = await createEphemeralAuthClient().auth.refreshSession({ refresh_token: refreshToken });
+    if (error || !data.session) {
+      return res.status(401).json({ error: "Session expirée, veuillez vous reconnecter." });
+    }
+    return res.json({
+      token: data.session.access_token,
+      refreshToken: data.session.refresh_token
+    });
+  } catch (err: any) {
+    console.error("[Supabase Error] Refresh session:", err.message);
+    return res.status(401).json({ error: "Session expirée, veuillez vous reconnecter." });
+  }
 });
 
 // Fetch User Purchased Tickets Endpoint

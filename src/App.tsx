@@ -105,6 +105,15 @@ export default function App() {
     }
   }
 
+  function handleTokenRefresh(token: string, refreshToken?: string) {
+    setUser(prev => {
+      if (!prev) return prev;
+      const updated = { ...prev, token, ...(refreshToken ? { refreshToken } : {}) };
+      localStorage.setItem("clicbillet-user", JSON.stringify(updated));
+      return updated;
+    });
+  }
+
   function handleLogout() {
     setUser(null);
     localStorage.removeItem("clicbillet-user");
@@ -187,7 +196,7 @@ export default function App() {
             )}
 
             {activeTab === "client-dashboard" && user && (
-              <ClientDashboard user={user} />
+              <ClientDashboard user={user} onTokenRefresh={handleTokenRefresh} />
             )}
 
             {activeTab === "organizer-dashboard" && user && user.role === "organizer" && (
@@ -196,11 +205,12 @@ export default function App() {
                 events={events}
                 onEventCreated={fetchEvents}
                 setActiveTab={setActiveTab}
+                onTokenRefresh={handleTokenRefresh}
               />
             )}
 
             {activeTab === "admin-dashboard" && user && user.role === "admin" && (
-              <AdminDashboard user={user} onLogout={handleLogout} />
+              <AdminDashboard user={user} onLogout={handleLogout} onTokenRefresh={handleTokenRefresh} />
             )}
 
             {activeTab === "scanner" && user && user.role === "organizer" && (

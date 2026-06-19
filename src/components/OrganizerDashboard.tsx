@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { Plus, LayoutDashboard, Calendar, MapPin, Tag, TrendingUp, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X } from "lucide-react";
 import { Event, User, SalesStatus } from "../types";
+import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 
 interface OrganizerDashboardProps {
   user: User;
   events: Event[];
   onEventCreated: () => void;
   setActiveTab: (tab: string) => void;
+  onTokenRefresh: TokenRefreshHandler;
 }
 
 const CATEGORIES = ["Concert", "Festivals", "Théâtre & Humour", "Sport"];
@@ -40,11 +42,10 @@ const BANNER_TEMPLATES = [
   }
 ];
 
-export default function OrganizerDashboard({ user, events, onEventCreated, setActiveTab }: OrganizerDashboardProps) {
+export default function OrganizerDashboard({ user, events, onEventCreated, setActiveTab, onTokenRefresh }: OrganizerDashboardProps) {
   const [subTab, setSubTab] = useState<"dashboard" | "create" | "simulator" | "payouts">("dashboard");
   const [stats, setStats] = useState<SalesStatus | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
-  const authHeaders = user.token ? { Authorization: `Bearer ${user.token}` } : {};
 
   // Form Fields for Creation
   const [title, setTitle] = useState("");
@@ -112,7 +113,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   async function fetchSimulatedTickets() {
     setLoadingSimTickets(true);
     try {
-      const response = await fetch(`/api/organizer/stats?organizerId=${user.id}`, { headers: authHeaders });
+      const response = await authFetch(`/api/organizer/stats?organizerId=${user.id}`, {}, user, onTokenRefresh);
       if (response.ok) {
         const data = await response.json();
         setSimulatedTickets(data.tickets || []);
@@ -126,10 +127,9 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
 
     async function downloadOrganizerExport() {
       try {
-        const response = await fetch(`/api/organizer/export?organizerId=${user.id}`, {
-          method: "GET",
-          headers: authHeaders
-        });
+        const response = await authFetch(`/api/organizer/export?organizerId=${user.id}`, {
+          method: "GET"
+        }, user, onTokenRefresh);
         if (!response.ok) {
           const data = await response.json();
           throw new Error(data.error || "Impossible de générer l'export.");
@@ -334,8 +334,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   async function fetchStats() {
     try {
       const [response, payoutRes] = await Promise.all([
-        fetch(`/api/organizer/stats?organizerId=${user.id}`, { headers: authHeaders }),
-        fetch(`/api/organizer/payouts?organizerId=${user.id}`, { headers: authHeaders })
+        authFetch(`/api/organizer/stats?organizerId=${user.id}`, {}, user, onTokenRefresh),
+        authFetch(`/api/organizer/payouts?organizerId=${user.id}`, {}, user, onTokenRefresh)
       ]);
       if (!response.ok) {
         throw new Error("Impossible de charger les statistiques.");
@@ -365,11 +365,11 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     }
     setSubmittingPayout(true);
     try {
-      const resp = await fetch("/api/organizer/payouts", {
+      const resp = await authFetch("/api/organizer/payouts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ organizerId: user.id, amount: payoutAmount, method: payoutMethod, details: payoutDetails })
-      });
+      }, user, onTokenRefresh);
       if (!resp.ok) throw new Error("Erreur de demande.");
       
       const newPayout = await resp.json();

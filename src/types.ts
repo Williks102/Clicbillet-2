@@ -6,6 +6,7 @@ export interface User {
   name: string;
   role: UserRole;
   token?: string;
+  refreshToken?: string;
 }
 
 export interface Event {

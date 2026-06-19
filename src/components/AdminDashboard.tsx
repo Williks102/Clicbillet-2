@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { User, Event, Ticket } from "../types";
-import { 
-  Building2, Users, Calendar, DollarSign, Trash2, ShieldCheck, 
-  Search, ShieldAlert, Sparkles, LogOut, Ticket as TicketIcon, TrendingUp, Filter 
+import {
+  Building2, Users, Calendar, DollarSign, Trash2, ShieldCheck,
+  Search, ShieldAlert, Sparkles, LogOut, Ticket as TicketIcon, TrendingUp, Filter
 } from "lucide-react";
+import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 
 interface AdminDashboardProps {
   user: User;
   onLogout: () => void;
+  onTokenRefresh: TokenRefreshHandler;
 }
 
 interface AdminStats {
@@ -23,7 +25,7 @@ interface AdminStats {
   tickets: Ticket[];
 }
 
-export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
+export default function AdminDashboard({ user, onLogout, onTokenRefresh }: AdminDashboardProps) {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [payouts, setPayouts] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -36,19 +38,17 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   const [eventSearch, setEventSearch] = useState("");
   const [ticketSearch, setTicketSearch] = useState("");
 
-  const authHeaders = user.token ? { Authorization: `Bearer ${user.token}` } : {};
-
   const handleValidatePayment = async (referenceNumber: string) => {
     if (!window.confirm("Valider manuellement ce paiement ? Le client recevra son ticket avec le QR code.")) {
       return;
     }
-    
+
     try {
-      const resp = await fetch("/api/admin/validate-payment", {
+      const resp = await authFetch("/api/admin/validate-payment", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ referenceNumber })
-      });
+      }, user, onTokenRefresh);
       const data = await resp.json();
       if (!resp.ok) {
         throw new Error(data.error || "Erreur de validation manuelle");
@@ -66,9 +66,9 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
     setError(null);
     try {
       const [response, respPayouts, respTx] = await Promise.all([
-        fetch("/api/admin/stats", { headers: authHeaders }),
-        fetch("/api/admin/payouts", { headers: authHeaders }),
-        fetch("/api/admin/transactions", { headers: authHeaders })
+        authFetch("/api/admin/stats", {}, user, onTokenRefresh),
+        authFetch("/api/admin/payouts", {}, user, onTokenRefresh),
+        authFetch("/api/admin/transactions", {}, user, onTokenRefresh)
       ]);
       if (!response.ok) {
         throw new Error("Impossible de communiquer avec l'interface d'administration.");
@@ -93,11 +93,11 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   async function handleUpdateEventStatus(id: string, status: "approved" | "rejected") {
     if (!confirm(`Confirmer le changement de statut en ${status} ?`)) return;
     try {
-      const response = await fetch(`/api/admin/events/${id}/status`, {
+      const response = await authFetch(`/api/admin/events/${id}/status`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", ...authHeaders },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status })
-      });
+      }, user, onTokenRefresh);
       if (!response.ok) throw new Error("Erreur de mise à jour.");
       fetchAdminData();
     } catch (err: any) { alert(err.message); }
@@ -106,11 +106,11 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   async function handleUpdatePayout(id: string, status: "completed" | "rejected") {
     if (!confirm(`Marquer ce retrait comme ${status} ?`)) return;
     try {
-      const response = await fetch(`/api/admin/payouts/${id}/status`, {
+      const response = await authFetch(`/api/admin/payouts/${id}/status`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", ...authHeaders },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status })
-      });
+      }, user, onTokenRefresh);
       if (!response.ok) throw new Error("Erreur de mise à jour.");
       fetchAdminData();
     } catch (err: any) { alert(err.message); }
@@ -119,7 +119,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   async function handleDeleteEvent(id: string) {
     if (!confirm("Êtes-vous sûr de vouloir supprimer cet événement de la plateforme ? Cette action est irréversible.")) return;
     try {
-      const response = await fetch(`/api/admin/events/${id}`, { method: "DELETE", headers: authHeaders });
+      const response = await authFetch(`/api/admin/events/${id}`, { method: "DELETE" }, user, onTokenRefresh);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || "Erreur de suppression.");
@@ -133,7 +133,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   async function handleDeleteUser(id: string) {
     if (!confirm("Êtes-vous sûr de vouloir révoquer ce compte utilisateur de ClicBillet ? Cette action est irréversible.")) return;
     try {
-      const response = await fetch(`/api/admin/users/${id}`, { method: "DELETE", headers: authHeaders });
+      const response = await authFetch(`/api/admin/users/${id}`, { method: "DELETE" }, user, onTokenRefresh);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || "Erreur de révocation.");
