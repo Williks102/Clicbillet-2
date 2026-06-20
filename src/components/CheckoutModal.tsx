@@ -118,16 +118,24 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
       }
 
       // INTEGRATION PAIEMENT PRO (CÔTE D'IVOIRE)
+      // diagContext garde la trace de ce qui a été tenté, pour pouvoir comprendre
+      // un échec a posteriori (console du navigateur) sans avoir à reproduire le bug.
+      const diagContext: Record<string, unknown> = { ticketId: data.ticket.id, method };
+      let paymentFailureReason: string | null = null;
+
       try {
         const merchantId = (import.meta as any).env.VITE_PAIEMENT_PRO_MERCHANT_ID || "ID_MARCHAND_DEMO";
         const LibPaiementPro = (window as any).PaiementPro;
-        
+        diagContext.merchantId = merchantId;
+        diagContext.sdkLoaded = !!LibPaiementPro;
+        diagContext.sdkIsFallback = !!LibPaiementPro?.isFallback;
+
         if (LibPaiementPro) {
           console.log("[PaiementPro] Initialisation du SDK avec l'ID marchand :", merchantId);
           const pPro = new LibPaiementPro(merchantId);
-          
+
           pPro.amount = totalPrice;
-          
+
           // Mappage des canaux vers les codes officiels de Côte d'Ivoire (CI)
           const channelMapping: Record<string, string> = {
             orange_money: "OMCIV2",
@@ -137,57 +145,83 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
             card: "CARD"
           };
           pPro.channel = channelMapping[method] || "WAVECI";
-          
+
           // Référence unique de notre plateforme
           pPro.referenceNumber = data.ticket.id || `TX-${Date.now()}`;
           pPro.customerEmail = user?.email || "customer@example.com";
-          
+
           // Séparation prénom / nom pour respecter les obligations du SDK
           const fullName = user?.name || "Client ClicBillet";
           const nameParts = fullName.trim().split(/\s+/);
           pPro.customerLastname = nameParts[0] || "Client";
           pPro.customerFirstName = nameParts.slice(1).join(" ") || "Billet";
-          
+
           pPro.customerPhoneNumber = phoneNumber || "0700000000";
           pPro.description = `Billet ${tier.toUpperCase()} - ${event.title}`;
-          
+
           pPro.notificationURL = data.notificationUrl || `${window.location.origin}/api/payment/callback`;
           pPro.returnURL = `${window.location.origin}/?payment_success=true&ticket_id=${data.ticket.id}`;
           pPro.returnContext = JSON.stringify({ ticketId: data.ticket.id, userId: user?.id });
-          
-          await pPro.getUrlPayment();
-          
+
+          try {
+            await pPro.getUrlPayment();
+          } catch (callErr: any) {
+            // Le SDK PaiementPro échoue silencieusement en cas de coupure réseau ou de
+            // réponse non-JSON du gateway : on capture explicitement pour le diagnostic.
+            diagContext.getUrlPaymentError = callErr?.message || String(callErr);
+            console.error("[PaiementPro] Échec de l'appel getUrlPayment()", diagContext, callErr);
+            throw new Error("La passerelle de paiement n'a pas répondu. Réessayez dans quelques instants.");
+          }
+
+          diagContext.pProSuccess = pPro.success;
+          diagContext.pProUrl = pPro.url;
+
           if (pPro.success && pPro.url) {
             console.log("[PaiementPro] Lien de paiement généré :", pPro.url);
             setPaymentUrl(pPro.url);
-            
+
             // Rediriger la page courante vers la passerelle de paiement
             window.location.href = pPro.url;
             return; // on arrête le JS ici puisque l'on quitte la page
-          } else {
-            console.warn("[PaiementPro] Succès de l'initialisation non retourné par l'API, mode simulation actif.");
-            // On simule l'appel du webhook en local pour débloquer le ticket
-            fetch("/api/dev/simulate-payment", {
-                method: "POST",
-                headers: devSimulateHeaders,
-                body: JSON.stringify({ referenceNumber: data.ticket.id })
-            }).then(() => window.dispatchEvent(new CustomEvent("refresh_tickets"))).catch(e => console.error("Erreur hook de test:", e));
           }
+
+          console.error("[PaiementPro] Initialisation refusée par la passerelle (success=false).", diagContext);
+          paymentFailureReason = "La passerelle de paiement a refusé d'initialiser la transaction. Vérifiez vos informations ou réessayez.";
         } else {
-          console.warn("[PaiementPro SDK] SDK non chargé globalement dans l'index.html, utilisation de la simulation locale.");
-          fetch("/api/dev/simulate-payment", {
-              method: "POST",
-              headers: devSimulateHeaders,
-              body: JSON.stringify({ referenceNumber: data.ticket.id })
-          }).then(() => window.dispatchEvent(new CustomEvent("refresh_tickets"))).catch(e => console.error("Erreur hook de test:", e));
+          console.error("[PaiementPro] SDK non chargé globalement dans l'index.html.", diagContext);
+          paymentFailureReason = "Le module de paiement n'a pas pu être chargé (connexion réseau ?). Veuillez réessayer.";
         }
-      } catch (sdkErr) {
-        console.error("[PaiementPro SDK Integration Error]", sdkErr);
-        fetch("/api/dev/simulate-payment", {
-            method: "POST",
-            headers: devSimulateHeaders,
-            body: JSON.stringify({ referenceNumber: data.ticket.id })
-        }).then(() => window.dispatchEvent(new CustomEvent("refresh_tickets"))).catch(e => console.error("Erreur hook de test:", e));
+      } catch (sdkErr: any) {
+        console.error("[PaiementPro SDK Integration Error]", diagContext, sdkErr);
+        paymentFailureReason = sdkErr?.message || "Une erreur technique est survenue lors de l'initialisation du paiement.";
+      }
+
+      // Le SDK n'a pas pu rediriger vers une vraie passerelle de paiement : on tente le
+      // déblocage de secours réservé au développement (route 404 en production, par design
+      // anti-fraude — cf. /api/dev/simulate-payment). On n'affiche un succès que si cet appel
+      // confirme réellement le billet ; sinon on remonte l'erreur à l'utilisateur.
+      try {
+        const simRes = await fetch("/api/dev/simulate-payment", {
+          method: "POST",
+          headers: devSimulateHeaders,
+          body: JSON.stringify({ referenceNumber: data.ticket.id })
+        });
+
+        if (simRes.ok) {
+          window.dispatchEvent(new CustomEvent("refresh_tickets"));
+          paymentFailureReason = null;
+        } else {
+          const simBody = await simRes.text().catch(() => "");
+          console.error("[Simulation paiement] Refusée par le serveur", { status: simRes.status, simBody, ...diagContext });
+        }
+      } catch (simErr) {
+        console.error("[Simulation paiement] Erreur réseau", diagContext, simErr);
+      }
+
+      if (paymentFailureReason) {
+        setError(paymentFailureReason);
+        setStep("details");
+        return;
       }
 
       // Checkout Success! Go to step 4
