@@ -13,10 +13,33 @@ interface WaitingRoomProps {
 
 const POLL_INTERVAL_MS = 4000;
 
+function formatCountdown(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 export default function WaitingRoom({ event, user, onTokenRefresh, onGranted, onCancel }: WaitingRoomProps) {
   const [position, setPosition] = useState<number | null>(null);
+  const [estimatedActiveAt, setEstimatedActiveAt] = useState<string | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const grantedRef = useRef(false);
+
+  // Compte à rebours local entre deux polls, dérivé de l'estimation renvoyée par le serveur.
+  useEffect(() => {
+    if (!estimatedActiveAt) {
+      setSecondsLeft(null);
+      return;
+    }
+    const target = new Date(estimatedActiveAt).getTime();
+    function tick() {
+      setSecondsLeft(Math.max(0, Math.round((target - Date.now()) / 1000)));
+    }
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [estimatedActiveAt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +77,7 @@ export default function WaitingRoom({ event, user, onTokenRefresh, onGranted, on
         return;
       }
       setPosition(data.position);
+      setEstimatedActiveAt(data.estimatedActiveAt ?? null);
       pollTimer = setTimeout(checkStatus, POLL_INTERVAL_MS);
     }
 
@@ -103,9 +127,17 @@ export default function WaitingRoom({ event, user, onTokenRefresh, onGranted, on
         {error ? (
           <p className="mt-6 text-sm font-semibold text-red-600">{error}</p>
         ) : position !== null ? (
-          <div className="mt-6 w-full rounded-2xl bg-gray-50 border border-gray-100 py-5">
-            <p className="text-xs font-bold uppercase tracking-wider text-gray-400">Votre position</p>
-            <p className="mt-1 text-3xl font-extrabold text-orange-600">{position}</p>
+          <div className="mt-6 grid w-full grid-cols-2 gap-3">
+            <div className="rounded-2xl bg-gray-50 border border-gray-100 py-5">
+              <p className="text-xs font-bold uppercase tracking-wider text-gray-400">Votre position</p>
+              <p className="mt-1 text-3xl font-extrabold text-orange-600">{position}</p>
+            </div>
+            <div className="rounded-2xl bg-gray-50 border border-gray-100 py-5">
+              <p className="text-xs font-bold uppercase tracking-wider text-gray-400">Temps estimé</p>
+              <p className="mt-1 text-3xl font-extrabold text-orange-600">
+                {secondsLeft !== null ? formatCountdown(secondsLeft) : "—"}
+              </p>
+            </div>
           </div>
         ) : (
           <div className="mt-6 h-10 w-10 animate-spin rounded-full border-4 border-orange-200 border-t-orange-600" />

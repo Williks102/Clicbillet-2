@@ -32,6 +32,7 @@ export interface Event {
 export interface WaitingRoomStatus {
   status: "waiting" | "active" | "expired";
   position: number;
+  estimatedActiveAt?: string | null;
 }
 
 export interface PayoutRequest {

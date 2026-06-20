@@ -1410,7 +1410,7 @@ async function getWaitingRoomEventConfig(eventId: string): Promise<{ enabled: bo
   };
 }
 
-async function advanceAndGetWaitingRoomStatus(eventId: string, userId: string, config: { capacity: number; activeMinutes: number }): Promise<{ status: "waiting" | "active" | "expired"; position: number } | null> {
+async function advanceAndGetWaitingRoomStatus(eventId: string, userId: string, config: { capacity: number; activeMinutes: number }): Promise<{ status: "waiting" | "active" | "expired"; position: number; estimatedActiveAt: string | null } | null> {
   if (!supabase) return null;
 
   const { error: rpcError } = await supabase.rpc("advance_waiting_room", {
@@ -1438,10 +1438,46 @@ async function advanceAndGetWaitingRoomStatus(eventId: string, userId: string, c
       .eq("event_id", eventId)
       .eq("status", "waiting")
       .lt("joined_at", entry.joined_at);
-    return { status: "waiting", position: (count || 0) + 1 };
+    const position = (count || 0) + 1;
+
+    // Estimation : la place active qui expire la plus tôt parmi les `position`
+    // places en cours d'expiration libère le tour de cet utilisateur (approximation,
+    // ignore les arrivées futures dans la file).
+    let estimatedActiveAt: string | null = null;
+    const { data: activeEntries } = await supabase
+      .from("waiting_room_entries")
+      .select("active_until")
+      .eq("event_id", eventId)
+      .eq("status", "active")
+      .order("active_until", { ascending: true })
+      .limit(position);
+    if (activeEntries && activeEntries.length > 0) {
+      const target = activeEntries[Math.min(position, activeEntries.length) - 1];
+      estimatedActiveAt = target.active_until;
+    }
+
+    return { status: "waiting", position, estimatedActiveAt };
   }
 
-  return { status: entry.status, position: 0 };
+  return { status: entry.status, position: 0, estimatedActiveAt: null };
+}
+
+// Libère immédiatement la place active d'un utilisateur dès que son achat est finalisé
+// (callback de paiement, simulation dev, validation manuelle admin), au lieu d'attendre
+// l'expiration de active_until. Sans effet si la salle d'attente n'est pas utilisée pour cet
+// événement/utilisateur (aucune ligne "active" correspondante) ou si Supabase est indisponible.
+async function releaseWaitingRoomSlot(eventId: string | null | undefined, userId: string | null | undefined): Promise<void> {
+  if (!supabase || !eventId || !userId) return;
+  try {
+    await supabase
+      .from("waiting_room_entries")
+      .update({ status: "expired" })
+      .eq("event_id", eventId)
+      .eq("user_id", userId)
+      .eq("status", "active");
+  } catch (err: any) {
+    console.error("[Waiting Room] Erreur libération de place:", err.message || err);
+  }
 }
 
 app.post("/api/waiting-room/join", requireAuth, async (req: express.Request, res: express.Response) => {
@@ -1929,6 +1965,7 @@ app.post("/api/payment/callback", async (req: express.Request, res: express.Resp
             } else {
               console.log(`[PaiementPro Callback] Mise à jour Supabase réussie pour id=${ticket.id}.`);
               const paidTicket = updated || ticket;
+              runInBackground(releaseWaitingRoomSlot(paidTicket.event_id, paidTicket.buyer_id));
               runInBackground(sendTicketEmail({
                 buyerEmail: paidTicket.buyer_email,
                 buyerName: paidTicket.buyer_name,
@@ -1969,6 +2006,7 @@ app.post("/api/payment/callback", async (req: express.Request, res: express.Resp
         ticket.transactionRef = newRef;
         saveDB(db);
         console.log(`[PaiementPro Callback] Ticket local mis à jour: id=${ticket.id}, transactionRef: ${oldRef} -> ${newRef}`);
+        runInBackground(releaseWaitingRoomSlot(ticket.eventId, ticket.buyerId));
         runInBackground(sendTicketEmail(ticket));
       }
     }
@@ -2003,6 +2041,7 @@ app.post("/api/dev/simulate-payment", async (req: express.Request, res: express.
       if (ticket && !fetchErr) {
         updated = true;
         await supabase.from("tickets").update({ transaction_ref: String(ticket.transaction_ref || "").replace("PENDING-", "PAID-") }).eq("id", ticket.id);
+        runInBackground(releaseWaitingRoomSlot(ticket.event_id, ticket.buyer_id));
         runInBackground(sendTicketEmail({
           buyerEmail: ticket.buyer_email,
           buyerName: ticket.buyer_name,
@@ -2027,6 +2066,7 @@ app.post("/api/dev/simulate-payment", async (req: express.Request, res: express.
       ticket.transactionRef = String(ticket.transactionRef || "").replace("PENDING-", "PAID-");
       saveDB(db);
       updated = true;
+      runInBackground(releaseWaitingRoomSlot(ticket.eventId, ticket.buyerId));
       runInBackground(sendTicketEmail(ticket));
     }
   }
@@ -2626,6 +2666,7 @@ app.post("/api/admin/validate-payment", requireAuth, requireRole("admin"), async
 
       if (updateErr) throw updateErr;
 
+      runInBackground(releaseWaitingRoomSlot(ticket.event_id, ticket.buyer_id));
       runInBackground(sendTicketEmail({
         buyerEmail: ticket.buyer_email,
         buyerName: ticket.buyer_name,
@@ -2653,6 +2694,7 @@ app.post("/api/admin/validate-payment", requireAuth, requireRole("admin"), async
 
   ticket.transactionRef = ticket.transactionRef.replace("PENDING-", "PAID-");
   saveDB(db);
+  runInBackground(releaseWaitingRoomSlot(ticket.eventId, ticket.buyerId));
   runInBackground(sendTicketEmail(ticket));
 
   res.json({ success: true, message: "Paiement validé localement." });
