@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { X, Check, ArrowRight, ShieldCheck, CreditCard, MessageSquare, Ticket, Sparkles, Smartphone } from "lucide-react";
 import { Event, User, PaymentMethod, PaymentDetails } from "../types";
+import ResponsiveSheet from "./ResponsiveSheet";
 
 interface CheckoutModalProps {
   event: Event;
@@ -235,9 +236,12 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs" id="checkout-modal-overlay">
-      <div className="relative w-full max-w-lg rounded-3xl bg-white shadow-2xl overflow-hidden border border-gray-100 flex flex-col" id="checkout-modal-panel">
-        
+    <ResponsiveSheet
+      id="checkout-modal-overlay"
+      panelId="checkout-modal-panel"
+      onClose={onClose}
+      panelClassName="max-w-lg overflow-hidden border border-gray-100 flex flex-col max-h-[92vh] sm:max-h-none"
+    >
         {/* Header bar titles */}
         <div className="flex items-center justify-between border-b border-gray-50 bg-gray-50/50 px-6 py-4">
           <div className="flex items-center space-x-2">
@@ -546,8 +550,6 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
             </div>
           )}
         </div>
-
-      </div>
-    </div>
+    </ResponsiveSheet>
   );
 }

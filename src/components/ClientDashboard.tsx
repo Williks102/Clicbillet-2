@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Ticket as TicketIcon, Calendar, MapPin, Download, CheckCircle2, AlertTriangle, ExternalLink, Printer, Sparkles } from "lucide-react";
 import { Ticket, User } from "../types";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
+import ResponsiveSheet from "./ResponsiveSheet";
 
 interface ClientDashboardProps {
   user: User;
@@ -299,9 +300,13 @@ export default function ClientDashboard({ user, onTokenRefresh }: ClientDashboar
 
       {/* Ticket Details & QR Code Drawer Modal */}
       {selectedTicket && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 overflow-y-auto backdrop-blur-xs" id="ticket-modal-overlay">
-          <div className="relative w-full max-w-md my-8 rounded-3xl bg-white border border-orange-50 shadow-2xl overflow-hidden print:p-0 print:border-none print:shadow-none" id="ticket-modal-box">
-            
+        <ResponsiveSheet
+          id="ticket-modal-overlay"
+          panelId="ticket-modal-box"
+          onClose={() => setSelectedTicket(null)}
+          overlayClassName="sm:overflow-y-auto"
+          panelClassName="max-w-md sm:my-8 border border-orange-50 overflow-x-hidden overflow-y-auto max-h-[92vh] sm:max-h-none print:p-0 print:border-none print:shadow-none"
+        >
             {/* Modal header details */}
             <div className="bg-orange-600 px-6 py-5 text-white flex justify-between items-center print:hidden">
               <span className="text-sm font-extrabold flex items-center space-x-1">
@@ -425,9 +430,7 @@ export default function ClientDashboard({ user, onTokenRefresh }: ClientDashboar
                 Tout est bon !
               </button>
             </div>
-
-          </div>
-        </div>
+        </ResponsiveSheet>
       )}
     </div>
   );

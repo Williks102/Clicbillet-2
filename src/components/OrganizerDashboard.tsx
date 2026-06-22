@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Plus, LayoutDashboard, Calendar, MapPin, Tag, TrendingUp, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X } from "lucide-react";
 import { Event, User, SalesStatus } from "../types";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
+import ResponsiveSheet from "./ResponsiveSheet";
 
 interface OrganizerDashboardProps {
   user: User;
@@ -1320,11 +1321,13 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
 
       {/* OVERLAY EDIT EVENT MODAL */}
       {editingEvent && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-6 relative">
+        <ResponsiveSheet
+          onClose={() => setEditingEvent(null)}
+          panelClassName="max-w-2xl border border-gray-100 max-h-[90vh] overflow-y-auto p-6 space-y-6"
+        >
             <button
               onClick={() => setEditingEvent(null)}
-              className="absolute top-4 right-4 h-8 w-8 rounded-full border border-gray-150 flex items-center justify-center text-gray-400 hover:text-gray-650 hover:bg-gray-50 transition"
+              className="absolute top-10 right-4 sm:top-4 h-8 w-8 rounded-full border border-gray-150 flex items-center justify-center text-gray-400 hover:text-gray-650 hover:bg-gray-50 transition"
               title="Fermer"
             >
               ✕
@@ -1514,8 +1517,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </ResponsiveSheet>
       )}
 
       {/* Payouts subtab */}

@@ -185,6 +185,33 @@ CREATE POLICY "Public read access to approved events"
 -- server.ts, jamais exposée au frontend) peut lire/écrire ces données.
 
 -- ==========================================
+-- 8bis. SUPABASE REALTIME — confirmation de paiement instantanée
+-- ==========================================
+-- Exception scoped à l'architecture "frontend ne touche jamais Supabase directement" :
+-- le frontend s'abonne en lecture seule aux changements de SES PROPRES tickets (via son
+-- propre JWT Supabase Auth, déjà émis au login) pour afficher un toast dès que le paiement
+-- est confirmé côté serveur, sans avoir à repasser par /api/*. Aucune autre table n'est
+-- concernée, et l'écriture continue de passer exclusivement par server.ts (service_role).
+
+DROP POLICY IF EXISTS "tickets_select_own" ON public.tickets;
+CREATE POLICY "tickets_select_own"
+  ON public.tickets
+  FOR SELECT
+  TO authenticated
+  USING (buyer_id = (auth.uid())::text);
+
+-- Replica identity FULL nécessaire pour que les événements UPDATE de Realtime incluent
+-- l'ancienne valeur des colonnes (notamment transaction_ref), indispensable pour détecter
+-- côté client la transition "PENDING-..." -> "PAID-...". Par défaut (REPLICA IDENTITY
+-- DEFAULT), seule la clé primaire est incluse dans le "old record".
+ALTER TABLE public.tickets REPLICA IDENTITY FULL;
+
+-- Active la réplication realtime sur la table tickets. Si cette commande échoue avec
+-- "publication supabase_realtime does not exist", utilisez plutôt le Dashboard :
+-- Database > Replication > activez la table "tickets".
+ALTER PUBLICATION supabase_realtime ADD TABLE public.tickets;
+
+-- ==========================================
 -- 9. WEBHOOK DE BIENVENUE (Supabase -> Resend)
 -- ==========================================
 -- Objectif : à chaque INSERT dans public.users, notifier server.ts qui envoie

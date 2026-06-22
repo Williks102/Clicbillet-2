@@ -137,6 +137,21 @@ const PAYMENT_GATEWAY_ORIGINS = [
 // dans la page (preamble HMR) qu'on doit encore autoriser, sinon le rechargement à chaud casse.
 const isProduction = process.env.NODE_ENV === "production";
 
+// Le frontend s'abonne en direct (WebSocket) à Supabase Realtime pour le toast de
+// confirmation de paiement (cf. App.tsx) — seule exception à "le frontend ne parle qu'à
+// /api/*". On dérive le host exact du projet Supabase configuré plutôt que d'autoriser
+// tout *.supabase.co.
+const SUPABASE_HOST = (() => {
+  try {
+    return SUPABASE_URL ? new URL(SUPABASE_URL).host : "";
+  } catch {
+    return "";
+  }
+})();
+const SUPABASE_REALTIME_ORIGINS = SUPABASE_HOST
+  ? [`https://${SUPABASE_HOST}`, `wss://${SUPABASE_HOST}`]
+  : [];
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -144,7 +159,7 @@ app.use(helmet({
       scriptSrc: isProduction
         ? ["'self'", "https://paiementpro.net"]
         : ["'self'", "'unsafe-inline'", "https://paiementpro.net"],
-      connectSrc: ["'self'", `ws://127.0.0.1:${HMR_PORT}`, `ws://localhost:${HMR_PORT}`, ...PAYMENT_GATEWAY_ORIGINS],
+      connectSrc: ["'self'", `ws://127.0.0.1:${HMR_PORT}`, `ws://localhost:${HMR_PORT}`, ...PAYMENT_GATEWAY_ORIGINS, ...SUPABASE_REALTIME_ORIGINS],
       styleSrc: ["'self'", "https:", "'unsafe-inline'"],
       imgSrc: ["'self'", "https:", "data:"],
       fontSrc: ["'self'", "https:", "data:"],
@@ -903,6 +918,16 @@ const validateVerifyTicket = (req: express.Request, res: express.Response, next:
 // API Endpoints: Event Fetching
 app.get("/api/events", async (req: express.Request, res: express.Response) => {
   const { includePending } = req.query;
+
+  // Catalogue public (sans includePending) : identique pour tout visiteur anonyme, peut
+  // être mis en cache par le CDN Vercel quelques secondes pour absorber le trafic sans
+  // retaper Supabase à chaque requête. La variante includePending (événements non
+  // approuvés) ne doit jamais être mise en cache publiquement.
+  if (!includePending) {
+    res.set("Cache-Control", "public, max-age=20, stale-while-revalidate=60");
+  } else {
+    res.set("Cache-Control", "no-store");
+  }
 
   if (isSupabaseEnabled && supabase) {
     try {
