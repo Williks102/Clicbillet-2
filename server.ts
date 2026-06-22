@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import { waitUntil } from "@vercel/functions";
+import rateLimit from "express-rate-limit";
 
 // Load environment variables from .env file
 dotenv.config();
@@ -85,13 +86,40 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const HMR_PORT = Number(process.env.HMR_PORT || process.env.WS_PORT) || 24678;
 
+// Sur Vercel (et tout déploiement derrière un proxy/CDN), req.ip ne reflète l'IP réelle du
+// client que si on fait confiance au premier hop de X-Forwarded-For posé par le edge Vercel.
+// Sans ça, express-rate-limit verrait une seule IP pour tout le monde (le proxy) et bloquerait
+// soit personne, soit tout le monde en même temps.
+app.set("trust proxy", 1);
+
+function makeRateLimiter(max: number, windowMs: number, message: string) {
+  return rateLimit({
+    windowMs,
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (_req: express.Request, res: express.Response) => {
+      res.status(429).json({ error: message });
+    }
+  });
+}
+
+// Limites adaptées aux routes réellement sensibles de cette app (pas de générique copié-collé) :
+// - login : cible le brute-force de mot de passe.
+// - checkout : laisse une marge pour les retries légitimes (échec PaiementPro, changement de
+//   moyen de paiement) tout en bornant le spam de création de tickets PENDING.
+// - apiGeneral : filet de sécurité large pour le reste de l'API.
+const loginRateLimiter = makeRateLimiter(10, 15 * 60 * 1000, "Trop de tentatives de connexion. Réessayez dans quelques minutes.");
+const checkoutRateLimiter = makeRateLimiter(20, 10 * 60 * 1000, "Trop de tentatives d'achat. Réessayez dans quelques minutes.");
+const apiGeneralRateLimiter = makeRateLimiter(300, 5 * 60 * 1000, "Trop de requêtes. Réessayez dans quelques instants.");
+
 // Basic security headers
 // Origines des passerelles de paiement (Paiement Pro et les opérateurs mobile money qu'il
 // route en arrière-plan) ainsi que le domaine de production, à autoriser pour les redirections,
 // requêtes XHR et formulaires de paiement.
 const PAYMENT_GATEWAY_ORIGINS = [
-  "https://clicbillet.com",
-  "https://www.clicbillet.com",
+  "https://monticket.online",
+  "https://www.monticket.online",
   "https://*.paiementpro.net",
   "https://paiementpro.net",
   "https://mpayment.orange-money.com",
@@ -529,6 +557,7 @@ app.use(express.json({
   }
 }));
 app.use(express.urlencoded({ extended: true }));
+app.use("/api", apiGeneralRateLimiter);
 
 function extractBearerToken(req: express.Request): string | null {
   const authHeader = req.headers.authorization;
@@ -1052,7 +1081,7 @@ app.post("/api/events", requireAuth, requireRole("organizer", "admin"), validate
 });
 
 // Authentication Endpoints
-app.post("/api/auth/register", validateRegister, async (req: express.Request, res: express.Response) => {
+app.post("/api/auth/register", loginRateLimiter, validateRegister, async (req: express.Request, res: express.Response) => {
   const { email, password, name, role } = req.body;
 
   if (!email || !password || !name || !role) {
@@ -1209,7 +1238,7 @@ app.post("/api/auth/register", validateRegister, async (req: express.Request, re
   });
 });
 
-app.post("/api/auth/login", validateLogin, async (req: express.Request, res: express.Response) => {
+app.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: express.Request, res: express.Response) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
@@ -1549,7 +1578,7 @@ app.get("/api/waiting-room/status", requireAuth, async (req: express.Request, re
 });
 
 // Checkout Purchase Ticket Endpoint
-app.post("/api/checkout", requireAuth, validateCheckout, async (req: express.Request, res: express.Response) => {
+app.post("/api/checkout", checkoutRateLimiter, requireAuth, validateCheckout, async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
   const { eventId, buyerName, tier, quantity, paymentDetails } = req.body;
   // L'identité de l'acheteur vient toujours du token authentifié, jamais du body :
