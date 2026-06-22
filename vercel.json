@@ -19,6 +19,18 @@
       "dest": "server.ts"
     },
     {
+      "src": "/(.*)",
+      "headers": {
+        "X-Frame-Options": "DENY",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(self)",
+        "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self' https://paiementpro.net; connect-src 'self' https://monticket.online https://www.monticket.online https://*.paiementpro.net https://paiementpro.net https://mpayment.orange-money.com https://multi.app.orange-money.com https://maxit-link.com https://pay.wave.com https://www.wave.com https://*.confirm.wave.com https://promo.wave.com; style-src 'self' https: 'unsafe-inline'; img-src 'self' https: data:; font-src 'self' https: data:; object-src 'none'; frame-src 'self' https://monticket.online https://www.monticket.online https://*.paiementpro.net https://paiementpro.net https://mpayment.orange-money.com https://multi.app.orange-money.com https://maxit-link.com https://pay.wave.com https://www.wave.com https://*.confirm.wave.com https://promo.wave.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self' https://monticket.online https://www.monticket.online https://*.paiementpro.net https://paiementpro.net https://mpayment.orange-money.com https://multi.app.orange-money.com https://maxit-link.com https://pay.wave.com https://www.wave.com https://*.confirm.wave.com https://promo.wave.com; upgrade-insecure-requests"
+      },
+      "continue": true
+    },
+    {
       "handle": "filesystem"
     },
     {
