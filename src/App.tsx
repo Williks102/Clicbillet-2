@@ -8,8 +8,11 @@ import QrScannerTab from "./components/QrScannerTab";
 import CheckoutModal from "./components/CheckoutModal";
 import AdminDashboard from "./components/AdminDashboard";
 import WaitingRoom from "./components/WaitingRoom";
+import ToastStack, { ToastItem } from "./components/ToastStack";
 import { User, Event } from "./types";
 import { Calendar, Compass, ShieldAlert, Sparkles } from "lucide-react";
+import { supabaseClient } from "./lib/supabaseClient";
+import { cachedFetch } from "./lib/fetchCache";
 
 export default function App() {
   const [user, setUser] = useState<User | null>((() => {
@@ -29,16 +32,27 @@ export default function App() {
   const [pendingEvent, setPendingEvent] = useState<Event | null>(null);
   const [authModalVisible, setAuthModalVisible] = useState(false);
   const [systemAlert, setSystemAlert] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
 
-  // Fetch events list on server side
-  async function fetchEvents() {
+  function pushToast(message: string) {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setToasts((prev) => [...prev, { id, message }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 6000);
+  }
+
+  function dismissToast(id: string) {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }
+
+  // Fetch events list on server side. force=true bypasse le cache client (après une
+  // mutation connue : achat de ticket, création d'événement) pour ne pas afficher de
+  // données obsolètes pendant les ~20s de fraîcheur du cache.
+  async function fetchEvents(force = false) {
     setLoadingEvents(true);
     try {
-      const response = await fetch("/api/events");
-      if (!response.ok) {
-        throw new Error("Impossible de communiquer avec la billetterie backend.");
-      }
-      const data = await response.json();
+      const data = await cachedFetch<Event[]>("/api/events", { ttlMs: 20_000, force });
       setEvents(data);
     } catch (err: any) {
       console.error(err);
@@ -83,6 +97,37 @@ export default function App() {
       }
     }
   }, []);
+
+  // Confirmation de paiement instantanée : on s'abonne aux changements de SES PROPRES
+  // tickets via Supabase Realtime (policy "tickets_select_own", scoped à buyer_id = auth.uid()).
+  // Dès qu'un ticket passe de PENDING- à PAID- (confirmé par le webhook PaiementPro côté
+  // serveur), on affiche un toast et on rafraîchit la liste de billets affichée.
+  useEffect(() => {
+    if (!supabaseClient || !user?.id || !user?.token) return;
+
+    supabaseClient.realtime.setAuth(user.token);
+
+    const channel = supabaseClient
+      .channel(`tickets-buyer-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "tickets", filter: `buyer_id=eq.${user.id}` },
+        (payload) => {
+          const oldRef = String((payload.old as any)?.transaction_ref || "");
+          const newRef = String((payload.new as any)?.transaction_ref || "");
+          if (oldRef.startsWith("PENDING-") && newRef.startsWith("PAID-")) {
+            const eventTitle = (payload.new as any)?.event_title || "votre événement";
+            pushToast(`Paiement confirmé ! Votre billet pour "${eventTitle}" est prêt.`);
+            window.dispatchEvent(new CustomEvent("refresh_tickets"));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabaseClient.removeChannel(channel);
+    };
+  }, [user?.id, user?.token]);
 
   function handleLoginSuccess(loggedInUser: User) {
     setUser(loggedInUser);
@@ -147,8 +192,10 @@ export default function App() {
 
   function handleCheckoutSuccess(ticket: any) {
     setCheckoutEvent(null);
-    // Refresh events lists to reflect decremented ticket inventory instantly
-    fetchEvents();
+    // Refresh events lists to reflect decremented ticket inventory instantly (force=true
+    // pour contourner le cache client, sinon l'inventaire affiché resterait obsolète
+    // jusqu'à expiration du TTL).
+    fetchEvents(true);
     // Redirect buyer to their tickets page
     setActiveTab("client-dashboard");
   }
@@ -215,7 +262,7 @@ export default function App() {
               <OrganizerDashboard
                 user={user}
                 events={events}
-                onEventCreated={fetchEvents}
+                onEventCreated={() => fetchEvents(true)}
                 setActiveTab={setActiveTab}
                 onTokenRefresh={handleTokenRefresh}
               />
@@ -258,6 +305,8 @@ export default function App() {
           }}
         />
       )}
+
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
 
       {/* Page Footer */}
       <footer className="mt-auto border-t border-gray-100 bg-white py-6 text-center text-xs text-gray-400 font-semibold uppercase tracking-wider print:hidden">
