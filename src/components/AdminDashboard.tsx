@@ -5,6 +5,7 @@ import {
   Search, ShieldAlert, Sparkles, LogOut, Ticket as TicketIcon, TrendingUp, Filter
 } from "lucide-react";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
+import { isEventPast } from "../lib/eventStatus";
 
 interface AdminDashboardProps {
   user: User;
@@ -479,6 +480,7 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                 <tbody className="divide-y divide-gray-50">
                   {filteredEvents.map((evt) => {
                     const remains = evt.totalTickets - evt.ticketsSold;
+                    const isPast = evt.status === "approved" && isEventPast(evt);
                     return (
                       <tr key={evt.id} className="hover:bg-gray-50/50">
                         <td className="py-3">
@@ -495,6 +497,8 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                             <span className="px-2 py-1 bg-amber-50 text-amber-600 rounded-md text-[10px] font-bold uppercase border border-amber-200">En Attente</span>
                           ) : evt.status === "rejected" ? (
                             <span className="px-2 py-1 bg-red-50 text-red-600 rounded-md text-[10px] font-bold uppercase border border-red-200">Rejeté</span>
+                          ) : isPast ? (
+                            <span className="px-2 py-1 bg-slate-100 text-slate-500 rounded-md text-[10px] font-bold uppercase border border-slate-200">Terminé</span>
                           ) : (
                             <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-md text-[10px] font-bold uppercase border border-emerald-200">Approuvé</span>
                           )}

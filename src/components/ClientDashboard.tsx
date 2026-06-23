@@ -282,8 +282,7 @@ export default function ClientDashboard({ user, onTokenRefresh }: ClientDashboar
                   <div className="h-3 w-3 -mr-6.5 rounded-full bg-gray-50 border-l border-gray-100" />
                 </div>
 
-                <div className="flex items-center justify-between text-xs pt-1">
-                  <span className="font-bold text-gray-400 font-mono">Qte: {tkt.quantity}</span>
+                <div className="flex items-center justify-end text-xs pt-1">
                   <span className="font-extrabold text-orange-600">Afficher le pass &rarr;</span>
                 </div>
               </div>

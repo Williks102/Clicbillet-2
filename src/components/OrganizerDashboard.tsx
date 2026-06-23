@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Plus, LayoutDashboard, Calendar, MapPin, Tag, TrendingUp, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X } from "lucide-react";
 import { Event, User, SalesStatus } from "../types";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
+import { isEventPast } from "../lib/eventStatus";
 
 interface OrganizerDashboardProps {
   user: User;
@@ -460,6 +461,15 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   // Filter events created specifically by this organizer
   const myEvents = events.filter((e) => e.organizerId === user.id);
 
+  // CA brut par événement, pour l'afficher sur la jauge de ventes de chaque carte évènement.
+  const eventRevenueByEventId = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const t of stats?.tickets || []) {
+      map[t.eventId] = (map[t.eventId] || 0) + Number(t.pricePaid || 0);
+    }
+    return map;
+  }, [stats]);
+
   return (
     <div className="space-y-8 py-6" id="organizer-dashboard-wrapper">
       
@@ -555,8 +565,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
               </div>
               {!loadingStats && stats && (
                 <div className="mt-3.5 pt-2.5 border-t border-gray-100 flex items-center justify-between text-[10px] text-gray-400 font-semibold font-sans">
-                  <span>Brut total : {((stats as any).totalGrossRevenue || 0).toLocaleString("fr-FR")} F</span>
-                  <span className="text-orange-600">Com. Plateforme (-10%) : -{((stats as any).totalCommission || 0).toLocaleString("fr-FR")} F</span>
+                  <span>Brut total : {(stats.totalGrossRevenue || 0).toLocaleString("fr-FR")} F</span>
+                  <span className="text-orange-600">Com. Plateforme (-10%) : -{(stats.totalCommission || 0).toLocaleString("fr-FR")} F</span>
                 </div>
               )}
             </div>
@@ -687,6 +697,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                 {myEvents.map((evt) => {
                   const soldRatio = evt.ticketsSold / evt.totalTickets;
                   const remains = evt.totalTickets - evt.ticketsSold;
+                  const isPast = evt.status === "approved" && isEventPast(evt);
+                  const eventRevenue = eventRevenueByEventId[evt.id] || 0;
 
                   return (
                     <div key={evt.id} className="py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -705,6 +717,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                                <span className="px-1.5 bg-amber-50 text-amber-600 rounded text-[8px] font-bold uppercase">En Attente</span>
                              ) : evt.status === "rejected" ? (
                                <span className="px-1.5 bg-red-50 text-red-600 rounded text-[8px] font-bold uppercase">Rejeté</span>
+                             ) : isPast ? (
+                               <span className="px-1.5 bg-slate-100 text-slate-500 rounded text-[8px] font-bold uppercase">Terminé</span>
                              ) : (
                                <span className="px-1.5 bg-emerald-50 text-emerald-600 rounded text-[8px] font-bold uppercase">Approuvé</span>
                              )}
@@ -723,11 +737,14 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                           <span>{Math.round(soldRatio * 100)}%</span>
                         </div>
                         <div className="relative h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-                          <div 
+                          <div
                             style={{ width: `${Math.min(100, soldRatio * 100)}%` }}
-                            className="bg-orange-600 h-full rounded-full transition-all" 
+                            className="bg-orange-600 h-full rounded-full transition-all"
                           />
                         </div>
+                        <p className="mt-1.5 text-[10px] font-semibold text-gray-400">
+                          {evt.ticketsSold} billet{evt.ticketsSold > 1 ? "s" : ""} vendu{evt.ticketsSold > 1 ? "s" : ""} · <span className="text-orange-600 font-bold">{eventRevenue.toLocaleString("fr-FR")} F CFA</span> de CA
+                        </p>
                       </div>
 
                       {/* CTA Action details */}
