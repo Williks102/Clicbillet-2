@@ -262,3 +262,22 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.tickets;
 -- CREATE TRIGGER trg_notify_new_user
 -- AFTER INSERT ON public.users
 -- FOR EACH ROW EXECUTE FUNCTION public.notify_new_user_webhook();
+
+-- ==========================================
+-- 10. RÉINITIALISATION DE MOT DE PASSE (mot de passe oublié)
+-- ==========================================
+-- Jetons à usage unique générés par /api/auth/forgot-password. On ne stocke jamais le jeton
+-- en clair (seulement son hash SHA-256), comme pour un mot de passe : si la table fuyait, les
+-- jetons (et donc la possibilité de réinitialiser un mot de passe) ne seraient pas exploitables.
+CREATE TABLE IF NOT EXISTS public.password_resets (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON public.password_resets (user_id);
+
+ALTER TABLE public.password_resets ENABLE ROW LEVEL SECURITY;
+-- Pas de policy anon/authenticated : accès exclusif via la clé service_role (server.ts),
+-- comme les autres tables sensibles (cf. section 8 ci-dessus).

@@ -110,6 +110,7 @@ function makeRateLimiter(max: number, windowMs: number, message: string) {
 //   moyen de paiement) tout en bornant le spam de création de tickets PENDING.
 // - apiGeneral : filet de sécurité large pour le reste de l'API.
 const loginRateLimiter = makeRateLimiter(10, 15 * 60 * 1000, "Trop de tentatives de connexion. Réessayez dans quelques minutes.");
+const forgotPasswordRateLimiter = makeRateLimiter(5, 15 * 60 * 1000, "Trop de demandes de réinitialisation. Réessayez dans quelques minutes.");
 const checkoutRateLimiter = makeRateLimiter(20, 10 * 60 * 1000, "Trop de tentatives d'achat. Réessayez dans quelques minutes.");
 const apiGeneralRateLimiter = makeRateLimiter(300, 5 * 60 * 1000, "Trop de requêtes. Réessayez dans quelques instants.");
 
@@ -288,7 +289,8 @@ const INITIAL_DATABASE = {
     }
   ],
   payouts: [],
-  transactions: []
+  transactions: [],
+  passwordResets: []
 };
 
 // Initialize DB file helper
@@ -427,6 +429,24 @@ async function sendWelcomeEmail(user: { email: string; name: string; role: strin
     to: user.email,
     subject: "Bienvenue sur ClicBillet !",
     html: buildWelcomeEmailHtml(user.name, user.role)
+  });
+}
+
+// --- Réinitialisation de mot de passe ---
+function buildPasswordResetHtml(name: string, resetUrl: string): string {
+  return emailLayout("Réinitialisation de votre mot de passe", `
+    <p>Bonjour ${name},</p>
+    <p>Vous avez demandé à réinitialiser le mot de passe de votre compte ClicBillet. Cliquez sur le lien ci-dessous pour choisir un nouveau mot de passe :</p>
+    <p><a href="${resetUrl}" style="display: inline-block; margin: 12px 0; padding: 12px 20px; background-color: #ea580c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: bold;">Réinitialiser mon mot de passe</a></p>
+    <p style="font-size: 12px; color: #6b7280;">Ce lien expire dans 1 heure. Si vous n'êtes pas à l'origine de cette demande, ignorez simplement cet e-mail : votre mot de passe actuel reste inchangé.</p>
+  `);
+}
+
+async function sendPasswordResetEmail(user: { email: string; name: string; resetUrl: string }): Promise<void> {
+  await sendEmail({
+    to: user.email,
+    subject: "Réinitialisation de votre mot de passe ClicBillet",
+    html: buildPasswordResetHtml(user.name, user.resetUrl)
   });
 }
 
@@ -729,12 +749,18 @@ function getWebhookSecretFromRequest(req: express.Request): string | null {
   return null;
 }
 
-function buildWebhookNotificationUrl(req: express.Request): string {
+// Le même serveur Express sert l'API et le frontend (SPA) sur la même origine : on peut donc
+// dériver l'URL publique de l'app directement depuis la requête entrante, sans variable
+// d'environnement dédiée (cf. buildWebhookNotificationUrl, même logique).
+function buildAppOrigin(req: express.Request): string {
   const forwardedProto = req.headers["x-forwarded-proto"];
   const scheme = typeof forwardedProto === "string" ? forwardedProto : req.protocol;
   const host = req.get("host") || "localhost:3000";
-  const origin = req.get("origin") || `${scheme}://${host}`;
-  const baseUrl = `${origin.replace(/\/$/, "")}/api/payment/callback`;
+  return (req.get("origin") || `${scheme}://${host}`).replace(/\/$/, "");
+}
+
+function buildWebhookNotificationUrl(req: express.Request): string {
+  const baseUrl = `${buildAppOrigin(req)}/api/payment/callback`;
   if (PAYMENT_WEBHOOK_SECRET) {
     return `${baseUrl}?wh=${encodeURIComponent(PAYMENT_WEBHOOK_SECRET)}`;
   }
@@ -829,6 +855,37 @@ const validateLogin = (req: express.Request, res: express.Response, next: expres
   const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
   if (!emailRegex.test(email)) {
     return res.status(400).json({ error: "Le format de l'e-mail est invalide." });
+  }
+
+  next();
+};
+
+// Middleware de validation pour la demande de réinitialisation de mot de passe
+const validateForgotPassword = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: "Veuillez saisir votre adresse e-mail." });
+  }
+
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: "Le format de l'e-mail est invalide." });
+  }
+
+  next();
+};
+
+// Middleware de validation pour la finalisation de la réinitialisation de mot de passe
+const validateResetPassword = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { token, newPassword } = req.body;
+
+  if (!token || !newPassword) {
+    return res.status(400).json({ error: "Lien de réinitialisation ou nouveau mot de passe manquant." });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: "Le mot de passe doit contenir au moins 6 caractères pour des raisons de sécurité." });
   }
 
   next();
@@ -1386,6 +1443,163 @@ app.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: express
   if (!user || !bcrypt.compareSync(password, user.password)) {
     return res.status(401).json({ error: "Identifiants de connexion invalides." });
   }
+
+  const { password: _, ...userWithoutPassword } = user;
+  res.json({
+    ...userWithoutPassword,
+    token: `local-${user.id}`
+  });
+});
+
+// Demande de réinitialisation de mot de passe : génère un jeton à usage unique (valable 1h)
+// et envoie un lien de réinitialisation par e-mail. Répond toujours avec le même message
+// générique, que l'e-mail corresponde ou non à un compte existant, pour ne pas permettre à un
+// attaquant de découvrir quels e-mails sont enregistrés sur la plateforme (énumération).
+app.post("/api/auth/forgot-password", forgotPasswordRateLimiter, validateForgotPassword, async (req: express.Request, res: express.Response) => {
+  const { email } = req.body;
+  const normalizedEmail = String(email).toLowerCase();
+  const genericResponse = { message: "Si un compte existe avec cette adresse e-mail, un lien de réinitialisation vient de lui être envoyé." };
+
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1h
+  const resetUrl = `${buildAppOrigin(req)}/?reset_token=${rawToken}`;
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { data: profile } = await supabase
+        .from("users")
+        .select("id, name, email")
+        .eq("email", normalizedEmail)
+        .maybeSingle();
+
+      if (profile) {
+        const { error: insertError } = await supabase.from("password_resets").insert({
+          token_hash: tokenHash,
+          user_id: profile.id,
+          email: profile.email,
+          expires_at: expiresAt.toISOString()
+        });
+
+        if (insertError) {
+          console.error("[Password Reset] Échec de la création du jeton :", insertError.message);
+        } else {
+          runInBackground(sendPasswordResetEmail({ email: profile.email, name: profile.name, resetUrl }));
+        }
+      }
+
+      return res.json(genericResponse);
+    } catch (err: any) {
+      console.error("[Supabase Error] Forgot password, falling back to local file DB:", err.message);
+    }
+  }
+
+  // Fallback database
+  const db = getDB();
+  const user = db.users.find((u: any) => u.email.toLowerCase() === normalizedEmail);
+  if (user) {
+    db.passwordResets = db.passwordResets || [];
+    // Purge les jetons expirés au passage, pour ne pas faire grossir db.json indéfiniment.
+    db.passwordResets = db.passwordResets.filter((r: any) => new Date(r.expiresAt) > new Date());
+    db.passwordResets.push({
+      tokenHash,
+      userId: user.id,
+      email: user.email,
+      expiresAt: expiresAt.toISOString()
+    });
+    saveDB(db);
+    runInBackground(sendPasswordResetEmail({ email: user.email, name: user.name, resetUrl }));
+  }
+
+  res.json(genericResponse);
+});
+
+// Finalisation de la réinitialisation : vérifie le jeton (à usage unique, 1h de validité),
+// met à jour le mot de passe puis ouvre directement une session, pour éviter à l'utilisateur
+// de devoir se reconnecter manuellement juste après avoir choisi son nouveau mot de passe.
+app.post("/api/auth/reset-password", loginRateLimiter, validateResetPassword, async (req: express.Request, res: express.Response) => {
+  const { token, newPassword } = req.body;
+  const tokenHash = crypto.createHash("sha256").update(String(token)).digest("hex");
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { data: resetEntry, error: lookupError } = await supabase
+        .from("password_resets")
+        .select("*")
+        .eq("token_hash", tokenHash)
+        .maybeSingle();
+
+      if (lookupError) throw lookupError;
+
+      if (!resetEntry || new Date(resetEntry.expires_at) < new Date()) {
+        if (resetEntry) await supabase.from("password_resets").delete().eq("token_hash", tokenHash);
+        return res.status(400).json({ error: "Ce lien de réinitialisation est invalide ou a expiré. Veuillez refaire une demande." });
+      }
+
+      if (!supabaseAdmin) {
+        return res.status(500).json({ error: "Service de réinitialisation indisponible pour le moment." });
+      }
+
+      const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(resetEntry.user_id, { password: newPassword });
+      if (updateError) throw updateError;
+
+      // Jeton à usage unique : on le supprime immédiatement après consommation.
+      await supabase.from("password_resets").delete().eq("token_hash", tokenHash);
+
+      const { data: profile } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", resetEntry.user_id)
+        .maybeSingle();
+
+      // Ouvre une session directement après la réinitialisation, comme à l'inscription
+      // (cf. /api/auth/register), pour que le frontend reparte avec un token valide.
+      let sessionToken: string | undefined;
+      let sessionRefreshToken: string | undefined;
+      try {
+        const { data: signInData } = await createEphemeralAuthClient().auth.signInWithPassword({
+          email: resetEntry.email,
+          password: newPassword
+        });
+        sessionToken = signInData?.session?.access_token;
+        sessionRefreshToken = signInData?.session?.refresh_token;
+      } catch (signInErr: any) {
+        console.warn("[Supabase Warning] Impossible d'ouvrir une session juste après la réinitialisation :", signInErr.message);
+      }
+
+      return res.json({
+        id: profile?.id || resetEntry.user_id,
+        email: profile?.email || resetEntry.email,
+        name: profile?.name || resetEntry.email.split("@")[0],
+        role: profile?.role || "client",
+        token: sessionToken,
+        refreshToken: sessionRefreshToken
+      });
+    } catch (err: any) {
+      console.error("[Supabase Error] Reset password:", err.message);
+      return res.status(500).json({ error: "Impossible de réinitialiser le mot de passe pour le moment." });
+    }
+  }
+
+  // Fallback database
+  const db = getDB();
+  db.passwordResets = db.passwordResets || [];
+  const resetEntry = db.passwordResets.find((r: any) => r.tokenHash === tokenHash);
+
+  if (!resetEntry || new Date(resetEntry.expiresAt) < new Date()) {
+    db.passwordResets = db.passwordResets.filter((r: any) => r.tokenHash !== tokenHash);
+    saveDB(db);
+    return res.status(400).json({ error: "Ce lien de réinitialisation est invalide ou a expiré. Veuillez refaire une demande." });
+  }
+
+  const user = db.users.find((u: any) => u.id === resetEntry.userId);
+  if (!user) {
+    return res.status(400).json({ error: "Compte introuvable pour ce lien de réinitialisation." });
+  }
+
+  user.password = bcrypt.hashSync(newPassword, 10);
+  db.passwordResets = db.passwordResets.filter((r: any) => r.tokenHash !== tokenHash);
+  saveDB(db);
 
   const { password: _, ...userWithoutPassword } = user;
   res.json({
