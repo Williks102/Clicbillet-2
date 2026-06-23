@@ -231,8 +231,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       eventId: simSelectedEventId,
       buyerName: simBuyerName,
       buyerEmail: simBuyerEmail,
-      tier: simTier,
-      quantity: Number(simQuantity),
+      items: [{ tier: simTier, quantity: Number(simQuantity) }],
       paymentDetails: {
         method: simPaymentMethod,
         phoneNumber: "0707070707"
@@ -250,9 +249,10 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         throw new Error(data.error || "Échec de simuler le checkout.");
       }
 
+      const simulatedTicket = data.tickets?.[0];
       setSimStatusMsg({
         type: "success",
-        text: `Achat simulé avec succès ! Billet #${data.ticket.id} enregistré. Ticket généré sous la réf ${data.ticket.transactionRef}`
+        text: `Achat simulé avec succès ! Billet #${simulatedTicket?.id} enregistré. Commande générée sous la réf ${data.orderId}`
       });
 
       // Quick re-init input parameters for variation

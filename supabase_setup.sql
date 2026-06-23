@@ -90,6 +90,14 @@ CREATE TABLE IF NOT EXISTS public.tickets (
 -- après la création initiale de "public.tickets".
 ALTER TABLE public.tickets ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1;
 
+-- 5quater. Une commande (ORD-xxxxx, référence envoyée à PaiementPro) peut désormais
+-- contenir plusieurs types de billets (ex: 2 Standard + 1 VIP) : chaque type devient sa
+-- propre ligne "tickets" (son propre QR code, son propre transaction_ref unique), reliées
+-- entre elles par order_id. NULL pour les billets créés avant cette migration (compatibilité
+-- conservée : la confirmation de paiement retombe sur id/transaction_ref si order_id absent).
+ALTER TABLE public.tickets ADD COLUMN IF NOT EXISTS order_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_tickets_order_id ON public.tickets (order_id);
+
 -- 5ter. Salle d'attente virtuelle (activable par événement, pour les pics de trafic sur
 -- une vente très demandée). Désactivée par défaut : aucun changement de comportement pour
 -- les événements existants.
