@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 import { isEventPast } from "../lib/eventStatus";
+import DashboardMobileMenu from "./DashboardMobileMenu";
 
 interface AdminDashboardProps {
   user: User;
@@ -26,13 +27,35 @@ interface AdminStats {
   tickets: Ticket[];
 }
 
+type AdminSubTab = "overview" | "events" | "users" | "tickets" | "payouts" | "transactions";
+
+const ADMIN_SUB_TABS: AdminSubTab[] = ["overview", "events", "users", "tickets", "payouts", "transactions"];
+
+const ADMIN_SUB_TAB_LABELS: Record<AdminSubTab, string> = {
+  overview: "Tableau de Bord",
+  events: "Événements & Modération",
+  users: "Membres & Rôles",
+  tickets: "Billets Vendus",
+  payouts: "Demandes de Retrait",
+  transactions: "Log Transactions"
+};
+
+const ADMIN_SUB_TAB_ICONS: Record<AdminSubTab, React.ReactNode> = {
+  overview: <Sparkles className="h-4 w-4" />,
+  events: <Calendar className="h-4 w-4" />,
+  users: <Users className="h-4 w-4" />,
+  tickets: <TicketIcon className="h-4 w-4" />,
+  payouts: <DollarSign className="h-4 w-4" />,
+  transactions: <TrendingUp className="h-4 w-4" />
+};
+
 export default function AdminDashboard({ user, onLogout, onTokenRefresh }: AdminDashboardProps) {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [payouts, setPayouts] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<"overview" | "events" | "users" | "tickets" | "payouts" | "transactions">("overview");
+  const [activeSubTab, setActiveSubTab] = useState<AdminSubTab>("overview");
 
   // Search & Filters parameters
   const [userSearch, setUserSearch] = useState("");
@@ -204,40 +227,35 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
           </div>
         </section>
 
-        {/* Sidebar Navigation */}
-        <nav className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0 scrollbar-none">
-          {(["overview", "events", "users", "tickets", "payouts", "transactions"] as const).map((tab) => {
-            const labels = {
-              overview: "Tableau de Bord",
-              events: "Événements & Modération",
-              users: "Membres & Rôles",
-              tickets: "Billets Vendus",
-              payouts: "Demandes de Retrait",
-              transactions: "Log Transactions"
-            };
-            const icons = {
-              overview: <Sparkles className="h-4 w-4" />,
-              events: <Calendar className="h-4 w-4" />,
-              users: <Users className="h-4 w-4" />,
-              tickets: <TicketIcon className="h-4 w-4" />,
-              payouts: <DollarSign className="h-4 w-4" />,
-              transactions: <TrendingUp className="h-4 w-4" />
-            };
-            return (
-              <button
-                key={tab}
-                onClick={() => setActiveSubTab(tab)}
-                className={`flex items-center space-x-3 px-4 py-3 rounded-xl text-xs whitespace-nowrap font-black transition-all ${
-                  activeSubTab === tab
-                    ? "bg-orange-50 text-orange-600 border border-orange-100 shadow-sm"
-                    : "text-gray-500 hover:bg-gray-50 hover:text-gray-900 border border-transparent"
-                }`}
-              >
-                {icons[tab]}
-                <span>{labels[tab]}</span>
-              </button>
-            );
-          })}
+        {/* Menu hamburger mobile : remplace la nav ci-dessous sous "lg" (style menu admin WordPress) */}
+        <DashboardMobileMenu
+          title="Menu Supervision"
+          activeLabel={ADMIN_SUB_TAB_LABELS[activeSubTab]}
+          items={ADMIN_SUB_TABS.map((tab) => ({
+            key: tab,
+            label: ADMIN_SUB_TAB_LABELS[tab],
+            icon: ADMIN_SUB_TAB_ICONS[tab],
+            active: activeSubTab === tab,
+            onSelect: () => setActiveSubTab(tab)
+          }))}
+        />
+
+        {/* Sidebar Navigation (desktop / large screens uniquement) */}
+        <nav className="hidden lg:flex lg:flex-col gap-2">
+          {ADMIN_SUB_TABS.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveSubTab(tab)}
+              className={`flex items-center space-x-3 px-4 py-3 rounded-xl text-xs whitespace-nowrap font-black transition-all ${
+                activeSubTab === tab
+                  ? "bg-orange-50 text-orange-600 border border-orange-100 shadow-sm"
+                  : "text-gray-500 hover:bg-gray-50 hover:text-gray-900 border border-transparent"
+              }`}
+            >
+              {ADMIN_SUB_TAB_ICONS[tab]}
+              <span>{ADMIN_SUB_TAB_LABELS[tab]}</span>
+            </button>
+          ))}
         </nav>
 
         <button

@@ -4,6 +4,7 @@ import { Event, User, SalesStatus } from "../types";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
 import { isEventPast } from "../lib/eventStatus";
+import DashboardMobileMenu from "./DashboardMobileMenu";
 
 interface OrganizerDashboardProps {
   user: User;
@@ -12,6 +13,22 @@ interface OrganizerDashboardProps {
   setActiveTab: (tab: string) => void;
   onTokenRefresh: TokenRefreshHandler;
 }
+
+type OrganizerSubTab = "dashboard" | "create" | "simulator" | "payouts";
+
+const ORGANIZER_SUB_TAB_LABELS: Record<OrganizerSubTab, string> = {
+  dashboard: "Suivi des Ventes",
+  create: "Créer un Événement",
+  simulator: "🧪 Simulateur Sandbox",
+  payouts: "Retraits & Soldes"
+};
+
+const ORGANIZER_SUB_TAB_ICONS: Record<OrganizerSubTab, React.ReactNode> = {
+  dashboard: <LayoutDashboard className="h-4 w-4" />,
+  create: <Plus className="h-4 w-4" />,
+  simulator: <Hammer className="h-4 w-4" />,
+  payouts: <DollarSign className="h-4 w-4" />
+};
 
 const CATEGORIES = ["Concert", "Festivals", "Théâtre & Humour", "Sport"];
 
@@ -45,7 +62,7 @@ const BANNER_TEMPLATES = [
 ];
 
 export default function OrganizerDashboard({ user, events, onEventCreated, setActiveTab, onTokenRefresh }: OrganizerDashboardProps) {
-  const [subTab, setSubTab] = useState<"dashboard" | "create" | "simulator" | "payouts">("dashboard");
+  const [subTab, setSubTab] = useState<OrganizerSubTab>("dashboard");
   const [stats, setStats] = useState<SalesStatus | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
 
@@ -485,8 +502,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
           </p>
         </div>
 
-        {/* Dash selector pills */}
-        <div className="flex flex-wrap gap-2">
+        {/* Dash selector pills (desktop / large screens uniquement) */}
+        <div className="hidden lg:flex flex-wrap gap-2">
           <button
             id="orga-dashboard-view-tab"
             onClick={() => setSubTab("dashboard")}
@@ -535,6 +552,19 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             <span>Retraits & Soldes</span>
           </button>
         </div>
+
+        {/* Menu hamburger mobile : remplace les pills ci-dessus sous "lg" */}
+        <DashboardMobileMenu
+          title="Menu Organisateur"
+          activeLabel={ORGANIZER_SUB_TAB_LABELS[subTab]}
+          items={(Object.keys(ORGANIZER_SUB_TAB_LABELS) as OrganizerSubTab[]).map((tab) => ({
+            key: tab,
+            label: ORGANIZER_SUB_TAB_LABELS[tab],
+            icon: ORGANIZER_SUB_TAB_ICONS[tab],
+            active: subTab === tab,
+            onSelect: () => setSubTab(tab)
+          }))}
+        />
       </section>
 
       {subTab === "dashboard" ? (

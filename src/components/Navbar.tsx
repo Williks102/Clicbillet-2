@@ -137,7 +137,7 @@ export default function Navbar({ user, onLogout, activeTab, setActiveTab, onOpen
             id="mobile-nav-trigger-btn"
             onClick={() => setDrawerOpen(true)}
             title="Ouvrir le menu"
-            className="flex items-center justify-center rounded-xl bg-gray-50 p-2.5 text-gray-600 transition-colors hover:bg-orange-50 hover:text-orange-600 active:scale-95 sm:hidden"
+            className="flex items-center justify-center rounded-xl border border-gray-200 bg-white p-2.5 text-gray-700 shadow-xs transition-colors hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600 active:scale-95 sm:hidden"
           >
             <Menu className="h-5 w-5" />
           </button>
