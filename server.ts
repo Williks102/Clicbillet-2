@@ -1042,6 +1042,18 @@ app.get("/api/events", async (req: express.Request, res: express.Response) => {
 
       if (error) throw error;
 
+      // Compute per-tier sold counts in one pass (avoid N+1 queries)
+      const tierSoldByEvent: Record<string, Record<string, number>> = {};
+      const { data: tierTickets } = await supabase
+        .from("tickets")
+        .select("event_id, tier")
+        .not("transaction_ref", "like", "PENDING-%")
+        .not("transaction_ref", "like", "FAILED-%");
+      for (const t of tierTickets || []) {
+        if (!tierSoldByEvent[t.event_id]) tierSoldByEvent[t.event_id] = {};
+        tierSoldByEvent[t.event_id][t.tier] = (tierSoldByEvent[t.event_id][t.tier] || 0) + 1;
+      }
+
       // Map snake_case columns back to camelCase frontend expectations
       const mappedEvents = (data || []).map((e: any) => ({
         id: e.id,
@@ -1060,7 +1072,8 @@ app.get("/api/events", async (req: express.Request, res: express.Response) => {
         organizerName: e.organizer_name,
         status: e.status || "approved",
         waitingRoomEnabled: e.waiting_room_enabled,
-        waitingRoomCapacity: e.waiting_room_capacity
+        waitingRoomCapacity: e.waiting_room_capacity,
+        ticketsSoldByTier: tierSoldByEvent[e.id] || {}
       }));
       return res.json(mappedEvents);
     } catch (err: any) {
@@ -1073,7 +1086,18 @@ app.get("/api/events", async (req: express.Request, res: express.Response) => {
   if (!includePending) {
     events = events.filter((e: any) => e.status === "approved" || !e.status);
   }
-  res.json(events);
+  // Compute per-tier sold counts from local tickets
+  const allTickets: any[] = db.tickets || [];
+  const tierSoldLocal: Record<string, Record<string, number>> = {};
+  for (const t of allTickets) {
+    const ref = String(t.transactionRef || t.transaction_ref || "");
+    if (ref.startsWith("PENDING-") || ref.startsWith("FAILED-")) continue;
+    const eid = t.eventId || t.event_id;
+    if (!tierSoldLocal[eid]) tierSoldLocal[eid] = {};
+    const tierKey = String(t.tier || "standard").toLowerCase();
+    tierSoldLocal[eid][tierKey] = (tierSoldLocal[eid][tierKey] || 0) + 1;
+  }
+  res.json(events.map((e: any) => ({ ...e, ticketsSoldByTier: tierSoldLocal[e.id] || {} })));
 });
 
 // Create Event Endpoint for Organizers
@@ -1925,6 +1949,23 @@ app.post("/api/checkout", checkoutRateLimiter, requireAuth, validateCheckout, as
       }
 
       const ticketTypes = event.ticket_types || [];
+
+      // Per-tier capacity check (only when tiers define a total)
+      for (const item of items) {
+        const tierDef = ticketTypes.find((t: any) => typeof t.name === "string" && t.name.toLowerCase() === item.tier);
+        if (tierDef && Number(tierDef.total) > 0) {
+          const { count: tierSoldCount } = await supabase
+            .from("tickets")
+            .select("id", { count: "exact", head: true })
+            .eq("event_id", eventId)
+            .eq("tier", item.tier)
+            .not("transaction_ref", "like", "PENDING-%")
+            .not("transaction_ref", "like", "FAILED-%");
+          if ((tierSoldCount || 0) + item.quantity > Number(tierDef.total)) {
+            return res.status(400).json({ error: `Il n'y a plus assez de places disponibles pour la catégorie "${tierDef.name}".` });
+          }
+        }
+      }
       let totalPrice = 0;
       // Une ligne "tickets" = un QR code = une personne : on crée item.quantity lignes par
       // type de billet (pas une seule ligne avec quantity=N), sinon un seul scan à l'entrée

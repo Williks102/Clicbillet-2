@@ -106,8 +106,17 @@ export default function LandingPage({ events, onBuyTicket, userRole }: LandingPa
         {filteredEvents.length > 0 ? (
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {filteredEvents.map((evt) => {
-              const remains = evt.totalTickets - evt.ticketsSold;
-              const isSoldOut = remains <= 0;
+              const hasTiers = Array.isArray(evt.ticketTypes) && evt.ticketTypes.length > 0 && evt.ticketTypes.some(t => (t.total ?? 0) > 0);
+              const tierAvailability = hasTiers
+                ? evt.ticketTypes!.map(t => ({
+                    name: t.name,
+                    available: Math.max(0, (t.total ?? 0) - ((evt.ticketsSoldByTier ?? {})[t.name.toLowerCase()] ?? 0))
+                  }))
+                : null;
+              const globalRemains = evt.totalTickets - evt.ticketsSold;
+              const isSoldOut = hasTiers
+                ? tierAvailability!.every(t => t.available <= 0)
+                : globalRemains <= 0;
 
               return (
                 <div
@@ -162,16 +171,39 @@ export default function LandingPage({ events, onBuyTicket, userRole }: LandingPa
                     </div>
 
                     {/* Stock tracker footer indicators */}
-                    <div className="mt-5 flex items-center justify-between">
-                      <div className="text-xs">
-                        {isSoldOut ? (
-                          <span className="rounded-md bg-red-50 px-2 py-1 font-bold text-red-600">Épuisé</span>
-                        ) : (
-                          <span className="text-gray-500 font-medium">
-                            <strong className="text-orange-600 font-black">{remains}</strong> places dispo
-                          </span>
-                        )}
-                      </div>
+                    <div className="mt-4 space-y-3">
+                      {/* Per-tier availability pills */}
+                      {hasTiers ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {tierAvailability!.map(t => (
+                            <span
+                              key={t.name}
+                              className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold ${
+                                t.available <= 0
+                                  ? "bg-red-50 text-red-500"
+                                  : "bg-orange-50 text-orange-700"
+                              }`}
+                            >
+                              {t.name}
+                              <span className={`rounded px-1 text-[10px] font-black ${t.available <= 0 ? "text-red-400" : "text-orange-600"}`}>
+                                {t.available <= 0 ? "Épuisé" : `${t.available} places`}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-xs">
+                          {isSoldOut ? (
+                            <span className="rounded-md bg-red-50 px-2 py-1 font-bold text-red-600">Épuisé</span>
+                          ) : (
+                            <span className="text-gray-500 font-medium">
+                              <strong className="text-orange-600 font-black">{globalRemains}</strong> places dispo
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-end">
 
                       {userRole === "organizer" ? (
                         <div className="rounded-full bg-orange-50 px-3 py-1.5 text-[11px] font-bold text-orange-700">
@@ -195,6 +227,7 @@ export default function LandingPage({ events, onBuyTicket, userRole }: LandingPa
                     </div>
                   </div>
                 </div>
+              </div>
               );
             })}
           </div>
