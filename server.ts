@@ -864,13 +864,12 @@ const validateEvent = (req: express.Request, res: express.Response, next: expres
 };
 
 // Middleware de validation de commande de billet (Checkout)
+// Une commande (panier) contient un ou plusieurs items, un par type de billet distinct
+// (ex: { tier: "standard", quantity: 2 } + { tier: "vip", quantity: 1 }).
 const validateCheckout = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  let { eventId, buyerId, buyerName, buyerEmail, tier, quantity, paymentDetails } = req.body;
-  const normalizedTier = typeof tier === "string" ? tier.toLowerCase() : tier;
-  req.body.tier = normalizedTier;
-  tier = normalizedTier;
+  const { eventId, buyerId, buyerName, buyerEmail, items, paymentDetails } = req.body;
 
-  if (!eventId || !buyerId || !buyerName || !buyerEmail || !tier || !quantity || !paymentDetails) {
+  if (!eventId || !buyerId || !buyerName || !buyerEmail || !Array.isArray(items) || items.length === 0 || !paymentDetails) {
     return res.status(400).json({ error: "Champs d'achat de billets incomplets." });
   }
 
@@ -879,14 +878,34 @@ const validateCheckout = (req: express.Request, res: express.Response, next: exp
     return res.status(400).json({ error: "L'adresse e-mail de l'acheteur est invalide." });
   }
 
-  if (tier !== "standard" && tier !== "vip") {
-    return res.status(400).json({ error: "Le ticket doit être de type 'standard' ou 'vip'." });
+  const normalizedItems: Array<{ tier: string; quantity: number }> = [];
+  let totalQuantity = 0;
+
+  for (const item of items) {
+    const normalizedTier = typeof item?.tier === "string" ? item.tier.toLowerCase() : item?.tier;
+    if (normalizedTier !== "standard" && normalizedTier !== "vip") {
+      return res.status(400).json({ error: "Chaque billet doit être de type 'standard' ou 'vip'." });
+    }
+
+    const qtyVal = Number(item?.quantity);
+    if (isNaN(qtyVal) || qtyVal < 1 || qtyVal > 20) {
+      return res.status(400).json({ error: "La quantité par type de billet doit être comprise entre 1 et 20." });
+    }
+
+    totalQuantity += qtyVal;
+    normalizedItems.push({ tier: normalizedTier, quantity: qtyVal });
   }
 
-  const qtyVal = Number(quantity);
-  if (isNaN(qtyVal) || qtyVal < 1 || qtyVal > 20) {
-    return res.status(400).json({ error: "La quantité achetée doit être comprise d'une valeur de 1 à 20 billets par commande." });
+  if (totalQuantity > 20) {
+    return res.status(400).json({ error: "Vous ne pouvez pas commander plus de 20 billets au total par commande." });
   }
+
+  const tierNames = normalizedItems.map((i) => i.tier);
+  if (new Set(tierNames).size !== tierNames.length) {
+    return res.status(400).json({ error: "Chaque type de billet ne peut apparaître qu'une seule fois dans la commande." });
+  }
+
+  req.body.items = normalizedItems;
 
   if (!paymentDetails.method) {
     return res.status(400).json({ error: "Moyen de facturation requis." });
@@ -1603,19 +1622,36 @@ app.get("/api/waiting-room/status", requireAuth, async (req: express.Request, re
 });
 
 // Checkout Purchase Ticket Endpoint
+const GATEWAY_SHORT_NAMES: Record<string, string> = {
+  orange_money: "OM",
+  mtn_momo: "MTN",
+  moov_money: "MOOV",
+  wave: "WAVE",
+  card: "CARD"
+};
+
 app.post("/api/checkout", checkoutRateLimiter, requireAuth, validateCheckout, async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
-  const { eventId, buyerName, tier, quantity, paymentDetails } = req.body;
+  const { eventId, buyerName, items, paymentDetails } = req.body as {
+    eventId: string;
+    buyerName: string;
+    items: Array<{ tier: string; quantity: number }>;
+    paymentDetails: { method: string };
+  };
   // L'identité de l'acheteur vient toujours du token authentifié, jamais du body :
   // sinon n'importe qui pourrait créer un billet "payé" au nom d'un autre utilisateur.
   const buyerId = authUser.id;
   const buyerEmail = authUser.email;
 
-  if (!eventId || !buyerId || !buyerName || !buyerEmail || !tier || !quantity || !paymentDetails) {
+  if (!eventId || !buyerId || !buyerName || !buyerEmail || !items || !paymentDetails) {
     return res.status(400).json({ error: "Informations de commande incomplètes." });
   }
 
-  const qty = Number(quantity);
+  const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+  // Référence de COMMANDE envoyée à PaiementPro et reçue dans le webhook — une commande
+  // (ORD-) peut regrouper plusieurs lignes "tickets" (TKT-), une par type de billet choisi.
+  const orderId = `ORD-${Date.now()}`;
+  const code = GATEWAY_SHORT_NAMES[paymentDetails.method] || "PAY";
 
   if (isSupabaseEnabled && supabase) {
     try {
@@ -1650,30 +1686,43 @@ app.post("/api/checkout", checkoutRateLimiter, requireAuth, validateCheckout, as
       const ticketsSold = Number(event.tickets_sold || 0);
       const totalTickets = Number(event.total_tickets || 0);
 
-      if (ticketsSold + qty > totalTickets) {
+      if (ticketsSold + totalQuantity > totalTickets) {
         return res.status(400).json({ error: "Désolé, il n'y a plus assez de places disponibles." });
       }
 
       const ticketTypes = event.ticket_types || [];
-      const selectedTier = ticketTypes.find((t: any) => typeof t.name === "string" && t.name.toLowerCase() === tier);
-      const unitPrice = selectedTier ? Number(selectedTier.price) : Number(event.price);
-      const totalPrice = unitPrice * qty;
+      let totalPrice = 0;
+      const ticketRows = items.map((item, idx) => {
+        const selectedTier = ticketTypes.find((t: any) => typeof t.name === "string" && t.name.toLowerCase() === item.tier);
+        const unitPrice = selectedTier ? Number(selectedTier.price) : Number(event.price);
+        const linePrice = unitPrice * item.quantity;
+        totalPrice += linePrice;
+        const ticketId = `tkt-${Date.now()}-${idx}`;
+        return {
+          id: ticketId,
+          order_id: orderId,
+          event_id: eventId,
+          event_title: event.title,
+          event_date: event.date,
+          event_time: event.time,
+          event_venue: event.venue,
+          buyer_id: buyerId,
+          buyer_name: buyerName,
+          buyer_email: buyerEmail,
+          tier: item.tier as "standard" | "vip",
+          price_paid: linePrice,
+          qr_code_data: `clicbillet-verify:${ticketId}`,
+          scanned: false,
+          scanned_at: null,
+          transaction_ref: `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}-${idx}`,
+          quantity: item.quantity
+        };
+      });
 
-      const gatewayShortNames: Record<string, string> = {
-        orange_money: "OM",
-        mtn_momo: "MTN",
-        moov_money: "MOOV",
-        wave: "WAVE",
-        card: "CARD"
-      };
-
-      const code = gatewayShortNames[paymentDetails.method] || "PAY";
-      const mockTransactionRef = `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}`;
-
-      // Log transaction attempt
+      // Log transaction attempt (un seul mouvement, pour le montant total de la commande)
       try {
         await supabase.from("transactions").insert({
-          id: mockTransactionRef,
+          id: orderId,
           event_id: eventId,
           buyer_email: buyerEmail,
           amount: totalPrice,
@@ -1683,46 +1732,27 @@ app.post("/api/checkout", checkoutRateLimiter, requireAuth, validateCheckout, as
         });
       } catch (e: any) { console.warn("Supabase tx log error:", e.message); }
 
-      const ticketId = `tkt-${Date.now()}`;
-
-      // 2. Insert Ticket
-      const { data: newTkt, error: tktError } = await supabase
+      // 2. Insert Tickets (une ligne par type de billet)
+      const { data: newTkts, error: tktError } = await supabase
         .from("tickets")
-        .insert({
-          id: ticketId,
-          event_id: eventId,
-          event_title: event.title,
-          event_date: event.date,
-          event_time: event.time,
-          event_venue: event.venue,
-          buyer_id: buyerId,
-          buyer_name: buyerName,
-          buyer_email: buyerEmail,
-          tier: tier as 'standard' | 'vip',
-          price_paid: totalPrice,
-          qr_code_data: `clicbillet-verify:${ticketId}`,
-          scanned: false,
-          scanned_at: null,
-          transaction_ref: mockTransactionRef,
-          quantity: qty
-        })
-        .select()
-        .single();
+        .insert(ticketRows)
+        .select();
 
       if (tktError) throw tktError;
 
       // 3. Update inventory
       const { error: updateError } = await supabase
         .from("events")
-        .update({ tickets_sold: ticketsSold + qty })
+        .update({ tickets_sold: ticketsSold + totalQuantity })
         .eq("id", eventId);
 
       if (updateError) {
         console.error("Failed to update tickets_sold inventory, continuing...", updateError);
       }
 
-      const mappedTicket = {
+      const mappedTickets = (newTkts || []).map((newTkt: any) => ({
         id: newTkt.id,
+        orderId: newTkt.order_id,
         eventId: newTkt.event_id,
         eventTitle: newTkt.event_title,
         eventDate: newTkt.event_date,
@@ -1739,28 +1769,34 @@ app.post("/api/checkout", checkoutRateLimiter, requireAuth, validateCheckout, as
         transactionRef: newTkt.transaction_ref,
         purchaseDate: newTkt.purchase_date,
         quantity: newTkt.quantity
-      };
-      
+      }));
+
       // L'email de confirmation de billet (avec QR code) n'est envoyé qu'une fois le
       // paiement réellement confirmé (cf. /api/payment/callback, /api/dev/simulate-payment,
-      // /api/admin/validate-payment) — pas à la création du ticket encore PENDING-.
+      // /api/admin/validate-payment) — pas à la création des tickets encore PENDING-.
 
-      // Notification organisateur (best-effort, ne doit jamais bloquer la réponse)
+      // Notification organisateur (best-effort, ne doit jamais bloquer la réponse) : un seul
+      // résumé pour toute la commande plutôt qu'un email par type de billet.
       try {
         const { data: organizerUser } = await supabase
           .from("users")
           .select("email")
           .eq("id", event.organizer_id)
           .maybeSingle();
-        runInBackground(sendOrganizerSaleEmail(organizerUser?.email, event.organizer_name, event.title, mappedTicket));
+        runInBackground(sendOrganizerSaleEmail(organizerUser?.email, event.organizer_name, event.title, {
+          buyerName,
+          quantity: totalQuantity,
+          pricePaid: totalPrice
+        }));
       } catch (e: any) {
         console.warn("[Email] Notification organisateur (vente) échouée :", e.message);
       }
 
       return res.status(201).json({
         success: true,
-        message: "Achat de billet effectué avec succès !",
-        ticket: mappedTicket,
+        message: "Achat de billets effectué avec succès !",
+        orderId,
+        tickets: mappedTickets,
         notificationUrl: buildWebhookNotificationUrl(req)
       });
     } catch (err: any) {
@@ -1775,30 +1811,43 @@ app.post("/api/checkout", checkoutRateLimiter, requireAuth, validateCheckout, as
     return res.status(404).json({ error: "Événement introuvable." });
   }
 
-  if (event.ticketsSold + qty > event.totalTickets) {
+  if (event.ticketsSold + totalQuantity > event.totalTickets) {
     return res.status(400).json({ error: "Désolé, il n'y a plus assez de places disponibles." });
   }
 
   const ticketTypes = event.ticketTypes || [];
-  const selectedTier = ticketTypes.find((t: any) => typeof t.name === "string" && t.name.toLowerCase() === tier);
-  const unitPrice = selectedTier ? Number(selectedTier.price) : Number(event.price);
-  const totalPrice = unitPrice * qty;
-
-  // Simulate payment processing based on provider
-  const gatewayShortNames: Record<string, string> = {
-    orange_money: "OM",
-    mtn_momo: "MTN",
-    moov_money: "MOOV",
-    wave: "WAVE",
-    card: "CARD"
-  };
-
-  const code = gatewayShortNames[paymentDetails.method] || "PAY";
-  const mockTransactionRef = `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}`;
+  let totalPrice = 0;
+  const newTickets = items.map((item, idx) => {
+    const selectedTier = ticketTypes.find((t: any) => typeof t.name === "string" && t.name.toLowerCase() === item.tier);
+    const unitPrice = selectedTier ? Number(selectedTier.price) : Number(event.price);
+    const linePrice = unitPrice * item.quantity;
+    totalPrice += linePrice;
+    const ticketId = `tkt-${Date.now()}-${idx}`;
+    return {
+      id: ticketId,
+      orderId,
+      eventId: event.id,
+      eventTitle: event.title,
+      eventDate: event.date,
+      eventTime: event.time,
+      eventVenue: event.venue,
+      buyerId,
+      buyerName,
+      buyerEmail,
+      tier: item.tier as "standard" | "vip",
+      pricePaid: linePrice,
+      qrCodeData: `clicbillet-verify:${ticketId}`,
+      scanned: false,
+      scannedAt: null,
+      transactionRef: `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}-${idx}`,
+      purchaseDate: new Date().toISOString(),
+      quantity: item.quantity
+    };
+  });
 
   db.transactions = db.transactions || [];
   db.transactions.unshift({
-    id: mockTransactionRef,
+    id: orderId,
     eventId: eventId,
     buyerEmail: buyerEmail,
     amount: totalPrice,
@@ -1807,51 +1856,34 @@ app.post("/api/checkout", checkoutRateLimiter, requireAuth, validateCheckout, as
     method: paymentDetails.method
   } as any);
 
-  // Generate single grouped ticket, or multiple tickets? Let's generate one ticket indicating quantum
-  const ticketId = `tkt-${Date.now()}`;
-  const newTicket = {
-    id: ticketId,
-    eventId: event.id,
-    eventTitle: event.title,
-    eventDate: event.date,
-    eventTime: event.time,
-    eventVenue: event.venue,
-    buyerId,
-    buyerName,
-    buyerEmail,
-    tier: tier as 'standard' | 'vip',
-    pricePaid: totalPrice,
-    qrCodeData: `clicbillet-verify:${ticketId}`,
-    scanned: false,
-    scannedAt: null,
-    transactionRef: mockTransactionRef,
-    purchaseDate: new Date().toISOString(),
-    quantity: qty
-  };
-
   // Update Inventory in database
-  event.ticketsSold += qty;
+  event.ticketsSold += totalQuantity;
 
-  // Record Ticket
-  db.tickets.unshift(newTicket);
+  // Record Tickets
+  db.tickets.unshift(...newTickets);
   saveDB(db);
-  
+
   // L'email de confirmation de billet (avec QR code) n'est envoyé qu'une fois le
   // paiement réellement confirmé (cf. /api/payment/callback, /api/dev/simulate-payment,
-  // /api/admin/validate-payment) — pas à la création du ticket encore PENDING-.
+  // /api/admin/validate-payment) — pas à la création des tickets encore PENDING-.
 
   // Notification organisateur (best-effort, ne doit jamais bloquer la réponse)
   try {
     const organizerUser = db.users.find((u: any) => u.id === event.organizerId);
-    runInBackground(sendOrganizerSaleEmail(organizerUser?.email, event.organizerName, event.title, newTicket));
+    runInBackground(sendOrganizerSaleEmail(organizerUser?.email, event.organizerName, event.title, {
+      buyerName,
+      quantity: totalQuantity,
+      pricePaid: totalPrice
+    }));
   } catch (e: any) {
     console.warn("[Email] Notification organisateur (vente) échouée :", e.message);
   }
 
   res.status(201).json({
     success: true,
-    message: "Achat de billet effectué avec succès !",
-    ticket: newTicket,
+    message: "Achat de billets effectué avec succès !",
+    orderId,
+    tickets: newTickets,
     notificationUrl: buildWebhookNotificationUrl(req)
   });
 });
@@ -1892,6 +1924,120 @@ function normalizeReferenceIdentifier(value: any): string | null {
   const text = String(value).trim();
   if (!text) return null;
   return text.split(/[?&]/)[0].trim();
+}
+
+/**
+ * RÉSOLUTION + CONFIRMATION DE PAIEMENT PAR RÉFÉRENCE
+ *
+ * Une commande (order_id, format ORD-xxxxx, c'est la référence envoyée à PaiementPro) peut
+ * regrouper plusieurs lignes "tickets" (un type de billet par ligne, ex: 2 Standard + 1 VIP).
+ * Ces trois fonctions sont partagées par les trois points d'entrée qui confirment un
+ * paiement : le webhook PaiementPro, la simulation dev, et la validation manuelle admin —
+ * avant cette factorisation chacun dupliquait sa propre logique de recherche/mise à jour,
+ * ce qui aurait rendu très facile d'oublier l'un des trois lors du passage au multi-types.
+ *
+ * findTicketsByReference cherche par order_id en priorité, avec repli sur id/transaction_ref
+ * pour les anciens billets créés avant l'introduction des commandes (order_id NULL).
+ */
+interface ResolvedTicket {
+  source: "supabase" | "local";
+  raw: any;
+}
+
+async function findTicketsByReference(candidates: Array<string | null | undefined>): Promise<ResolvedTicket[]> {
+  const cleaned = Array.from(new Set(candidates.filter((c): c is string => !!c)));
+  if (cleaned.length === 0) return [];
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const orClause = cleaned
+        .flatMap((ref) => [`order_id.eq.${ref}`, `id.eq.${ref}`, `transaction_ref.eq.${ref}`])
+        .join(",");
+      const { data, error } = await supabase.from("tickets").select("*").or(orClause);
+      if (!error && data && data.length > 0) {
+        return data.map((raw: any) => ({ source: "supabase" as const, raw }));
+      }
+      if (error) {
+        console.error("[Payment Reference Lookup] Erreur Supabase :", error.message);
+      }
+    } catch (err: any) {
+      console.error("[Payment Reference Lookup] Exception Supabase :", err.message || err);
+    }
+  }
+
+  const db = getDB();
+  const local = (db.tickets || []).filter((t: any) =>
+    cleaned.some((ref) => t.orderId === ref || t.id === ref || t.transactionRef === ref)
+  );
+  return local.map((raw: any) => ({ source: "local" as const, raw }));
+}
+
+// Met en forme un ticket résolu (Supabase snake_case ou local déjà camelCase) au format
+// attendu par sendTicketEmail/sendPaymentFailedEmail.
+function ticketEmailShape(resolved: ResolvedTicket): any {
+  const t = resolved.raw;
+  if (resolved.source === "local") return t;
+  return {
+    buyerEmail: t.buyer_email,
+    buyerName: t.buyer_name,
+    eventTitle: t.event_title,
+    eventDate: t.event_date,
+    eventTime: t.event_time,
+    eventVenue: t.event_venue,
+    tier: t.tier,
+    quantity: t.quantity,
+    qrCodeData: t.qr_code_data
+  };
+}
+
+// Confirme (PENDING- -> PAID-) tous les tickets résolus qui sont encore en attente.
+// Idempotent par construction : un ticket déjà confirmé (transaction_ref ne commence plus
+// par "PENDING-") est silencieusement ignoré, pour ne pas renvoyer l'email de billet à
+// chaque retry du webhook PaiementPro. Retourne le nombre de tickets effectivement confirmés.
+async function confirmPaymentForTickets(resolvedTickets: ResolvedTicket[]): Promise<number> {
+  let confirmedCount = 0;
+  // findTicketsByReference() a sa propre copie en mémoire de db.json (un getDB() distinct) :
+  // on ne peut pas muter resolved.raw pour les tickets locaux et sauvegarder, ça mute un objet
+  // orphelin. On recharge une copie fraîche ici et on mute CETTE copie-là, par id.
+  const hasLocal = resolvedTickets.some((r) => r.source === "local");
+  const db = hasLocal ? getDB() : null;
+
+  for (const resolved of resolvedTickets) {
+    const t = resolved.raw;
+    const currentRef = String(resolved.source === "supabase" ? t.transaction_ref : t.transactionRef) || "";
+    if (!currentRef.startsWith("PENDING-")) continue;
+    const newRef = currentRef.replace("PENDING-", "PAID-");
+
+    if (resolved.source === "supabase" && supabase) {
+      const { error } = await supabase.from("tickets").update({ transaction_ref: newRef }).eq("id", t.id);
+      if (error) {
+        console.error(`[Payment Confirmation] Échec mise à jour Supabase pour id=${t.id}:`, error.message);
+        continue;
+      }
+      t.transaction_ref = newRef;
+      runInBackground(releaseWaitingRoomSlot(t.event_id, t.buyer_id));
+    } else if (db) {
+      const localTicket = (db.tickets || []).find((lt: any) => lt.id === t.id);
+      if (!localTicket) {
+        console.error(`[Payment Confirmation] Ticket local id=${t.id} introuvable lors de la sauvegarde.`);
+        continue;
+      }
+      localTicket.transactionRef = newRef;
+      runInBackground(releaseWaitingRoomSlot(localTicket.eventId, localTicket.buyerId));
+    }
+
+    runInBackground(sendTicketEmail(ticketEmailShape(resolved)));
+    confirmedCount++;
+  }
+
+  if (db) saveDB(db);
+  return confirmedCount;
+}
+
+async function notifyPaymentFailedForTickets(resolvedTickets: ResolvedTicket[]): Promise<void> {
+  for (const resolved of resolvedTickets) {
+    runInBackground(sendPaymentFailedEmail(ticketEmailShape(resolved)));
+  }
 }
 
 app.options("/api/payment/callback", (req: express.Request, res: express.Response) => {
@@ -1976,94 +2122,18 @@ app.post("/api/payment/callback", async (req: express.Request, res: express.Resp
 
   console.log(`[PaiementPro] Raw response code: ${rawResponseCode} -> numeric: ${numericResponseCode}, interpreted success: ${isSuccess}`);
 
-  let supabaseTicketFound = false;
-  if (isSupabaseEnabled && supabase) {
-    try {
-      const refCandidates = [referenceNumber];
-      if (rawReferenceNumberDisplay && rawReferenceNumberDisplay !== referenceNumber) {
-        refCandidates.push(rawReferenceNumberDisplay);
-      }
+  // La référence reçue peut être un order_id (ORD-xxxxx, commande multi-types) ou, pour
+  // compatibilité avec les anciens billets, un id/transaction_ref individuel.
+  const resolvedTickets = await findTicketsByReference([referenceNumber, rawReferenceNumberDisplay]);
 
-      for (const ref of refCandidates) {
-        if (!ref) continue;
-        console.log(`[PaiementPro Callback] Tentative de recherche Supabase pour référence candidate: ${ref}`);
-        const { data: ticket, error: fetchErr } = await supabase
-          .from("tickets")
-          .select("*")
-          .or(`id.eq.${ref},transaction_ref.eq.${ref}`)
-          .maybeSingle();
-
-        if (fetchErr || !ticket) {
-          console.warn(`[PaiementPro Callback] Ticket introuvable dans Supabase pour la référence : ${ref}`);
-          continue;
-        }
-
-        supabaseTicketFound = true;
-        console.log(`[PaiementPro Callback] Ticket trouvé dans Supabase: id=${ticket.id}, event=${ticket.event_title}, transaction_ref=${ticket.transaction_ref}`);
-
-        if (!isSuccess) {
-          console.log(`[PaiementPro Callback] Réception d'un callback NON-succès pour ticket id=${ticket.id} (responsecode=${numericResponseCode}). Aucune mise à jour effectuée.`);
-          runInBackground(sendPaymentFailedEmail(ticket));
-        } else {
-          const newRef = String(ticket.transaction_ref || "").replace("PENDING-", "PAID-");
-          console.log(`[PaiementPro Callback] Mise à jour Supabase ticket id=${ticket.id} -> transaction_ref: ${ticket.transaction_ref} => ${newRef}`);
-          try {
-            const { data: updated, error: updateErr } = await supabase.from("tickets")
-              .update({ transaction_ref: newRef })
-              .eq("id", ticket.id)
-              .select()
-              .single();
-
-            if (updateErr) {
-              console.error(`[PaiementPro Callback] Erreur lors de la mise à jour Supabase pour id=${ticket.id}:`, updateErr.message || updateErr);
-            } else {
-              console.log(`[PaiementPro Callback] Mise à jour Supabase réussie pour id=${ticket.id}.`);
-              const paidTicket = updated || ticket;
-              runInBackground(releaseWaitingRoomSlot(paidTicket.event_id, paidTicket.buyer_id));
-              runInBackground(sendTicketEmail({
-                buyerEmail: paidTicket.buyer_email,
-                buyerName: paidTicket.buyer_name,
-                eventTitle: paidTicket.event_title,
-                eventDate: paidTicket.event_date,
-                eventTime: paidTicket.event_time,
-                eventVenue: paidTicket.event_venue,
-                tier: paidTicket.tier,
-                quantity: paidTicket.quantity,
-                qrCodeData: paidTicket.qr_code_data
-              }));
-            }
-          } catch (uErr: any) {
-            console.error(`[PaiementPro Callback] Exception lors de la mise à jour Supabase pour id=${ticket.id}:`, uErr.message || uErr);
-          }
-        }
-
-        break;
-      }
-    } catch (err: any) {
-      console.error("[PaiementPro Callback Supabase Error]", err.message);
-    }
-  }
-
-  if (!supabaseTicketFound) {
-    const db = getDB();
-    const ticket = db.tickets.find(t => [referenceNumber, rawReferenceNumberDisplay].some(ref => ref && (t.id === ref || t.transactionRef === ref)));
-    if (!ticket) {
-      console.warn(`[PaiementPro Callback] Ticket local introuvable pour la référence : ${referenceNumber}`);
-    } else {
-      console.log(`[PaiementPro Callback] Ticket local trouvé: id=${ticket.id}, buyer=${ticket.buyerName}, transactionRef=${ticket.transactionRef}`);
-      if (!isSuccess) {
-        console.log(`[PaiementPro Callback] Callback NON-succès reçu pour ticket id=${ticket.id} (rawResponseCode=${rawResponseCode}). Aucune modification locale appliquée.`);
-        runInBackground(sendPaymentFailedEmail(ticket));
-      } else {
-        const oldRef = ticket.transactionRef || "";
-        const newRef = String(oldRef).replace("PENDING-", "PAID-");
-        ticket.transactionRef = newRef;
-        saveDB(db);
-        console.log(`[PaiementPro Callback] Ticket local mis à jour: id=${ticket.id}, transactionRef: ${oldRef} -> ${newRef}`);
-        runInBackground(releaseWaitingRoomSlot(ticket.eventId, ticket.buyerId));
-        runInBackground(sendTicketEmail(ticket));
-      }
-    }
+  if (resolvedTickets.length === 0) {
+    console.warn(`[PaiementPro Callback] Aucun billet trouvé pour la référence : ${referenceNumber}`);
+  } else if (!isSuccess) {
+    console.log(`[PaiementPro Callback] Callback NON-succès pour la référence ${referenceNumber} (responsecode=${numericResponseCode}). Aucune mise à jour appliquée.`);
+    await notifyPaymentFailedForTickets(resolvedTickets);
+  } else {
+    const confirmedCount = await confirmPaymentForTickets(resolvedTickets);
+    console.log(`[PaiementPro Callback] ${confirmedCount}/${resolvedTickets.length} billet(s) confirmé(s) pour la référence ${referenceNumber}.`);
   }
 
   res.status(200).json({ status: "success", message: "Notification traitée" });
@@ -2084,51 +2154,12 @@ app.post("/api/dev/simulate-payment", async (req: express.Request, res: express.
     return res.status(400).json({ error: "Référence invalide." });
   }
 
-  let updated = false;
-  if (isSupabaseEnabled && supabase) {
-    try {
-      const { data: ticket, error: fetchErr } = await supabase.from("tickets")
-        .select("*")
-        .or(`id.eq.${rawReferenceNumber},transaction_ref.eq.${rawReferenceNumber}`)
-        .maybeSingle();
-
-      if (ticket && !fetchErr) {
-        updated = true;
-        await supabase.from("tickets").update({ transaction_ref: String(ticket.transaction_ref || "").replace("PENDING-", "PAID-") }).eq("id", ticket.id);
-        runInBackground(releaseWaitingRoomSlot(ticket.event_id, ticket.buyer_id));
-        runInBackground(sendTicketEmail({
-          buyerEmail: ticket.buyer_email,
-          buyerName: ticket.buyer_name,
-          eventTitle: ticket.event_title,
-          eventDate: ticket.event_date,
-          eventTime: ticket.event_time,
-          eventVenue: ticket.event_venue,
-          tier: ticket.tier,
-          quantity: ticket.quantity,
-          qrCodeData: ticket.qr_code_data
-        }));
-      }
-    } catch (err: any) {
-      console.error("[Dev Simulation] Erreur Supabase lors de la simulation de paiement :", err.message || err);
-    }
-  }
-
-  if (!updated) {
-    const db = getDB();
-    const ticket = db.tickets.find((t: any) => t.id === rawReferenceNumber || t.transactionRef === rawReferenceNumber);
-    if (ticket) {
-      ticket.transactionRef = String(ticket.transactionRef || "").replace("PENDING-", "PAID-");
-      saveDB(db);
-      updated = true;
-      runInBackground(releaseWaitingRoomSlot(ticket.eventId, ticket.buyerId));
-      runInBackground(sendTicketEmail(ticket));
-    }
-  }
-
-  if (!updated) {
+  const resolvedTickets = await findTicketsByReference([rawReferenceNumber]);
+  if (resolvedTickets.length === 0) {
     return res.status(404).json({ error: "Billet introuvable pour simulation." });
   }
 
+  await confirmPaymentForTickets(resolvedTickets);
   res.json({ success: true, message: "Simulation de paiement effectuée." });
 });
 
@@ -2702,56 +2733,18 @@ app.post("/api/admin/validate-payment", requireAuth, requireRole("admin"), async
     return res.status(400).json({ error: "Référence ou ID du billet manquant." });
   }
 
-  const adminClient = supabaseAdmin;
-  if (adminClient) {
-    try {
-      const { data: ticket, error: fetchErr } = await adminClient.from("tickets")
-        .select()
-        .or(`id.eq.${referenceNumber},transaction_ref.eq.${referenceNumber}`)
-        .single();
-      
-      if (fetchErr || !ticket) {
-        throw new Error("Billet introuvable dans Supabase.");
-      }
-
-      const { error: updateErr } = await supabase.from("tickets")
-        .update({ transaction_ref: ticket.transaction_ref.replace("PENDING-", "PAID-") })
-        .eq("id", ticket.id);
-
-      if (updateErr) throw updateErr;
-
-      runInBackground(releaseWaitingRoomSlot(ticket.event_id, ticket.buyer_id));
-      runInBackground(sendTicketEmail({
-        buyerEmail: ticket.buyer_email,
-        buyerName: ticket.buyer_name,
-        eventTitle: ticket.event_title,
-        eventDate: ticket.event_date,
-        eventTime: ticket.event_time,
-        eventVenue: ticket.event_venue,
-        tier: ticket.tier,
-        quantity: ticket.quantity,
-        qrCodeData: ticket.qr_code_data
-      }));
-
-      return res.json({ success: true, message: "Paiement validé avec succès." });
-    } catch (err: any) {
-      console.error("[Supabase Error] Manual validation, falling back to local file DB:", err.message);
-    }
-  }
-
-  const db = getDB();
-  const ticket = db.tickets.find(t => t.id === referenceNumber || t.transactionRef === referenceNumber);
-  
-  if (!ticket) {
+  const resolvedTickets = await findTicketsByReference([referenceNumber]);
+  if (resolvedTickets.length === 0) {
     return res.status(404).json({ error: "Billet introuvable." });
   }
 
-  ticket.transactionRef = ticket.transactionRef.replace("PENDING-", "PAID-");
-  saveDB(db);
-  runInBackground(releaseWaitingRoomSlot(ticket.eventId, ticket.buyerId));
-  runInBackground(sendTicketEmail(ticket));
-
-  res.json({ success: true, message: "Paiement validé localement." });
+  const confirmedCount = await confirmPaymentForTickets(resolvedTickets);
+  const wasSupabase = resolvedTickets[0].source === "supabase";
+  return res.json({
+    success: true,
+    message: wasSupabase ? "Paiement validé avec succès." : "Paiement validé localement.",
+    confirmedCount
+  });
 });
 
 app.delete("/api/admin/events/:id", async (req: express.Request, res: express.Response) => {

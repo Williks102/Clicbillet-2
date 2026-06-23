@@ -7,18 +7,22 @@ interface CheckoutModalProps {
   event: Event;
   user: User | null;
   onClose: () => void;
-  onSuccess: (ticket: any) => void;
+  onSuccess: (tickets: any[]) => void;
   onOpenAuth: () => void;
 }
 
+const MAX_PER_TIER = 10;
+const MAX_TOTAL_PER_ORDER = 20;
+
 export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenAuth }: CheckoutModalProps) {
   const [step, setStep] = useState<"configure" | "details" | "processing" | "success">("configure");
-  const activeTicketTypes = (event.ticketTypes && event.ticketTypes.length > 0) 
-    ? event.ticketTypes 
+  const activeTicketTypes = (event.ticketTypes && event.ticketTypes.length > 0)
+    ? event.ticketTypes
     : [{ name: "Standard", price: event.price }, { name: "VIP", price: event.price * 2 }];
-  
-  const [tier, setTier] = useState<string>(activeTicketTypes[0].name);
-  const [quantity, setQuantity] = useState(1);
+
+  // Panier : quantité indépendante par type de billet, plusieurs types peuvent être
+  // sélectionnés simultanément dans la même commande (ex: 2 Standard + 1 VIP).
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [method, setMethod] = useState<PaymentMethod>("orange_money");
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
 
@@ -32,9 +36,23 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
   const [error, setError] = useState<string | null>(null);
 
   // Computed values
-  const activeTier = activeTicketTypes.find(t => t.name === tier) || activeTicketTypes[0];
-  const unitPrice = activeTier.price;
-  const totalPrice = unitPrice * quantity;
+  const selectedItems = activeTicketTypes
+    .map((t) => ({ name: t.name, price: t.price, qty: quantities[t.name] || 0 }))
+    .filter((item) => item.qty > 0);
+  const totalQuantity = selectedItems.reduce((sum, item) => sum + item.qty, 0);
+  const totalPrice = selectedItems.reduce((sum, item) => sum + item.price * item.qty, 0);
+
+  function adjustQuantity(tierName: string, delta: number) {
+    setQuantities((prev) => {
+      const current = prev[tierName] || 0;
+      const currentTotal = Object.values(prev).reduce((sum, q) => sum + q, 0);
+      if (delta > 0 && (current >= MAX_PER_TIER || currentTotal >= MAX_TOTAL_PER_ORDER)) {
+        return prev;
+      }
+      const next = Math.max(0, current + delta);
+      return { ...prev, [tierName]: next };
+    });
+  }
 
   // Gateways configurations with logo text & primary CSS theme styles
   const GATEWAYS = [
@@ -46,6 +64,10 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
   ];
 
   function handleGoToDetails() {
+    if (totalQuantity === 0) {
+      setError("Veuillez sélectionner au moins un billet.");
+      return;
+    }
     if (!user) {
       // Prompt Auth first if anonymous
       onOpenAuth();
@@ -102,8 +124,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
         buyerId: user?.id,
         buyerName: user?.name,
         buyerEmail: user?.email,
-        tier: tier.toLowerCase(),
-        quantity,
+        items: selectedItems.map((item) => ({ tier: item.name.toLowerCase(), quantity: item.qty })),
         paymentDetails
       };
 
@@ -121,7 +142,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
       // INTEGRATION PAIEMENT PRO (CÔTE D'IVOIRE)
       // diagContext garde la trace de ce qui a été tenté, pour pouvoir comprendre
       // un échec a posteriori (console du navigateur) sans avoir à reproduire le bug.
-      const diagContext: Record<string, unknown> = { ticketId: data.ticket.id, method };
+      const diagContext: Record<string, unknown> = { orderId: data.orderId, method };
       let paymentFailureReason: string | null = null;
 
       try {
@@ -147,8 +168,8 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
           };
           pPro.channel = channelMapping[method] || "WAVECI";
 
-          // Référence unique de notre plateforme
-          pPro.referenceNumber = data.ticket.id || `TX-${Date.now()}`;
+          // Référence de la commande (peut regrouper plusieurs types de billets)
+          pPro.referenceNumber = data.orderId || `ORD-${Date.now()}`;
           pPro.customerEmail = user?.email || "customer@example.com";
 
           // Séparation prénom / nom pour respecter les obligations du SDK
@@ -158,11 +179,11 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
           pPro.customerFirstName = nameParts.slice(1).join(" ") || "Billet";
 
           pPro.customerPhoneNumber = phoneNumber || "0700000000";
-          pPro.description = `Billet ${tier.toUpperCase()} - ${event.title}`;
+          pPro.description = `${selectedItems.map((item) => `${item.qty}x ${item.name}`).join(", ")} - ${event.title}`;
 
           pPro.notificationURL = data.notificationUrl || `${window.location.origin}/api/payment/callback`;
-          pPro.returnURL = `${window.location.origin}/?payment_success=true&ticket_id=${data.ticket.id}`;
-          pPro.returnContext = JSON.stringify({ ticketId: data.ticket.id, userId: user?.id });
+          pPro.returnURL = `${window.location.origin}/?payment_success=true&order_id=${data.orderId}`;
+          pPro.returnContext = JSON.stringify({ orderId: data.orderId, userId: user?.id });
 
           try {
             await pPro.getUrlPayment();
@@ -205,7 +226,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
         const simRes = await fetch("/api/dev/simulate-payment", {
           method: "POST",
           headers: devSimulateHeaders,
-          body: JSON.stringify({ referenceNumber: data.ticket.id })
+          body: JSON.stringify({ referenceNumber: data.orderId })
         });
 
         if (simRes.ok) {
@@ -227,7 +248,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
 
       // Checkout Success! Go to step 4
       setStep("success");
-      onSuccess(data.ticket);
+      onSuccess(data.tickets);
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Erreur de connexion.");
@@ -272,49 +293,49 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
 
           {step === "configure" && (
             <div className="space-y-6" id="checkout-configure-step">
-              {/* Ticket Tier Selection */}
+              {/* Panier : un stepper indépendant par type de billet, plusieurs types
+                  peuvent être sélectionnés en même temps dans la même commande. */}
               <div className="space-y-2">
-                <label className="text-xs font-black text-gray-700 block">Choisissez votre Type de Billet</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {activeTicketTypes.map((t, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => setTier(t.name)}
-                      className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition-all ${
-                        tier === t.name
-                          ? "bg-orange-50/50 border-orange-500 text-orange-700 ring-1 ring-orange-500"
-                          : "border-gray-200 bg-white hover:bg-gray-50 text-gray-600"
-                      }`}
-                    >
-                      <span className="text-[11px] font-black block">{t.name}</span>
-                      <span className="text-[10px] font-bold block mt-0.5">{t.price.toLocaleString("fr-FR")} XOF</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Quantity Selector input logic */}
-              <div className="flex items-center justify-between bg-gray-50 p-4 rounded-2xl border border-gray-100">
-                <div>
-                  <label className="text-xs font-black text-gray-950 block">Nombre de places</label>
-                  <p className="text-[10px] text-gray-400 font-medium mt-0.5">Maximum de 10 tickets par achat</p>
-                </div>
-                <div className="flex items-center space-x-3.5">
-                  <button
-                    type="button"
-                    onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                    className="flex h-9 w-9 items-center justify-center rounded-xl bg-white border border-gray-200 text-gray-600 font-bold hover:bg-gray-100 transition active:scale-95"
-                  >
-                    -
-                  </button>
-                  <span className="text-base font-extrabold text-gray-950 font-sans">{quantity}</span>
-                  <button
-                    type="button"
-                    onClick={() => setQuantity(Math.min(10, quantity + 1))}
-                    className="flex h-9 w-9 items-center justify-center rounded-xl bg-white border border-gray-200 text-gray-600 font-bold hover:bg-gray-100 transition active:scale-95"
-                  >
-                    +
-                  </button>
+                <label className="text-xs font-black text-gray-700 block">Choisissez vos Billets</label>
+                <p className="text-[10px] text-gray-400 font-medium">Maximum {MAX_PER_TIER} par type, {MAX_TOTAL_PER_ORDER} au total par commande.</p>
+                <div className="space-y-2">
+                  {activeTicketTypes.map((t, idx) => {
+                    const qty = quantities[t.name] || 0;
+                    return (
+                      <div
+                        key={idx}
+                        className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
+                          qty > 0
+                            ? "bg-orange-50/50 border-orange-500 ring-1 ring-orange-500"
+                            : "border-gray-200 bg-white"
+                        }`}
+                      >
+                        <div>
+                          <span className={`text-[11px] font-black block ${qty > 0 ? "text-orange-700" : "text-gray-900"}`}>{t.name}</span>
+                          <span className="text-[10px] font-bold block mt-0.5 text-gray-500">{t.price.toLocaleString("fr-FR")} XOF</span>
+                        </div>
+                        <div className="flex items-center space-x-3">
+                          <button
+                            type="button"
+                            onClick={() => adjustQuantity(t.name, -1)}
+                            disabled={qty === 0}
+                            className="flex h-8 w-8 items-center justify-center rounded-xl bg-white border border-gray-200 text-gray-600 font-bold hover:bg-gray-100 transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            -
+                          </button>
+                          <span className="w-5 text-center text-sm font-extrabold text-gray-950 font-sans">{qty}</span>
+                          <button
+                            type="button"
+                            onClick={() => adjustQuantity(t.name, 1)}
+                            disabled={qty >= MAX_PER_TIER || totalQuantity >= MAX_TOTAL_PER_ORDER}
+                            className="flex h-8 w-8 items-center justify-center rounded-xl bg-white border border-gray-200 text-gray-600 font-bold hover:bg-gray-100 transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -359,9 +380,17 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
 
           {step === "details" && (
             <form onSubmit={handleConfirmPayment} className="space-y-4" id="checkout-details-step">
-              <div className="bg-orange-50/50 p-4 rounded-xl border border-orange-100/30 flex items-center justify-between text-xs mb-3">
-                <span className="text-gray-500 font-semibold uppercase font-mono">Billet: {tier} ({quantity} pos)</span>
-                <span className="text-sm font-extrabold text-orange-650">{totalPrice.toLocaleString("fr-FR")} XOF</span>
+              <div className="bg-orange-50/50 p-4 rounded-xl border border-orange-100/30 space-y-1.5 text-xs mb-3">
+                {selectedItems.map((item) => (
+                  <div key={item.name} className="flex items-center justify-between">
+                    <span className="text-gray-500 font-semibold uppercase font-mono">{item.name} × {item.qty}</span>
+                    <span className="font-extrabold text-orange-650">{(item.price * item.qty).toLocaleString("fr-FR")} XOF</span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between pt-1.5 border-t border-orange-100/60">
+                  <span className="text-gray-500 font-semibold uppercase font-mono">Total</span>
+                  <span className="text-sm font-extrabold text-orange-650">{totalPrice.toLocaleString("fr-FR")} XOF</span>
+                </div>
               </div>
 
               {/* Mobile Mobile Inputs (Orange Money, MTN, Moov, Wave) */}
@@ -513,7 +542,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
               </div>
               <div>
                 <h4 className="text-base font-black text-gray-900">Commande Initiale Validée !</h4>
-                <p className="text-xs text-gray-500 mt-1 pb-1">Votre billet a été configuré avec succès dans votre espace.</p>
+                <p className="text-xs text-gray-500 mt-1 pb-1">Vos billets ont été configurés avec succès dans votre espace.</p>
               </div>
 
               {paymentUrl ? (

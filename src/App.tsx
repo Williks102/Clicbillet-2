@@ -67,15 +67,15 @@ export default function App() {
     
     const params = new URLSearchParams(window.location.search);
     if ((import.meta as any).env?.DEV && params.get("payment_success") === "true") {
-      const ticketId = params.get("ticket_id");
-      if (ticketId) {
-        console.log("Validation du paiement post-redirection en développement pour:", ticketId);
+      const orderId = params.get("order_id");
+      if (orderId) {
+        console.log("Validation du paiement post-redirection en développement pour la commande :", orderId);
         fetch("/api/dev/simulate-payment", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
           },
-          body: JSON.stringify({ referenceNumber: ticketId })
+          body: JSON.stringify({ referenceNumber: orderId })
         }).then(() => {
           window.history.replaceState({}, document.title, window.location.pathname);
           window.dispatchEvent(new CustomEvent("refresh_tickets"));
@@ -190,7 +190,7 @@ export default function App() {
     }
   }
 
-  function handleCheckoutSuccess(ticket: any) {
+  function handleCheckoutSuccess(tickets: any[]) {
     setCheckoutEvent(null);
     // Refresh events lists to reflect decremented ticket inventory instantly (force=true
     // pour contourner le cache client, sinon l'inventaire affiché resterait obsolète
