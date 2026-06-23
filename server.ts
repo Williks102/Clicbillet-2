@@ -343,6 +343,14 @@ function saveDB(data: typeof INITIAL_DATABASE) {
   }
 }
 
+// Un événement est "passé" dès que sa date + heure de début sont dépassées (miroir de
+// src/lib/eventStatus.ts côté frontend — pas d'import cross src/server dans ce repo).
+function isEventPast(evt: { date: string; time: string }): boolean {
+  const eventDateTime = new Date(`${evt.date}T${evt.time}`);
+  if (isNaN(eventDateTime.getTime())) return false;
+  return eventDateTime.getTime() < Date.now();
+}
+
 // ==========================================
 // SERVICE D'ENVOI D'EMAILS (Resend)
 // ==========================================
@@ -422,29 +430,36 @@ async function sendWelcomeEmail(user: { email: string; name: string; role: strin
   });
 }
 
-// --- Acheteur : confirmation de billet ---
-function buildTicketConfirmationHtml(ticket: any): string {
-  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(ticket.qrCodeData)}`;
-  return emailLayout("Votre billet est confirmé !", `
-    <p>Bonjour ${ticket.buyerName},</p>
+// --- Acheteur : confirmation de billet(s) ---
+// Une commande peut regrouper plusieurs billets (un QR code par billet, cf. /api/checkout) :
+// on envoie UN SEUL email par commande listant tous les QR codes, plutôt qu'un email par billet.
+function buildTicketConfirmationHtml(order: { buyerName: string; eventTitle: string; eventDate: string; eventTime: string; eventVenue: string; tickets: { tier: string; qrCodeData: string }[] }): string {
+  const qrBlocks = order.tickets.map((t, i) => `
+    <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid #e5e7eb;">
+      <p style="margin: 0 0 8px; font-weight: bold;">Billet ${i + 1}/${order.tickets.length} — ${t.tier === "vip" ? "VIP" : "Standard"}</p>
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(t.qrCodeData)}" alt="QR Code billet ${i + 1}" width="220" height="220" />
+    </div>
+  `).join("");
+
+  return emailLayout(order.tickets.length > 1 ? "Vos billets sont confirmés !" : "Votre billet est confirmé !", `
+    <p>Bonjour ${order.buyerName},</p>
     <p>Merci pour votre achat. Voici les détails de votre commande :</p>
     <ul>
-      <li><strong>Événement :</strong> ${ticket.eventTitle}</li>
-      <li><strong>Date :</strong> ${ticket.eventDate} à ${ticket.eventTime}</li>
-      <li><strong>Lieu :</strong> ${ticket.eventVenue}</li>
-      <li><strong>Quantité :</strong> ${ticket.quantity}</li>
-      <li><strong>Catégorie :</strong> ${ticket.tier}</li>
+      <li><strong>Événement :</strong> ${order.eventTitle}</li>
+      <li><strong>Date :</strong> ${order.eventDate} à ${order.eventTime}</li>
+      <li><strong>Lieu :</strong> ${order.eventVenue}</li>
+      <li><strong>Nombre de billets :</strong> ${order.tickets.length}</li>
     </ul>
-    <p>Présentez ce QR code à l'entrée :</p>
-    <img src="${qrImageUrl}" alt="QR Code billet" width="220" height="220" />
+    <p>Présentez le QR code correspondant à chaque billet à l'entrée (1 QR code = 1 personne) :</p>
+    ${qrBlocks}
   `);
 }
 
-async function sendTicketEmail(ticket: any): Promise<void> {
+async function sendTicketEmail(order: { buyerEmail: string; buyerName: string; eventTitle: string; eventDate: string; eventTime: string; eventVenue: string; tickets: { tier: string; qrCodeData: string }[] }): Promise<void> {
   await sendEmail({
-    to: ticket.buyerEmail,
-    subject: `Vos billets pour ${ticket.eventTitle}`,
-    html: buildTicketConfirmationHtml(ticket)
+    to: order.buyerEmail,
+    subject: `Vos billets pour ${order.eventTitle}`,
+    html: buildTicketConfirmationHtml(order)
   });
 }
 
@@ -1666,6 +1681,10 @@ app.post("/api/checkout", checkoutRateLimiter, requireAuth, validateCheckout, as
         return res.status(404).json({ error: "Événement introuvable." });
       }
 
+      if (isEventPast({ date: event.date, time: event.time })) {
+        return res.status(400).json({ error: "Cet événement est terminé, l'achat de billets n'est plus possible." });
+      }
+
       // Si la salle d'attente est activée sur cet événement, l'acheteur doit avoir une
       // entrée "active" non expirée (obtenue via /api/waiting-room/join puis /status) avant
       // de pouvoir passer commande.
@@ -1692,32 +1711,39 @@ app.post("/api/checkout", checkoutRateLimiter, requireAuth, validateCheckout, as
 
       const ticketTypes = event.ticket_types || [];
       let totalPrice = 0;
-      const ticketRows = items.map((item, idx) => {
+      // Une ligne "tickets" = un QR code = une personne : on crée item.quantity lignes par
+      // type de billet (pas une seule ligne avec quantity=N), sinon un seul scan à l'entrée
+      // "consommerait" toutes les places du groupe d'un coup.
+      const ticketRows: any[] = [];
+      let unitIdx = 0;
+      for (const item of items) {
         const selectedTier = ticketTypes.find((t: any) => typeof t.name === "string" && t.name.toLowerCase() === item.tier);
         const unitPrice = selectedTier ? Number(selectedTier.price) : Number(event.price);
-        const linePrice = unitPrice * item.quantity;
-        totalPrice += linePrice;
-        const ticketId = `tkt-${Date.now()}-${idx}`;
-        return {
-          id: ticketId,
-          order_id: orderId,
-          event_id: eventId,
-          event_title: event.title,
-          event_date: event.date,
-          event_time: event.time,
-          event_venue: event.venue,
-          buyer_id: buyerId,
-          buyer_name: buyerName,
-          buyer_email: buyerEmail,
-          tier: item.tier as "standard" | "vip",
-          price_paid: linePrice,
-          qr_code_data: `clicbillet-verify:${ticketId}`,
-          scanned: false,
-          scanned_at: null,
-          transaction_ref: `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}-${idx}`,
-          quantity: item.quantity
-        };
-      });
+        totalPrice += unitPrice * item.quantity;
+        for (let u = 0; u < item.quantity; u++) {
+          const ticketId = `tkt-${Date.now()}-${unitIdx}`;
+          ticketRows.push({
+            id: ticketId,
+            order_id: orderId,
+            event_id: eventId,
+            event_title: event.title,
+            event_date: event.date,
+            event_time: event.time,
+            event_venue: event.venue,
+            buyer_id: buyerId,
+            buyer_name: buyerName,
+            buyer_email: buyerEmail,
+            tier: item.tier as "standard" | "vip",
+            price_paid: unitPrice,
+            qr_code_data: `clicbillet-verify:${ticketId}`,
+            scanned: false,
+            scanned_at: null,
+            transaction_ref: `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}-${unitIdx}`,
+            quantity: 1
+          });
+          unitIdx++;
+        }
+      }
 
       // Log transaction attempt (un seul mouvement, pour le montant total de la commande)
       try {
@@ -1811,39 +1837,49 @@ app.post("/api/checkout", checkoutRateLimiter, requireAuth, validateCheckout, as
     return res.status(404).json({ error: "Événement introuvable." });
   }
 
+  if (isEventPast({ date: event.date, time: event.time })) {
+    return res.status(400).json({ error: "Cet événement est terminé, l'achat de billets n'est plus possible." });
+  }
+
   if (event.ticketsSold + totalQuantity > event.totalTickets) {
     return res.status(400).json({ error: "Désolé, il n'y a plus assez de places disponibles." });
   }
 
   const ticketTypes = event.ticketTypes || [];
   let totalPrice = 0;
-  const newTickets = items.map((item, idx) => {
+  // Même logique que la branche Supabase ci-dessus : une ligne par billet unitaire, pas
+  // par type de billet.
+  const newTickets: any[] = [];
+  let unitIdx = 0;
+  for (const item of items) {
     const selectedTier = ticketTypes.find((t: any) => typeof t.name === "string" && t.name.toLowerCase() === item.tier);
     const unitPrice = selectedTier ? Number(selectedTier.price) : Number(event.price);
-    const linePrice = unitPrice * item.quantity;
-    totalPrice += linePrice;
-    const ticketId = `tkt-${Date.now()}-${idx}`;
-    return {
-      id: ticketId,
-      orderId,
-      eventId: event.id,
-      eventTitle: event.title,
-      eventDate: event.date,
-      eventTime: event.time,
-      eventVenue: event.venue,
-      buyerId,
-      buyerName,
-      buyerEmail,
-      tier: item.tier as "standard" | "vip",
-      pricePaid: linePrice,
-      qrCodeData: `clicbillet-verify:${ticketId}`,
-      scanned: false,
-      scannedAt: null,
-      transactionRef: `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}-${idx}`,
-      purchaseDate: new Date().toISOString(),
-      quantity: item.quantity
-    };
-  });
+    totalPrice += unitPrice * item.quantity;
+    for (let u = 0; u < item.quantity; u++) {
+      const ticketId = `tkt-${Date.now()}-${unitIdx}`;
+      newTickets.push({
+        id: ticketId,
+        orderId,
+        eventId: event.id,
+        eventTitle: event.title,
+        eventDate: event.date,
+        eventTime: event.time,
+        eventVenue: event.venue,
+        buyerId,
+        buyerName,
+        buyerEmail,
+        tier: item.tier as "standard" | "vip",
+        pricePaid: unitPrice,
+        qrCodeData: `clicbillet-verify:${ticketId}`,
+        scanned: false,
+        scannedAt: null,
+        transactionRef: `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}-${unitIdx}`,
+        purchaseDate: new Date().toISOString(),
+        quantity: 1
+      });
+      unitIdx++;
+    }
+  }
 
   db.transactions = db.transactions || [];
   db.transactions.unshift({
@@ -1976,8 +2012,9 @@ async function findTicketsByReference(candidates: Array<string | null | undefine
 // attendu par sendTicketEmail/sendPaymentFailedEmail.
 function ticketEmailShape(resolved: ResolvedTicket): any {
   const t = resolved.raw;
-  if (resolved.source === "local") return t;
+  if (resolved.source === "local") return { orderId: t.orderId || t.id, ...t };
   return {
+    orderId: t.order_id || t.id,
     buyerEmail: t.buyer_email,
     buyerName: t.buyer_name,
     eventTitle: t.event_title,
@@ -1988,6 +2025,19 @@ function ticketEmailShape(resolved: ResolvedTicket): any {
     quantity: t.quantity,
     qrCodeData: t.qr_code_data
   };
+}
+
+// Regroupe des billets individuels par commande (order_id, avec repli sur l'id du billet
+// pour les anciens billets pré-migration sans order_id) pour n'envoyer qu'un seul email par
+// commande au lieu d'un email par billet.
+function groupTicketsByOrder(shapedTickets: any[]): any[][] {
+  const groups = new Map<string, any[]>();
+  for (const t of shapedTickets) {
+    const key = String(t.orderId);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(t);
+  }
+  return Array.from(groups.values());
 }
 
 // Confirme (PENDING- -> PAID-) tous les tickets résolus qui sont encore en attente.
@@ -2001,6 +2051,7 @@ async function confirmPaymentForTickets(resolvedTickets: ResolvedTicket[]): Prom
   // orphelin. On recharge une copie fraîche ici et on mute CETTE copie-là, par id.
   const hasLocal = resolvedTickets.some((r) => r.source === "local");
   const db = hasLocal ? getDB() : null;
+  const newlyConfirmed: any[] = [];
 
   for (const resolved of resolvedTickets) {
     const t = resolved.raw;
@@ -2026,17 +2077,34 @@ async function confirmPaymentForTickets(resolvedTickets: ResolvedTicket[]): Prom
       runInBackground(releaseWaitingRoomSlot(localTicket.eventId, localTicket.buyerId));
     }
 
-    runInBackground(sendTicketEmail(ticketEmailShape(resolved)));
+    newlyConfirmed.push(ticketEmailShape(resolved));
     confirmedCount++;
   }
 
   if (db) saveDB(db);
+
+  // Un seul email de confirmation par commande, listant le QR code de chaque billet, plutôt
+  // qu'un email par billet (cf. /api/checkout : une commande = N lignes "tickets" désormais).
+  for (const group of groupTicketsByOrder(newlyConfirmed)) {
+    const first = group[0];
+    runInBackground(sendTicketEmail({
+      buyerEmail: first.buyerEmail,
+      buyerName: first.buyerName,
+      eventTitle: first.eventTitle,
+      eventDate: first.eventDate,
+      eventTime: first.eventTime,
+      eventVenue: first.eventVenue,
+      tickets: group.map((t) => ({ tier: t.tier, qrCodeData: t.qrCodeData }))
+    }));
+  }
+
   return confirmedCount;
 }
 
 async function notifyPaymentFailedForTickets(resolvedTickets: ResolvedTicket[]): Promise<void> {
-  for (const resolved of resolvedTickets) {
-    runInBackground(sendPaymentFailedEmail(ticketEmailShape(resolved)));
+  const shaped = resolvedTickets.map(ticketEmailShape);
+  for (const group of groupTicketsByOrder(shaped)) {
+    runInBackground(sendPaymentFailedEmail(group[0]));
   }
 }
 

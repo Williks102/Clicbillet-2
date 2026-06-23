@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Search, Calendar, MapPin, Tag, ArrowRight, Sparkles, Filter } from "lucide-react";
 import { Event } from "../types";
+import { isEventPast } from "../lib/eventStatus";
 
 interface LandingPageProps {
   events: Event[];
@@ -14,8 +15,11 @@ export default function LandingPage({ events, onBuyTicket, userRole }: LandingPa
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Tous");
 
-  // Filter events based on search query and selected category
+  // Filter events based on search query, selected category, and exclude events whose
+  // date is already past (dépublication automatique côté acheteur).
   const filteredEvents = events.filter((evt) => {
+    if (isEventPast(evt)) return false;
+
     const matchesSearch =
       evt.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       evt.venue.toLowerCase().includes(searchTerm.toLowerCase()) ||
