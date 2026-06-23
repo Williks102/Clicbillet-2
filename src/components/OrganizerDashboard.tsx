@@ -223,9 +223,10 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       }, user, onTokenRefresh);
-      const data = await response.json();
+      let data: any = {};
+      try { data = await response.json(); } catch { /* réponse non-JSON (ex. 413, 502) */ }
       if (!response.ok) {
-        throw new Error(data.error || "Une erreur est survenue lors de la mise à jour.");
+        throw new Error(data.error || `Erreur serveur (${response.status}).`);
       }
       setEditingEvent(null);
       onEventCreated(); // refresh events
@@ -440,9 +441,10 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         body: JSON.stringify(payload),
       }, user, onTokenRefresh);
 
-      const data = await response.json();
+      let data: any = {};
+      try { data = await response.json(); } catch { /* réponse non-JSON (ex. 413, 502) */ }
       if (!response.ok) {
-        throw new Error(data.error || "Une erreur est survenue.");
+        throw new Error(data.error || `Erreur serveur (${response.status}).`);
       }
 
       // Success

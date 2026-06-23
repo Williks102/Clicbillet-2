@@ -602,6 +602,7 @@ async function sendAdminPayoutRequestEmail(organizerName: string, payout: any): 
 
 // Enable parsing middlewares for Webhooks and APIs
 app.use(express.json({
+  limit: "10mb",
   verify(req, res, buf) {
     (req as any).rawBody = buf;
   }
@@ -928,8 +929,8 @@ const validateEvent = (req: express.Request, res: express.Response, next: expres
     return res.status(400).json({ error: "Le format de l'heure doit être HH:MM." });
   }
 
-  if (banner && !banner.startsWith("http://") && !banner.startsWith("https://")) {
-    return res.status(400).json({ error: "L'URL de l'image de couverture est invalide (doit commencer par http:// ou https://)." });
+  if (banner && !banner.startsWith("http://") && !banner.startsWith("https://") && !banner.startsWith("data:image/")) {
+    return res.status(400).json({ error: "L'URL de l'image de couverture est invalide (doit commencer par http://, https:// ou être une image uploadée)." });
   }
 
   next();
