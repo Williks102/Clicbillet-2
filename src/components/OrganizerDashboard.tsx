@@ -74,7 +74,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [price, setPrice] = useState("");
-  const [ticketTypes, setTicketTypes] = useState<{name: string; price: string}[]>([{ name: 'Standard', price: '' }]);
+  const [ticketTypes, setTicketTypes] = useState<{name: string; price: string; total: string}[]>([{ name: 'Standard', price: '', total: '' }]);
   const [venue, setVenue] = useState("");
   const [category, setCategory] = useState("Concert");
   const [totalTickets, setTotalTickets] = useState("");
@@ -94,7 +94,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [editDate, setEditDate] = useState("");
   const [editTime, setEditTime] = useState("");
   const [editPrice, setEditPrice] = useState("");
-  const [editTicketTypes, setEditTicketTypes] = useState<{name: string; price: string}[]>([]);
+  const [editTicketTypes, setEditTicketTypes] = useState<{name: string; price: string; total: string}[]>([]);
   const [editVenue, setEditVenue] = useState("");
   const [editCategory, setEditCategory] = useState("Concert");
   const [editTotalTickets, setEditTotalTickets] = useState("");
@@ -182,6 +182,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     setEditVenue(evt.venue);
     setEditCategory(evt.category);
     setEditTotalTickets(String(evt.totalTickets));
+    setEditTicketTypes((evt.ticketTypes || []).map(t => ({ name: t.name, price: String(t.price), total: String(t.total || '') })));
     setEditWaitingRoomEnabled(Boolean(evt.waitingRoomEnabled));
     setEditWaitingRoomCapacity(String(evt.waitingRoomCapacity || 50));
     if (BANNER_TEMPLATES.some(b => b.url === evt.banner)) {
@@ -202,16 +203,21 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
 
     const bannerPath = editCustomBannerUrl.trim() !== "" ? editCustomBannerUrl.trim() : editSelectedBanner;
 
+    const cleanedEditTiers = editTicketTypes
+      .filter(t => t.name.trim() !== "")
+      .map(t => ({ name: t.name, price: Number(t.price), total: Number(t.total) || 0 }));
+    const tierTotalSum = cleanedEditTiers.reduce((s, t) => s + t.total, 0);
     const payload = {
       title: editTitle,
       description: editDescription,
       date: editDate,
       time: editTime,
       price: Number(editPrice),
+      ticketTypes: cleanedEditTiers,
       venue: editVenue,
       category: editCategory,
       banner: bannerPath,
-      totalTickets: Number(editTotalTickets),
+      totalTickets: tierTotalSum > 0 ? tierTotalSum : Number(editTotalTickets),
       organizerId: user.id,
       waitingRoomEnabled: editWaitingRoomEnabled,
       waitingRoomCapacity: Number(editWaitingRoomCapacity) || 50
@@ -223,9 +229,10 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       }, user, onTokenRefresh);
-      const data = await response.json();
+      let data: any = {};
+      try { data = await response.json(); } catch { /* réponse non-JSON (ex. 413, 502) */ }
       if (!response.ok) {
-        throw new Error(data.error || "Une erreur est survenue lors de la mise à jour.");
+        throw new Error(data.error || `Erreur serveur (${response.status}).`);
       }
       setEditingEvent(null);
       onEventCreated(); // refresh events
@@ -422,11 +429,11 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       date,
       time,
       price: Number(price),
-      ticketTypes: ticketTypes.filter(t => t.name.trim() !== "").map(t => ({ name: t.name, price: Number(t.price) })),
+      ticketTypes: ticketTypes.filter(t => t.name.trim() !== "").map(t => ({ name: t.name, price: Number(t.price), total: Number(t.total) || 0 })),
       venue,
       category,
       banner: bannerPath,
-      totalTickets: Number(totalTickets),
+      totalTickets: ticketTypes.reduce((s, t) => s + (Number(t.total) || 0), 0) || Number(totalTickets),
       organizerId: user.id,
       organizerName: user.name,
       waitingRoomEnabled,
@@ -440,9 +447,10 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         body: JSON.stringify(payload),
       }, user, onTokenRefresh);
 
-      const data = await response.json();
+      let data: any = {};
+      try { data = await response.json(); } catch { /* réponse non-JSON (ex. 413, 502) */ }
       if (!response.ok) {
-        throw new Error(data.error || "Une erreur est survenue.");
+        throw new Error(data.error || `Erreur serveur (${response.status}).`);
       }
 
       // Success
@@ -891,33 +899,48 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-bold text-gray-700">Types de billets (Optionnel)</label>
+              <label className="text-xs font-bold text-gray-700">Types de billets</label>
+              <div className="grid grid-cols-3 gap-1 mb-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1">
+                <span>Catégorie</span><span>Prix (XOF)</span><span>Places</span>
+              </div>
               <div className="space-y-2">
                 {ticketTypes.map((tier, idx) => (
                   <div key={idx} className="flex space-x-2">
                     <input
                       type="text"
-                      placeholder="Nom (ex: VIP, VIP+)"
+                      placeholder="Ex: VIP"
                       value={tier.name}
                       onChange={(e) => {
                         const newTiers = [...ticketTypes];
                         newTiers[idx].name = e.target.value;
                         setTicketTypes(newTiers);
                       }}
-                      className="w-1/2 rounded-xl border border-gray-200 py-3 px-4 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
+                      className="flex-1 rounded-xl border border-gray-200 py-3 px-3 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
                     />
                     <input
                       type="number"
                       min="0"
                       step="500"
-                      placeholder="Prix (ex: 15000)"
+                      placeholder="15000"
                       value={tier.price}
                       onChange={(e) => {
                         const newTiers = [...ticketTypes];
                         newTiers[idx].price = e.target.value;
                         setTicketTypes(newTiers);
                       }}
-                      className="w-1/2 rounded-xl border border-gray-200 py-3 px-4 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
+                      className="flex-1 rounded-xl border border-gray-200 py-3 px-3 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="100"
+                      value={tier.total}
+                      onChange={(e) => {
+                        const newTiers = [...ticketTypes];
+                        newTiers[idx].total = e.target.value;
+                        setTicketTypes(newTiers);
+                      }}
+                      className="flex-1 rounded-xl border border-gray-200 py-3 px-3 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
                     />
                     <button
                       type="button"
@@ -931,7 +954,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                 ))}
                 <button
                   type="button"
-                  onClick={() => setTicketTypes([...ticketTypes, { name: '', price: '' }])}
+                  onClick={() => setTicketTypes([...ticketTypes, { name: '', price: '', total: '' }])}
                   className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center mt-2"
                 >
                   <Plus className="w-3 h-3 mr-1" /> Ajouter un type de billet
@@ -1452,15 +1475,66 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-700">Nombre de places total</label>
-                  <input
-                    type="number"
-                    required
-                    min="10"
-                    value={editTotalTickets}
-                    onChange={(e) => setEditTotalTickets(e.target.value)}
-                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-xs outline-none focus:border-orange-500"
-                  />
+                  <label className="text-xs font-bold text-gray-700">Types de billets &amp; places</label>
+                  <div className="grid grid-cols-3 gap-1 mb-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1">
+                    <span>Catégorie</span><span>Prix (XOF)</span><span>Places</span>
+                  </div>
+                  <div className="space-y-2">
+                    {editTicketTypes.map((tier, idx) => (
+                      <div key={idx} className="flex space-x-2">
+                        <input
+                          type="text"
+                          placeholder="Ex: VIP"
+                          value={tier.name}
+                          onChange={(e) => {
+                            const t = [...editTicketTypes];
+                            t[idx].name = e.target.value;
+                            setEditTicketTypes(t);
+                          }}
+                          className="flex-1 rounded-xl border border-gray-200 py-2.5 px-3 text-xs outline-none focus:border-orange-500"
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          step="500"
+                          placeholder="15000"
+                          value={tier.price}
+                          onChange={(e) => {
+                            const t = [...editTicketTypes];
+                            t[idx].price = e.target.value;
+                            setEditTicketTypes(t);
+                          }}
+                          className="flex-1 rounded-xl border border-gray-200 py-2.5 px-3 text-xs outline-none focus:border-orange-500"
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="100"
+                          value={tier.total}
+                          onChange={(e) => {
+                            const t = [...editTicketTypes];
+                            t[idx].total = e.target.value;
+                            setEditTicketTypes(t);
+                          }}
+                          className="flex-1 rounded-xl border border-gray-200 py-2.5 px-3 text-xs outline-none focus:border-orange-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setEditTicketTypes(editTicketTypes.filter((_, i) => i !== idx))}
+                          className="px-2 rounded-xl bg-red-50 text-red-500 font-bold hover:bg-red-100"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setEditTicketTypes([...editTicketTypes, { name: '', price: '', total: '' }])}
+                      className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center mt-1"
+                    >
+                      <Plus className="w-3 h-3 mr-1" /> Ajouter un type
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-2 rounded-xl border border-gray-200 p-4">
