@@ -92,6 +92,9 @@ export interface PaymentDetails {
 
 export interface SalesStatus {
   totalRevenue: number;
+  totalGrossRevenue: number;
+  totalCommission: number;
+  commissionRate: number;
   ticketsSold: number;
   activeEvents: number;
   recentSales: {
@@ -100,5 +103,19 @@ export interface SalesStatus {
     amount: number;
     date: string;
     tier: string;
+  }[];
+  tickets: {
+    id: string;
+    eventId: string;
+    eventTitle: string;
+    buyerName: string;
+    buyerEmail: string;
+    tier: string;
+    pricePaid: number;
+    scanned: boolean;
+    scannedAt: string | null;
+    transactionRef: string;
+    purchaseDate: string;
+    quantity: number;
   }[];
 }

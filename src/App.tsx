@@ -31,6 +31,7 @@ export default function App() {
   const [waitingRoomEvent, setWaitingRoomEvent] = useState<Event | null>(null);
   const [pendingEvent, setPendingEvent] = useState<Event | null>(null);
   const [authModalVisible, setAuthModalVisible] = useState(false);
+  const [resetToken, setResetToken] = useState<string | null>(null);
   const [systemAlert, setSystemAlert] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
@@ -64,8 +65,19 @@ export default function App() {
 
   useEffect(() => {
     fetchEvents();
-    
+
     const params = new URLSearchParams(window.location.search);
+
+    // Lien de réinitialisation de mot de passe reçu par e-mail (cf. /api/auth/forgot-password) :
+    // on ouvre directement l'écran "Choisir un nouveau mot de passe" et on retire le jeton de
+    // l'URL pour ne pas le laisser traîner dans l'historique/les logs du navigateur.
+    const token = params.get("reset_token");
+    if (token) {
+      setResetToken(token);
+      setAuthModalVisible(true);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
     if ((import.meta as any).env?.DEV && params.get("payment_success") === "true") {
       const orderId = params.get("order_id");
       if (orderId) {
@@ -229,8 +241,10 @@ export default function App() {
         {authModalVisible ? (
           <AuthPage
             onSuccess={handleLoginSuccess}
+            initialResetToken={resetToken}
             onCancel={() => {
               setAuthModalVisible(false);
+              setResetToken(null);
               setCheckoutEvent(null);
               setPendingEvent(null);
             }}

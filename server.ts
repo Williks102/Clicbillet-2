@@ -110,6 +110,7 @@ function makeRateLimiter(max: number, windowMs: number, message: string) {
 //   moyen de paiement) tout en bornant le spam de création de tickets PENDING.
 // - apiGeneral : filet de sécurité large pour le reste de l'API.
 const loginRateLimiter = makeRateLimiter(10, 15 * 60 * 1000, "Trop de tentatives de connexion. Réessayez dans quelques minutes.");
+const forgotPasswordRateLimiter = makeRateLimiter(5, 15 * 60 * 1000, "Trop de demandes de réinitialisation. Réessayez dans quelques minutes.");
 const checkoutRateLimiter = makeRateLimiter(20, 10 * 60 * 1000, "Trop de tentatives d'achat. Réessayez dans quelques minutes.");
 const apiGeneralRateLimiter = makeRateLimiter(300, 5 * 60 * 1000, "Trop de requêtes. Réessayez dans quelques instants.");
 
@@ -288,7 +289,8 @@ const INITIAL_DATABASE = {
     }
   ],
   payouts: [],
-  transactions: []
+  transactions: [],
+  passwordResets: []
 };
 
 // Initialize DB file helper
@@ -341,6 +343,14 @@ function saveDB(data: typeof INITIAL_DATABASE) {
   } catch (err) {
     console.error("Error saving to db.json", err);
   }
+}
+
+// Un événement est "passé" dès que sa date + heure de début sont dépassées (miroir de
+// src/lib/eventStatus.ts côté frontend — pas d'import cross src/server dans ce repo).
+function isEventPast(evt: { date: string; time: string }): boolean {
+  const eventDateTime = new Date(`${evt.date}T${evt.time}`);
+  if (isNaN(eventDateTime.getTime())) return false;
+  return eventDateTime.getTime() < Date.now();
 }
 
 // ==========================================
@@ -422,29 +432,54 @@ async function sendWelcomeEmail(user: { email: string; name: string; role: strin
   });
 }
 
-// --- Acheteur : confirmation de billet ---
-function buildTicketConfirmationHtml(ticket: any): string {
-  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(ticket.qrCodeData)}`;
-  return emailLayout("Votre billet est confirmé !", `
-    <p>Bonjour ${ticket.buyerName},</p>
-    <p>Merci pour votre achat. Voici les détails de votre commande :</p>
-    <ul>
-      <li><strong>Événement :</strong> ${ticket.eventTitle}</li>
-      <li><strong>Date :</strong> ${ticket.eventDate} à ${ticket.eventTime}</li>
-      <li><strong>Lieu :</strong> ${ticket.eventVenue}</li>
-      <li><strong>Quantité :</strong> ${ticket.quantity}</li>
-      <li><strong>Catégorie :</strong> ${ticket.tier}</li>
-    </ul>
-    <p>Présentez ce QR code à l'entrée :</p>
-    <img src="${qrImageUrl}" alt="QR Code billet" width="220" height="220" />
+// --- Réinitialisation de mot de passe ---
+function buildPasswordResetHtml(name: string, resetUrl: string): string {
+  return emailLayout("Réinitialisation de votre mot de passe", `
+    <p>Bonjour ${name},</p>
+    <p>Vous avez demandé à réinitialiser le mot de passe de votre compte ClicBillet. Cliquez sur le lien ci-dessous pour choisir un nouveau mot de passe :</p>
+    <p><a href="${resetUrl}" style="display: inline-block; margin: 12px 0; padding: 12px 20px; background-color: #ea580c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: bold;">Réinitialiser mon mot de passe</a></p>
+    <p style="font-size: 12px; color: #6b7280;">Ce lien expire dans 1 heure. Si vous n'êtes pas à l'origine de cette demande, ignorez simplement cet e-mail : votre mot de passe actuel reste inchangé.</p>
   `);
 }
 
-async function sendTicketEmail(ticket: any): Promise<void> {
+async function sendPasswordResetEmail(user: { email: string; name: string; resetUrl: string }): Promise<void> {
   await sendEmail({
-    to: ticket.buyerEmail,
-    subject: `Vos billets pour ${ticket.eventTitle}`,
-    html: buildTicketConfirmationHtml(ticket)
+    to: user.email,
+    subject: "Réinitialisation de votre mot de passe ClicBillet",
+    html: buildPasswordResetHtml(user.name, user.resetUrl)
+  });
+}
+
+// --- Acheteur : confirmation de billet(s) ---
+// Une commande peut regrouper plusieurs billets (un QR code par billet, cf. /api/checkout) :
+// on envoie UN SEUL email par commande listant tous les QR codes, plutôt qu'un email par billet.
+function buildTicketConfirmationHtml(order: { buyerName: string; eventTitle: string; eventDate: string; eventTime: string; eventVenue: string; tickets: { tier: string; qrCodeData: string }[] }): string {
+  const qrBlocks = order.tickets.map((t, i) => `
+    <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid #e5e7eb;">
+      <p style="margin: 0 0 8px; font-weight: bold;">Billet ${i + 1}/${order.tickets.length} — ${t.tier === "vip" ? "VIP" : "Standard"}</p>
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(t.qrCodeData)}" alt="QR Code billet ${i + 1}" width="220" height="220" />
+    </div>
+  `).join("");
+
+  return emailLayout(order.tickets.length > 1 ? "Vos billets sont confirmés !" : "Votre billet est confirmé !", `
+    <p>Bonjour ${order.buyerName},</p>
+    <p>Merci pour votre achat. Voici les détails de votre commande :</p>
+    <ul>
+      <li><strong>Événement :</strong> ${order.eventTitle}</li>
+      <li><strong>Date :</strong> ${order.eventDate} à ${order.eventTime}</li>
+      <li><strong>Lieu :</strong> ${order.eventVenue}</li>
+      <li><strong>Nombre de billets :</strong> ${order.tickets.length}</li>
+    </ul>
+    <p>Présentez le QR code correspondant à chaque billet à l'entrée (1 QR code = 1 personne) :</p>
+    ${qrBlocks}
+  `);
+}
+
+async function sendTicketEmail(order: { buyerEmail: string; buyerName: string; eventTitle: string; eventDate: string; eventTime: string; eventVenue: string; tickets: { tier: string; qrCodeData: string }[] }): Promise<void> {
+  await sendEmail({
+    to: order.buyerEmail,
+    subject: `Vos billets pour ${order.eventTitle}`,
+    html: buildTicketConfirmationHtml(order)
   });
 }
 
@@ -714,12 +749,18 @@ function getWebhookSecretFromRequest(req: express.Request): string | null {
   return null;
 }
 
-function buildWebhookNotificationUrl(req: express.Request): string {
+// Le même serveur Express sert l'API et le frontend (SPA) sur la même origine : on peut donc
+// dériver l'URL publique de l'app directement depuis la requête entrante, sans variable
+// d'environnement dédiée (cf. buildWebhookNotificationUrl, même logique).
+function buildAppOrigin(req: express.Request): string {
   const forwardedProto = req.headers["x-forwarded-proto"];
   const scheme = typeof forwardedProto === "string" ? forwardedProto : req.protocol;
   const host = req.get("host") || "localhost:3000";
-  const origin = req.get("origin") || `${scheme}://${host}`;
-  const baseUrl = `${origin.replace(/\/$/, "")}/api/payment/callback`;
+  return (req.get("origin") || `${scheme}://${host}`).replace(/\/$/, "");
+}
+
+function buildWebhookNotificationUrl(req: express.Request): string {
+  const baseUrl = `${buildAppOrigin(req)}/api/payment/callback`;
   if (PAYMENT_WEBHOOK_SECRET) {
     return `${baseUrl}?wh=${encodeURIComponent(PAYMENT_WEBHOOK_SECRET)}`;
   }
@@ -814,6 +855,37 @@ const validateLogin = (req: express.Request, res: express.Response, next: expres
   const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
   if (!emailRegex.test(email)) {
     return res.status(400).json({ error: "Le format de l'e-mail est invalide." });
+  }
+
+  next();
+};
+
+// Middleware de validation pour la demande de réinitialisation de mot de passe
+const validateForgotPassword = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: "Veuillez saisir votre adresse e-mail." });
+  }
+
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: "Le format de l'e-mail est invalide." });
+  }
+
+  next();
+};
+
+// Middleware de validation pour la finalisation de la réinitialisation de mot de passe
+const validateResetPassword = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { token, newPassword } = req.body;
+
+  if (!token || !newPassword) {
+    return res.status(400).json({ error: "Lien de réinitialisation ou nouveau mot de passe manquant." });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: "Le mot de passe doit contenir au moins 6 caractères pour des raisons de sécurité." });
   }
 
   next();
@@ -1379,6 +1451,163 @@ app.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: express
   });
 });
 
+// Demande de réinitialisation de mot de passe : génère un jeton à usage unique (valable 1h)
+// et envoie un lien de réinitialisation par e-mail. Répond toujours avec le même message
+// générique, que l'e-mail corresponde ou non à un compte existant, pour ne pas permettre à un
+// attaquant de découvrir quels e-mails sont enregistrés sur la plateforme (énumération).
+app.post("/api/auth/forgot-password", forgotPasswordRateLimiter, validateForgotPassword, async (req: express.Request, res: express.Response) => {
+  const { email } = req.body;
+  const normalizedEmail = String(email).toLowerCase();
+  const genericResponse = { message: "Si un compte existe avec cette adresse e-mail, un lien de réinitialisation vient de lui être envoyé." };
+
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1h
+  const resetUrl = `${buildAppOrigin(req)}/?reset_token=${rawToken}`;
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { data: profile } = await supabase
+        .from("users")
+        .select("id, name, email")
+        .eq("email", normalizedEmail)
+        .maybeSingle();
+
+      if (profile) {
+        const { error: insertError } = await supabase.from("password_resets").insert({
+          token_hash: tokenHash,
+          user_id: profile.id,
+          email: profile.email,
+          expires_at: expiresAt.toISOString()
+        });
+
+        if (insertError) {
+          console.error("[Password Reset] Échec de la création du jeton :", insertError.message);
+        } else {
+          runInBackground(sendPasswordResetEmail({ email: profile.email, name: profile.name, resetUrl }));
+        }
+      }
+
+      return res.json(genericResponse);
+    } catch (err: any) {
+      console.error("[Supabase Error] Forgot password, falling back to local file DB:", err.message);
+    }
+  }
+
+  // Fallback database
+  const db = getDB();
+  const user = db.users.find((u: any) => u.email.toLowerCase() === normalizedEmail);
+  if (user) {
+    db.passwordResets = db.passwordResets || [];
+    // Purge les jetons expirés au passage, pour ne pas faire grossir db.json indéfiniment.
+    db.passwordResets = db.passwordResets.filter((r: any) => new Date(r.expiresAt) > new Date());
+    db.passwordResets.push({
+      tokenHash,
+      userId: user.id,
+      email: user.email,
+      expiresAt: expiresAt.toISOString()
+    });
+    saveDB(db);
+    runInBackground(sendPasswordResetEmail({ email: user.email, name: user.name, resetUrl }));
+  }
+
+  res.json(genericResponse);
+});
+
+// Finalisation de la réinitialisation : vérifie le jeton (à usage unique, 1h de validité),
+// met à jour le mot de passe puis ouvre directement une session, pour éviter à l'utilisateur
+// de devoir se reconnecter manuellement juste après avoir choisi son nouveau mot de passe.
+app.post("/api/auth/reset-password", loginRateLimiter, validateResetPassword, async (req: express.Request, res: express.Response) => {
+  const { token, newPassword } = req.body;
+  const tokenHash = crypto.createHash("sha256").update(String(token)).digest("hex");
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { data: resetEntry, error: lookupError } = await supabase
+        .from("password_resets")
+        .select("*")
+        .eq("token_hash", tokenHash)
+        .maybeSingle();
+
+      if (lookupError) throw lookupError;
+
+      if (!resetEntry || new Date(resetEntry.expires_at) < new Date()) {
+        if (resetEntry) await supabase.from("password_resets").delete().eq("token_hash", tokenHash);
+        return res.status(400).json({ error: "Ce lien de réinitialisation est invalide ou a expiré. Veuillez refaire une demande." });
+      }
+
+      if (!supabaseAdmin) {
+        return res.status(500).json({ error: "Service de réinitialisation indisponible pour le moment." });
+      }
+
+      const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(resetEntry.user_id, { password: newPassword });
+      if (updateError) throw updateError;
+
+      // Jeton à usage unique : on le supprime immédiatement après consommation.
+      await supabase.from("password_resets").delete().eq("token_hash", tokenHash);
+
+      const { data: profile } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", resetEntry.user_id)
+        .maybeSingle();
+
+      // Ouvre une session directement après la réinitialisation, comme à l'inscription
+      // (cf. /api/auth/register), pour que le frontend reparte avec un token valide.
+      let sessionToken: string | undefined;
+      let sessionRefreshToken: string | undefined;
+      try {
+        const { data: signInData } = await createEphemeralAuthClient().auth.signInWithPassword({
+          email: resetEntry.email,
+          password: newPassword
+        });
+        sessionToken = signInData?.session?.access_token;
+        sessionRefreshToken = signInData?.session?.refresh_token;
+      } catch (signInErr: any) {
+        console.warn("[Supabase Warning] Impossible d'ouvrir une session juste après la réinitialisation :", signInErr.message);
+      }
+
+      return res.json({
+        id: profile?.id || resetEntry.user_id,
+        email: profile?.email || resetEntry.email,
+        name: profile?.name || resetEntry.email.split("@")[0],
+        role: profile?.role || "client",
+        token: sessionToken,
+        refreshToken: sessionRefreshToken
+      });
+    } catch (err: any) {
+      console.error("[Supabase Error] Reset password:", err.message);
+      return res.status(500).json({ error: "Impossible de réinitialiser le mot de passe pour le moment." });
+    }
+  }
+
+  // Fallback database
+  const db = getDB();
+  db.passwordResets = db.passwordResets || [];
+  const resetEntry = db.passwordResets.find((r: any) => r.tokenHash === tokenHash);
+
+  if (!resetEntry || new Date(resetEntry.expiresAt) < new Date()) {
+    db.passwordResets = db.passwordResets.filter((r: any) => r.tokenHash !== tokenHash);
+    saveDB(db);
+    return res.status(400).json({ error: "Ce lien de réinitialisation est invalide ou a expiré. Veuillez refaire une demande." });
+  }
+
+  const user = db.users.find((u: any) => u.id === resetEntry.userId);
+  if (!user) {
+    return res.status(400).json({ error: "Compte introuvable pour ce lien de réinitialisation." });
+  }
+
+  user.password = bcrypt.hashSync(newPassword, 10);
+  db.passwordResets = db.passwordResets.filter((r: any) => r.tokenHash !== tokenHash);
+  saveDB(db);
+
+  const { password: _, ...userWithoutPassword } = user;
+  res.json({
+    ...userWithoutPassword,
+    token: `local-${user.id}`
+  });
+});
+
 // Rafraîchissement de session : les access_token Supabase expirent (par défaut au bout
 // d'1h). Le frontend appelle cette route avec le refresh_token stocké pour obtenir un
 // nouveau access_token sans forcer l'utilisateur à se reconnecter manuellement.
@@ -1666,6 +1895,10 @@ app.post("/api/checkout", checkoutRateLimiter, requireAuth, validateCheckout, as
         return res.status(404).json({ error: "Événement introuvable." });
       }
 
+      if (isEventPast({ date: event.date, time: event.time })) {
+        return res.status(400).json({ error: "Cet événement est terminé, l'achat de billets n'est plus possible." });
+      }
+
       // Si la salle d'attente est activée sur cet événement, l'acheteur doit avoir une
       // entrée "active" non expirée (obtenue via /api/waiting-room/join puis /status) avant
       // de pouvoir passer commande.
@@ -1692,32 +1925,39 @@ app.post("/api/checkout", checkoutRateLimiter, requireAuth, validateCheckout, as
 
       const ticketTypes = event.ticket_types || [];
       let totalPrice = 0;
-      const ticketRows = items.map((item, idx) => {
+      // Une ligne "tickets" = un QR code = une personne : on crée item.quantity lignes par
+      // type de billet (pas une seule ligne avec quantity=N), sinon un seul scan à l'entrée
+      // "consommerait" toutes les places du groupe d'un coup.
+      const ticketRows: any[] = [];
+      let unitIdx = 0;
+      for (const item of items) {
         const selectedTier = ticketTypes.find((t: any) => typeof t.name === "string" && t.name.toLowerCase() === item.tier);
         const unitPrice = selectedTier ? Number(selectedTier.price) : Number(event.price);
-        const linePrice = unitPrice * item.quantity;
-        totalPrice += linePrice;
-        const ticketId = `tkt-${Date.now()}-${idx}`;
-        return {
-          id: ticketId,
-          order_id: orderId,
-          event_id: eventId,
-          event_title: event.title,
-          event_date: event.date,
-          event_time: event.time,
-          event_venue: event.venue,
-          buyer_id: buyerId,
-          buyer_name: buyerName,
-          buyer_email: buyerEmail,
-          tier: item.tier as "standard" | "vip",
-          price_paid: linePrice,
-          qr_code_data: `clicbillet-verify:${ticketId}`,
-          scanned: false,
-          scanned_at: null,
-          transaction_ref: `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}-${idx}`,
-          quantity: item.quantity
-        };
-      });
+        totalPrice += unitPrice * item.quantity;
+        for (let u = 0; u < item.quantity; u++) {
+          const ticketId = `tkt-${Date.now()}-${unitIdx}`;
+          ticketRows.push({
+            id: ticketId,
+            order_id: orderId,
+            event_id: eventId,
+            event_title: event.title,
+            event_date: event.date,
+            event_time: event.time,
+            event_venue: event.venue,
+            buyer_id: buyerId,
+            buyer_name: buyerName,
+            buyer_email: buyerEmail,
+            tier: item.tier as "standard" | "vip",
+            price_paid: unitPrice,
+            qr_code_data: `clicbillet-verify:${ticketId}`,
+            scanned: false,
+            scanned_at: null,
+            transaction_ref: `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}-${unitIdx}`,
+            quantity: 1
+          });
+          unitIdx++;
+        }
+      }
 
       // Log transaction attempt (un seul mouvement, pour le montant total de la commande)
       try {
@@ -1811,39 +2051,49 @@ app.post("/api/checkout", checkoutRateLimiter, requireAuth, validateCheckout, as
     return res.status(404).json({ error: "Événement introuvable." });
   }
 
+  if (isEventPast({ date: event.date, time: event.time })) {
+    return res.status(400).json({ error: "Cet événement est terminé, l'achat de billets n'est plus possible." });
+  }
+
   if (event.ticketsSold + totalQuantity > event.totalTickets) {
     return res.status(400).json({ error: "Désolé, il n'y a plus assez de places disponibles." });
   }
 
   const ticketTypes = event.ticketTypes || [];
   let totalPrice = 0;
-  const newTickets = items.map((item, idx) => {
+  // Même logique que la branche Supabase ci-dessus : une ligne par billet unitaire, pas
+  // par type de billet.
+  const newTickets: any[] = [];
+  let unitIdx = 0;
+  for (const item of items) {
     const selectedTier = ticketTypes.find((t: any) => typeof t.name === "string" && t.name.toLowerCase() === item.tier);
     const unitPrice = selectedTier ? Number(selectedTier.price) : Number(event.price);
-    const linePrice = unitPrice * item.quantity;
-    totalPrice += linePrice;
-    const ticketId = `tkt-${Date.now()}-${idx}`;
-    return {
-      id: ticketId,
-      orderId,
-      eventId: event.id,
-      eventTitle: event.title,
-      eventDate: event.date,
-      eventTime: event.time,
-      eventVenue: event.venue,
-      buyerId,
-      buyerName,
-      buyerEmail,
-      tier: item.tier as "standard" | "vip",
-      pricePaid: linePrice,
-      qrCodeData: `clicbillet-verify:${ticketId}`,
-      scanned: false,
-      scannedAt: null,
-      transactionRef: `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}-${idx}`,
-      purchaseDate: new Date().toISOString(),
-      quantity: item.quantity
-    };
-  });
+    totalPrice += unitPrice * item.quantity;
+    for (let u = 0; u < item.quantity; u++) {
+      const ticketId = `tkt-${Date.now()}-${unitIdx}`;
+      newTickets.push({
+        id: ticketId,
+        orderId,
+        eventId: event.id,
+        eventTitle: event.title,
+        eventDate: event.date,
+        eventTime: event.time,
+        eventVenue: event.venue,
+        buyerId,
+        buyerName,
+        buyerEmail,
+        tier: item.tier as "standard" | "vip",
+        pricePaid: unitPrice,
+        qrCodeData: `clicbillet-verify:${ticketId}`,
+        scanned: false,
+        scannedAt: null,
+        transactionRef: `PENDING-TX-${code}-${Math.floor(1000000 + Math.random() * 9000000)}-${unitIdx}`,
+        purchaseDate: new Date().toISOString(),
+        quantity: 1
+      });
+      unitIdx++;
+    }
+  }
 
   db.transactions = db.transactions || [];
   db.transactions.unshift({
@@ -1976,8 +2226,9 @@ async function findTicketsByReference(candidates: Array<string | null | undefine
 // attendu par sendTicketEmail/sendPaymentFailedEmail.
 function ticketEmailShape(resolved: ResolvedTicket): any {
   const t = resolved.raw;
-  if (resolved.source === "local") return t;
+  if (resolved.source === "local") return { orderId: t.orderId || t.id, ...t };
   return {
+    orderId: t.order_id || t.id,
     buyerEmail: t.buyer_email,
     buyerName: t.buyer_name,
     eventTitle: t.event_title,
@@ -1988,6 +2239,19 @@ function ticketEmailShape(resolved: ResolvedTicket): any {
     quantity: t.quantity,
     qrCodeData: t.qr_code_data
   };
+}
+
+// Regroupe des billets individuels par commande (order_id, avec repli sur l'id du billet
+// pour les anciens billets pré-migration sans order_id) pour n'envoyer qu'un seul email par
+// commande au lieu d'un email par billet.
+function groupTicketsByOrder(shapedTickets: any[]): any[][] {
+  const groups = new Map<string, any[]>();
+  for (const t of shapedTickets) {
+    const key = String(t.orderId);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(t);
+  }
+  return Array.from(groups.values());
 }
 
 // Confirme (PENDING- -> PAID-) tous les tickets résolus qui sont encore en attente.
@@ -2001,6 +2265,7 @@ async function confirmPaymentForTickets(resolvedTickets: ResolvedTicket[]): Prom
   // orphelin. On recharge une copie fraîche ici et on mute CETTE copie-là, par id.
   const hasLocal = resolvedTickets.some((r) => r.source === "local");
   const db = hasLocal ? getDB() : null;
+  const newlyConfirmed: any[] = [];
 
   for (const resolved of resolvedTickets) {
     const t = resolved.raw;
@@ -2026,17 +2291,34 @@ async function confirmPaymentForTickets(resolvedTickets: ResolvedTicket[]): Prom
       runInBackground(releaseWaitingRoomSlot(localTicket.eventId, localTicket.buyerId));
     }
 
-    runInBackground(sendTicketEmail(ticketEmailShape(resolved)));
+    newlyConfirmed.push(ticketEmailShape(resolved));
     confirmedCount++;
   }
 
   if (db) saveDB(db);
+
+  // Un seul email de confirmation par commande, listant le QR code de chaque billet, plutôt
+  // qu'un email par billet (cf. /api/checkout : une commande = N lignes "tickets" désormais).
+  for (const group of groupTicketsByOrder(newlyConfirmed)) {
+    const first = group[0];
+    runInBackground(sendTicketEmail({
+      buyerEmail: first.buyerEmail,
+      buyerName: first.buyerName,
+      eventTitle: first.eventTitle,
+      eventDate: first.eventDate,
+      eventTime: first.eventTime,
+      eventVenue: first.eventVenue,
+      tickets: group.map((t) => ({ tier: t.tier, qrCodeData: t.qrCodeData }))
+    }));
+  }
+
   return confirmedCount;
 }
 
 async function notifyPaymentFailedForTickets(resolvedTickets: ResolvedTicket[]): Promise<void> {
-  for (const resolved of resolvedTickets) {
-    runInBackground(sendPaymentFailedEmail(ticketEmailShape(resolved)));
+  const shaped = resolvedTickets.map(ticketEmailShape);
+  for (const group of groupTicketsByOrder(shaped)) {
+    runInBackground(sendPaymentFailedEmail(group[0]));
   }
 }
 
