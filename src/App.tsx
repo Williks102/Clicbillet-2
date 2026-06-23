@@ -8,6 +8,7 @@ import QrScannerTab from "./components/QrScannerTab";
 import CheckoutModal from "./components/CheckoutModal";
 import AdminDashboard from "./components/AdminDashboard";
 import WaitingRoom from "./components/WaitingRoom";
+import GuestOrAuthModal, { GuestInfo } from "./components/GuestOrAuthModal";
 import ToastStack, { ToastItem } from "./components/ToastStack";
 import { User, Event } from "./types";
 import { Calendar, Compass, ShieldAlert, Sparkles } from "lucide-react";
@@ -31,6 +32,8 @@ export default function App() {
   const [waitingRoomEvent, setWaitingRoomEvent] = useState<Event | null>(null);
   const [pendingEvent, setPendingEvent] = useState<Event | null>(null);
   const [authModalVisible, setAuthModalVisible] = useState(false);
+  const [guestChoiceEvent, setGuestChoiceEvent] = useState<Event | null>(null);
+  const [guestInfo, setGuestInfo] = useState<GuestInfo | null>(null);
   const [resetToken, setResetToken] = useState<string | null>(null);
   const [systemAlert, setSystemAlert] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -179,6 +182,8 @@ export default function App() {
     setCheckoutEvent(null);
     setWaitingRoomEvent(null);
     setPendingEvent(null);
+    setGuestInfo(null);
+    setGuestChoiceEvent(null);
     setAuthModalVisible(false);
     setActiveTab("home");
   }
@@ -194,12 +199,24 @@ export default function App() {
 
   function handleBuyTicketTrigger(event: Event) {
     if (!user) {
-      // Needs Auth first to attribute ticket purchase - do not open checkout until logged in!
-      setPendingEvent(event);
-      setAuthModalVisible(true);
+      setGuestChoiceEvent(event);
     } else {
       openCheckoutFlow(event);
     }
+  }
+
+  function handleGuestContinue(info: GuestInfo) {
+    setGuestInfo(info);
+    const event = guestChoiceEvent;
+    setGuestChoiceEvent(null);
+    if (event) openCheckoutFlow(event);
+  }
+
+  function handleGuestChooseAuth() {
+    const event = guestChoiceEvent;
+    setGuestChoiceEvent(null);
+    setPendingEvent(event);
+    setAuthModalVisible(true);
   }
 
   function handleCheckoutSuccess(tickets: any[]) {
@@ -307,12 +324,22 @@ export default function App() {
         />
       )}
 
+      {/* Choix invité / connexion avant l'achat */}
+      {guestChoiceEvent && (
+        <GuestOrAuthModal
+          onGuestContinue={handleGuestContinue}
+          onOpenAuth={handleGuestChooseAuth}
+          onClose={() => setGuestChoiceEvent(null)}
+        />
+      )}
+
       {/* Ticket purchases interactive modal */}
       {checkoutEvent && (
         <CheckoutModal
           event={checkoutEvent}
           user={user}
-          onClose={() => setCheckoutEvent(null)}
+          guestInfo={guestInfo ?? undefined}
+          onClose={() => { setCheckoutEvent(null); setGuestInfo(null); }}
           onSuccess={handleCheckoutSuccess}
           onOpenAuth={() => {
             setAuthModalVisible(true);
