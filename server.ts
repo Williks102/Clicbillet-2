@@ -681,6 +681,12 @@ async function requireAuth(req: express.Request, res: express.Response, next: ex
   next();
 }
 
+async function optionalAuth(req: express.Request, _res: express.Response, next: express.NextFunction) {
+  const user = await getAuthenticatedUser(req);
+  (req as any).user = user ?? null;
+  next();
+}
+
 function requireRole(...allowedRoles: string[]) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const user = (req as any).user;
@@ -940,10 +946,15 @@ const validateEvent = (req: express.Request, res: express.Response, next: expres
 // Une commande (panier) contient un ou plusieurs items, un par type de billet distinct
 // (ex: { tier: "standard", quantity: 2 } + { tier: "vip", quantity: 1 }).
 const validateCheckout = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const { eventId, buyerId, buyerName, buyerEmail, items, paymentDetails } = req.body;
+  const { eventId, buyerId, buyerName, buyerEmail, guestPhone, items, paymentDetails } = req.body;
+  const isGuest = !buyerId && !!buyerEmail;
 
-  if (!eventId || !buyerId || !buyerName || !buyerEmail || !Array.isArray(items) || items.length === 0 || !paymentDetails) {
+  // Logged-in users must have buyerId; guests must provide buyerEmail + guestPhone
+  if (!eventId || (!buyerId && !buyerEmail) || !buyerName || !buyerEmail || !Array.isArray(items) || items.length === 0 || !paymentDetails) {
     return res.status(400).json({ error: "Champs d'achat de billets incomplets." });
+  }
+  if (isGuest && (!guestPhone || String(guestPhone).replace(/\s+/g, "").length < 8)) {
+    return res.status(400).json({ error: "Un numéro de téléphone valide est requis pour l'achat sans compte." });
   }
 
   const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -1884,18 +1895,20 @@ const GATEWAY_SHORT_NAMES: Record<string, string> = {
   card: "CARD"
 };
 
-app.post("/api/checkout", checkoutRateLimiter, requireAuth, validateCheckout, async (req: express.Request, res: express.Response) => {
+app.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout, async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
-  const { eventId, buyerName, items, paymentDetails } = req.body as {
+  const { eventId, buyerName, buyerEmail: bodyEmail, guestPhone, items, paymentDetails } = req.body as {
     eventId: string;
     buyerName: string;
+    buyerEmail: string;
+    guestPhone?: string;
     items: Array<{ tier: string; quantity: number }>;
     paymentDetails: { method: string };
   };
-  // L'identité de l'acheteur vient toujours du token authentifié, jamais du body :
-  // sinon n'importe qui pourrait créer un billet "payé" au nom d'un autre utilisateur.
-  const buyerId = authUser.id;
-  const buyerEmail = authUser.email;
+  // Pour un utilisateur connecté, l'identité vient du token (non falsifiable).
+  // Pour un invité (pas de token), on utilise les données du body après validation.
+  const buyerId: string = authUser?.id ?? `guest-${Date.now()}`;
+  const buyerEmail: string = authUser?.email ?? bodyEmail;
 
   if (!eventId || !buyerId || !buyerName || !buyerEmail || !items || !paymentDetails) {
     return res.status(400).json({ error: "Informations de commande incomplètes." });

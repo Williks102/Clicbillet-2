@@ -2,10 +2,12 @@ import React, { useState } from "react";
 import { X, Check, ArrowRight, ShieldCheck, CreditCard, MessageSquare, Ticket, Sparkles, Smartphone } from "lucide-react";
 import { Event, User, PaymentMethod, PaymentDetails } from "../types";
 import ResponsiveSheet from "./ResponsiveSheet";
+import { GuestInfo } from "./GuestOrAuthModal";
 
 interface CheckoutModalProps {
   event: Event;
   user: User | null;
+  guestInfo?: GuestInfo;
   onClose: () => void;
   onSuccess: (tickets: any[]) => void;
   onOpenAuth: () => void;
@@ -14,7 +16,8 @@ interface CheckoutModalProps {
 const MAX_PER_TIER = 10;
 const MAX_TOTAL_PER_ORDER = 20;
 
-export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenAuth }: CheckoutModalProps) {
+export default function CheckoutModal({ event, user, guestInfo, onClose, onSuccess, onOpenAuth }: CheckoutModalProps) {
+  const isGuest = !user && !!guestInfo;
   const [step, setStep] = useState<"configure" | "details" | "processing" | "success">("configure");
   const activeTicketTypes = (event.ticketTypes && event.ticketTypes.length > 0)
     ? event.ticketTypes
@@ -68,8 +71,7 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
       setError("Veuillez sélectionner au moins un billet.");
       return;
     }
-    if (!user) {
-      // Prompt Auth first if anonymous
+    if (!user && !guestInfo) {
       onOpenAuth();
       return;
     }
@@ -104,10 +106,14 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
       ...(user?.token ? { Authorization: `Bearer ${user.token}` } : {})
     };
 
+    const buyerEmail = user?.email ?? guestInfo?.email ?? "";
+    const buyerName = user?.name ?? (guestInfo?.email.split("@")[0] ?? "Invité");
+    const buyerPhone = isGuest ? (guestInfo?.phone ?? phoneNumber) : phoneNumber;
+
     // Initiate backend express purchase sequence
     const paymentDetails: PaymentDetails = {
       method,
-      phoneNumber,
+      phoneNumber: buyerPhone,
       otp,
       cardName,
       cardNumber,
@@ -121,9 +127,10 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
 
       const payload = {
         eventId: event.id,
-        buyerId: user?.id,
-        buyerName: user?.name,
-        buyerEmail: user?.email,
+        buyerId: user?.id ?? null,
+        buyerName,
+        buyerEmail,
+        guestPhone: isGuest ? guestInfo?.phone : undefined,
         items: selectedItems.map((item) => ({ tier: item.name.toLowerCase(), quantity: item.qty })),
         paymentDetails
       };
@@ -170,20 +177,18 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
 
           // Référence de la commande (peut regrouper plusieurs types de billets)
           pPro.referenceNumber = data.orderId || `ORD-${Date.now()}`;
-          pPro.customerEmail = user?.email || "customer@example.com";
+          pPro.customerEmail = buyerEmail || "customer@example.com";
 
-          // Séparation prénom / nom pour respecter les obligations du SDK
-          const fullName = user?.name || "Client ClicBillet";
-          const nameParts = fullName.trim().split(/\s+/);
+          const nameParts = buyerName.trim().split(/\s+/);
           pPro.customerLastname = nameParts[0] || "Client";
           pPro.customerFirstName = nameParts.slice(1).join(" ") || "Billet";
 
-          pPro.customerPhoneNumber = phoneNumber || "0700000000";
+          pPro.customerPhoneNumber = buyerPhone || "0700000000";
           pPro.description = `${selectedItems.map((item) => `${item.qty}x ${item.name}`).join(", ")} - ${event.title}`;
 
           pPro.notificationURL = data.notificationUrl || `${window.location.origin}/api/payment/callback`;
           pPro.returnURL = `${window.location.origin}/?payment_success=true&order_id=${data.orderId}`;
-          pPro.returnContext = JSON.stringify({ orderId: data.orderId, userId: user?.id });
+          pPro.returnContext = JSON.stringify({ orderId: data.orderId, userId: user?.id ?? null, guestEmail: isGuest ? buyerEmail : null });
 
           try {
             await pPro.getUrlPayment();
@@ -542,7 +547,13 @@ export default function CheckoutModal({ event, user, onClose, onSuccess, onOpenA
               </div>
               <div>
                 <h4 className="text-base font-black text-gray-900">Commande Initiale Validée !</h4>
-                <p className="text-xs text-gray-500 mt-1 pb-1">Vos billets ont été configurés avec succès dans votre espace.</p>
+                {isGuest ? (
+                  <p className="text-xs text-gray-500 mt-1 pb-1">
+                    Vos billets (avec QR codes) seront envoyés à <strong className="text-orange-600">{buyerEmail}</strong> après confirmation du paiement.
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-500 mt-1 pb-1">Vos billets ont été configurés avec succès dans votre espace.</p>
+                )}
               </div>
 
               {paymentUrl ? (
