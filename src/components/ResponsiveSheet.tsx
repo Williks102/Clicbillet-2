@@ -32,7 +32,7 @@ export default function ResponsiveSheet({ id, panelId, onClose, panelClassName =
   return (
     <div
       id={id}
-      className={`fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center sm:p-4 bg-black/55 backdrop-blur-xs ${overlayClassName}`}
+      className={`fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 bg-black/55 backdrop-blur-xs ${overlayClassName}`}
     >
       <motion.div
         id={panelId}
