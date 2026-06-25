@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background rounded rect -->
+  <rect width="512" height="512" rx="112" fill="#ea580c"/>
+  <!-- Subtle gradient overlay -->
+  <rect width="512" height="512" rx="112" fill="url(#grad)" opacity="0.35"/>
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fbbf24;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#c2410c;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Ticket shape -->
+  <path d="M96 192 Q96 160 128 160 L224 160 Q224 144 256 144 Q288 144 288 160 L384 160 Q416 160 416 192 L416 224 Q400 224 400 256 Q400 288 416 288 L416 320 Q416 352 384 352 L288 352 Q288 368 256 368 Q224 368 224 352 L128 352 Q96 352 96 320 L96 288 Q112 288 112 256 Q112 224 96 224 Z" fill="white" opacity="0.18"/>
+  <!-- CB letters -->
+  <text x="256" y="310" font-family="system-ui, -apple-system, sans-serif" font-size="196" font-weight="900" fill="white" text-anchor="middle" letter-spacing="-8">CB</text>
+</svg>
