@@ -1,14 +1,28 @@
 <!doctype html>
-<html lang="en">
+<html lang="fr">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>clicbillet,la billetterie de référence</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>ClicBillet – La billetterie de référence</title>
+
+    <!-- PWA -->
+    <meta name="theme-color" content="#ea580c" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="ClicBillet" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+
+    <!-- SEO / Open Graph -->
+    <meta name="description" content="Achetez vos billets de concerts, festivals et matchs en Côte d'Ivoire. Paiement Orange Money, MTN, Wave, Moov et carte bancaire." />
+    <meta property="og:title" content="ClicBillet – Billetterie Ivoirienne" />
+    <meta property="og:description" content="Tickets instantanés, paiement mobile money, QR code de vérification." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/icon.svg" />
+
     <!-- SDK de paiement professionnel en ligne Paiement Pro -->
     <script src="https://paiementpro.net/webservice/onlinepayment/js/paiementpro.v1.0.1.js"></script>
-    <!-- Logique de secours déplacée en fichier externe (pas de script inline) pour pouvoir
-         retirer 'unsafe-inline' du CSP scriptSrc. Le CDN ci-dessus ne renvoie pas de header
-         CORS, donc pas de SRI possible dessus sans casser le chargement réel du SDK. -->
     <script src="/paiementpro-fallback.js"></script>
   </head>
   <body>
@@ -16,4 +30,3 @@
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

@@ -463,7 +463,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       setDate("");
       setTime("");
       setPrice("");
-      setTicketTypes([{ name: 'Standard', price: '' }]);
+      setTicketTypes([{ name: 'Standard', price: '', total: '' }]);
       setVenue("");
       setTotalTickets("");
       setWaitingRoomEnabled(false);

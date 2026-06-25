@@ -10,6 +10,7 @@ import AdminDashboard from "./components/AdminDashboard";
 import WaitingRoom from "./components/WaitingRoom";
 import GuestOrAuthModal, { GuestInfo } from "./components/GuestOrAuthModal";
 import ToastStack, { ToastItem } from "./components/ToastStack";
+import PwaInstallPrompt from "./components/PwaInstallPrompt";
 import { User, Event } from "./types";
 import { Calendar, Compass, ShieldAlert, Sparkles } from "lucide-react";
 import { supabaseClient } from "./lib/supabaseClient";
@@ -348,6 +349,7 @@ export default function App() {
       )}
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
+      <PwaInstallPrompt />
 
       {/* Page Footer */}
       <footer className="mt-auto border-t border-gray-100 bg-white py-6 text-center text-xs text-gray-400 font-semibold uppercase tracking-wider print:hidden">

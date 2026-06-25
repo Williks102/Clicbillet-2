@@ -44,6 +44,7 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
     .filter((item) => item.qty > 0);
   const totalQuantity = selectedItems.reduce((sum, item) => sum + item.qty, 0);
   const totalPrice = selectedItems.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const buyerEmail = user?.email ?? guestInfo?.email ?? "";
 
   function adjustQuantity(tierName: string, delta: number) {
     setQuantities((prev) => {
@@ -106,7 +107,6 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
       ...(user?.token ? { Authorization: `Bearer ${user.token}` } : {})
     };
 
-    const buyerEmail = user?.email ?? guestInfo?.email ?? "";
     const buyerName = user?.name ?? (guestInfo?.email.split("@")[0] ?? "Invité");
     const buyerPhone = isGuest ? (guestInfo?.phone ?? phoneNumber) : phoneNumber;
 
