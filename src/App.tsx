@@ -82,9 +82,19 @@ export default function App() {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
-    if ((import.meta as any).env?.DEV && params.get("payment_success") === "true") {
+    if (params.get("payment_success") === "true") {
       const orderId = params.get("order_id");
-      if (orderId) {
+      const finishPaymentReturn = () => {
+        window.history.replaceState({}, document.title, window.location.pathname);
+        window.dispatchEvent(new CustomEvent("refresh_tickets"));
+        if (user?.role === "client") {
+          setActiveTab("client-dashboard");
+        } else {
+          setActiveTab("home");
+        }
+      };
+
+      if ((import.meta as any).env?.DEV && orderId) {
         console.log("Validation du paiement post-redirection en développement pour la commande :", orderId);
         fetch("/api/dev/simulate-payment", {
           method: "POST",
@@ -93,12 +103,10 @@ export default function App() {
           },
           body: JSON.stringify({ referenceNumber: orderId })
         }).then(() => {
-          window.history.replaceState({}, document.title, window.location.pathname);
-          window.dispatchEvent(new CustomEvent("refresh_tickets"));
-          if (user?.role === "client") {
-            setActiveTab("client-dashboard");
-          }
+          finishPaymentReturn();
         }).catch(e => console.error("Could not simulate redirect payment:", e));
+      } else {
+        finishPaymentReturn();
       }
     }
   }, [user]);
@@ -220,14 +228,19 @@ export default function App() {
     setAuthModalVisible(true);
   }
 
-  function handleCheckoutSuccess(tickets: any[]) {
+  function handleCheckoutSuccess(_tickets: any[]) {
     setCheckoutEvent(null);
     // Refresh events lists to reflect decremented ticket inventory instantly (force=true
     // pour contourner le cache client, sinon l'inventaire affiché resterait obsolète
     // jusqu'à expiration du TTL).
     fetchEvents(true);
-    // Redirect buyer to their tickets page
-    setActiveTab("client-dashboard");
+    // Les invités n'ont pas d'espace "Mes billets" connecté : les renvoyer vers l'accueil
+    // évite une page blanche, leurs QR codes étant envoyés par email.
+    if (user?.role === "client") {
+      setActiveTab("client-dashboard");
+    } else {
+      setActiveTab("home");
+    }
   }
 
   return (
@@ -255,7 +268,7 @@ export default function App() {
       )}
 
       {/* Primary viewport content context router */}
-      <main className="flex-1 mx-auto w-full max-w-7xl px-4 py-8 sm:px-6">
+      <main className="flex-1 mx-auto w-full max-w-7xl overflow-hidden px-3 py-6 sm:px-6 sm:py-8">
         {authModalVisible ? (
           <AuthPage
             onSuccess={handleLoginSuccess}

@@ -500,10 +500,10 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       
       {/* Header and Toggle Navigation */}
       <section className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-100 pb-5">
-        <div>
-          <h2 className="text-xl font-black text-gray-900 flex items-center space-x-1">
-            <LayoutDashboard className="h-5 w-5 text-orange-600" />
-            <span>Espace Organisateur : {user.name}</span>
+        <div className="min-w-0">
+          <h2 className="flex items-start gap-1.5 text-lg font-black text-gray-900 sm:items-center sm:text-xl">
+            <LayoutDashboard className="mt-0.5 h-5 w-5 shrink-0 text-orange-600 sm:mt-0" />
+            <span className="min-w-0 break-words">Espace Organisateur : {user.name}</span>
           </h2>
           <p className="mt-1 text-xs text-gray-500 font-semibold uppercase tracking-wider">
             Tableau de Bord & Création d'événements
@@ -814,11 +814,11 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         </div>
       ) : subTab === "create" ? (
         /* Create New Event Form Layout */
-        <form onSubmit={handleCreateEvent} className="rounded-2xl border border-gray-150/70 bg-white p-6 space-y-6" id="orga-create-form-view">
+        <form onSubmit={handleCreateEvent} className="min-w-0 rounded-2xl border border-gray-150/70 bg-white p-4 space-y-5 sm:p-6 sm:space-y-6" id="orga-create-form-view">
           <div className="border-b border-gray-50 pb-4">
-            <h3 className="text-base font-black text-gray-900 flex items-center space-x-1">
-              <Sparkles className="h-4.5 w-4.5 text-orange-600" />
-              <span>Publiez un Nouvel Événement</span>
+            <h3 className="flex items-start gap-1.5 text-base font-black text-gray-900 sm:items-center">
+              <Sparkles className="mt-0.5 h-4.5 w-4.5 shrink-0 text-orange-600 sm:mt-0" />
+              <span className="break-words">Publiez un Nouvel Événement</span>
             </h3>
             <p className="text-xs text-gray-400 mt-0.5 font-medium">Prenez soin de définir des tarifs clairs adaptés aux spectateurs ivoiriens.</p>
           </div>
@@ -837,7 +837,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
           )}
 
           {/* Form grid values */}
-          <div className="grid gap-5 sm:grid-cols-2">
+          <div className="grid min-w-0 grid-cols-1 gap-5 sm:grid-cols-2">
             
             <div className="space-y-1 sm:col-span-2">
               <label className="text-xs font-bold text-gray-700">Titre de l'événement</label>
@@ -900,12 +900,12 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
 
             <div className="space-y-1">
               <label className="text-xs font-bold text-gray-700">Types de billets</label>
-              <div className="grid grid-cols-3 gap-1 mb-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1">
+              <div className="hidden grid-cols-3 gap-1 mb-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1 sm:grid">
                 <span>Catégorie</span><span>Prix (XOF)</span><span>Places</span>
               </div>
               <div className="space-y-2">
                 {ticketTypes.map((tier, idx) => (
-                  <div key={idx} className="flex space-x-2">
+                  <div key={idx} className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
                     <input
                       type="text"
                       placeholder="Ex: VIP"
@@ -915,7 +915,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                         newTiers[idx].name = e.target.value;
                         setTicketTypes(newTiers);
                       }}
-                      className="flex-1 rounded-xl border border-gray-200 py-3 px-3 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
+                      aria-label="Catégorie du billet"
+                      className="min-w-0 rounded-xl border border-gray-200 py-3 px-3 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
                     />
                     <input
                       type="number"
@@ -928,7 +929,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                         newTiers[idx].price = e.target.value;
                         setTicketTypes(newTiers);
                       }}
-                      className="flex-1 rounded-xl border border-gray-200 py-3 px-3 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
+                      aria-label="Prix du billet"
+                      className="min-w-0 rounded-xl border border-gray-200 py-3 px-3 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
                     />
                     <input
                       type="number"
@@ -940,12 +942,13 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                         newTiers[idx].total = e.target.value;
                         setTicketTypes(newTiers);
                       }}
-                      className="flex-1 rounded-xl border border-gray-200 py-3 px-3 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
+                      aria-label="Nombre de places du billet"
+                      className="min-w-0 rounded-xl border border-gray-200 py-3 px-3 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
                     />
                     <button
                       type="button"
                       onClick={() => setTicketTypes(ticketTypes.filter((_, i) => i !== idx))}
-                      className="px-3 rounded-xl bg-red-50 text-red-500 font-bold hover:bg-red-100"
+                      className="flex min-h-11 items-center justify-center rounded-xl bg-red-50 px-3 text-red-500 font-bold hover:bg-red-100"
                       title="Supprimer"
                     >
                       <X className="w-4 h-4" />
@@ -1031,10 +1034,10 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             </div>
 
             {/* Banner Theme selector */}
-            <div className="col-span-2 space-y-3">
+            <div className="space-y-3 sm:col-span-2">
               <label className="text-xs font-bold text-gray-700">Bannière de l'Événement (Sélectionnez un modèle ou entrez un lien custom)</label>
               
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                 {BANNER_TEMPLATES.map((tmpl, index) => (
                   <div
                     key={index}
@@ -1156,11 +1159,11 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
           </div>
 
           {/* Form CTA active submissions */}
-          <div className="border-t border-gray-150 pt-5 flex items-center justify-end space-x-3">
+          <div className="border-t border-gray-150 pt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end sm:space-x-3 sm:gap-0">
             <button
               type="button"
               onClick={() => setSubTab("dashboard")}
-              className="rounded-xl px-5 py-3 text-xs font-bold text-gray-500 hover:text-gray-700 transition"
+              className="w-full rounded-xl px-5 py-3 text-xs font-bold text-gray-500 hover:text-gray-700 transition sm:w-auto"
             >
               Annuler
             </button>
@@ -1168,7 +1171,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
               type="submit"
               id="submit-create-event-btn"
               disabled={submitting}
-              className="rounded-xl bg-orange-600 px-6 py-3 text-xs font-black text-white hover:bg-orange-700 shadow-md shadow-orange-100 disabled:bg-gray-300 transition-all active:scale-95"
+              className="w-full rounded-xl bg-orange-600 px-6 py-3 text-xs font-black text-white hover:bg-orange-700 shadow-md shadow-orange-100 disabled:bg-gray-300 transition-all active:scale-95 sm:w-auto"
             >
               {submitting ? "Publication en cours..." : "Publier l'Événement"}
             </button>
