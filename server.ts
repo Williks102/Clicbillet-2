@@ -2015,19 +2015,28 @@ app.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout, a
       }
 
       // Log transaction attempt (un seul mouvement, pour le montant total de la commande)
+      const txStatus = totalPrice === 0 ? "completed" : "pending";
       try {
         await supabase.from("transactions").insert({
           id: orderId,
           event_id: eventId,
           buyer_email: buyerEmail,
           amount: totalPrice,
-          status: "pending",
+          status: txStatus,
           date: new Date().toISOString(),
           method: paymentDetails.method
         });
       } catch (e: any) { console.warn("Supabase tx log error:", e.message); }
 
-      // 2. Insert Tickets (une ligne par type de billet)
+      // Pour les billets gratuits, on confirme immédiatement (FREE- au lieu de PENDING-)
+      // afin d'éviter d'attendre un webhook PaiementPro qui ne viendra jamais.
+      if (totalPrice === 0) {
+        ticketRows.forEach((t) => {
+          t.transaction_ref = t.transaction_ref.replace("PENDING-", "FREE-");
+        });
+      }
+
+      // 2. Insert Tickets (une ligne par billet unitaire)
       const { data: newTkts, error: tktError } = await supabase
         .from("tickets")
         .insert(ticketRows)
@@ -2066,12 +2075,7 @@ app.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout, a
         quantity: newTkt.quantity
       }));
 
-      // L'email de confirmation de billet (avec QR code) n'est envoyé qu'une fois le
-      // paiement réellement confirmé (cf. /api/payment/callback, /api/dev/simulate-payment,
-      // /api/admin/validate-payment) — pas à la création des tickets encore PENDING-.
-
-      // Notification organisateur (best-effort, ne doit jamais bloquer la réponse) : un seul
-      // résumé pour toute la commande plutôt qu'un email par type de billet.
+      // Notification organisateur (best-effort, ne doit jamais bloquer la réponse)
       try {
         const { data: organizerUser } = await supabase
           .from("users")
@@ -2087,12 +2091,29 @@ app.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout, a
         console.warn("[Email] Notification organisateur (vente) échouée :", e.message);
       }
 
+      // Billets gratuits : envoyer l'email de confirmation immédiatement (pas de webhook).
+      // Billets payants : l'email est envoyé par /api/payment/callback après confirmation.
+      if (totalPrice === 0) {
+        runInBackground(sendTicketEmail({
+          buyerEmail,
+          buyerName,
+          eventTitle: event.title,
+          eventDate: event.date,
+          eventTime: event.time,
+          eventVenue: event.venue,
+          tickets: mappedTickets.map((t: any) => ({ tier: t.tier, qrCodeData: t.qrCodeData }))
+        }));
+      }
+
       return res.status(201).json({
         success: true,
-        message: "Achat de billets effectué avec succès !",
+        message: totalPrice === 0
+          ? "Inscription gratuite confirmée ! Votre billet vous a été envoyé par email."
+          : "Achat de billets effectué avec succès !",
         orderId,
         tickets: mappedTickets,
-        notificationUrl: buildWebhookNotificationUrl(req)
+        // notificationUrl inutile pour les billets gratuits (pas de webhook attendu)
+        ...(totalPrice > 0 && { notificationUrl: buildWebhookNotificationUrl(req) })
       });
     } catch (err: any) {
       console.error("[Supabase Error] Checkout, falling back to local file DB:", err.message);
@@ -2150,13 +2171,20 @@ app.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout, a
     }
   }
 
+  // Pour les billets gratuits, confirmer immédiatement (FREE- au lieu de PENDING-)
+  if (totalPrice === 0) {
+    newTickets.forEach((t) => {
+      t.transactionRef = t.transactionRef.replace("PENDING-", "FREE-");
+    });
+  }
+
   db.transactions = db.transactions || [];
   db.transactions.unshift({
     id: orderId,
     eventId: eventId,
     buyerEmail: buyerEmail,
     amount: totalPrice,
-    status: "pending",
+    status: totalPrice === 0 ? "completed" : "pending",
     date: new Date().toISOString(),
     method: paymentDetails.method
   } as any);
@@ -2167,10 +2195,6 @@ app.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout, a
   // Record Tickets
   db.tickets.unshift(...newTickets);
   saveDB(db);
-
-  // L'email de confirmation de billet (avec QR code) n'est envoyé qu'une fois le
-  // paiement réellement confirmé (cf. /api/payment/callback, /api/dev/simulate-payment,
-  // /api/admin/validate-payment) — pas à la création des tickets encore PENDING-.
 
   // Notification organisateur (best-effort, ne doit jamais bloquer la réponse)
   try {
@@ -2184,12 +2208,27 @@ app.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout, a
     console.warn("[Email] Notification organisateur (vente) échouée :", e.message);
   }
 
+  // Billets gratuits : envoyer l'email de confirmation immédiatement
+  if (totalPrice === 0) {
+    runInBackground(sendTicketEmail({
+      buyerEmail,
+      buyerName,
+      eventTitle: event.title,
+      eventDate: event.date,
+      eventTime: event.time,
+      eventVenue: event.venue,
+      tickets: newTickets.map((t: any) => ({ tier: t.tier, qrCodeData: t.qrCodeData }))
+    }));
+  }
+
   res.status(201).json({
     success: true,
-    message: "Achat de billets effectué avec succès !",
+    message: totalPrice === 0
+      ? "Inscription gratuite confirmée ! Votre billet vous a été envoyé par email."
+      : "Achat de billets effectué avec succès !",
     orderId,
     tickets: newTickets,
-    notificationUrl: buildWebhookNotificationUrl(req)
+    ...(totalPrice > 0 && { notificationUrl: buildWebhookNotificationUrl(req) })
   });
 });
 
