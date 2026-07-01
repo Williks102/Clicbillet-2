@@ -44,6 +44,7 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
     .filter((item) => item.qty > 0);
   const totalQuantity = selectedItems.reduce((sum, item) => sum + item.qty, 0);
   const totalPrice = selectedItems.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const isFreeOrder = totalPrice === 0;
   const buyerEmail = user?.email ?? guestInfo?.email ?? "";
 
   function adjustQuantity(tierName: string, delta: number) {
@@ -84,8 +85,10 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
     e.preventDefault();
     setError(null);
 
-    // Dynamic field validation before processing starts
-    if (method !== "card" && method !== "wave") {
+    // Dynamic field validation before processing starts.
+    // Les commandes gratuites ne doivent jamais passer par la passerelle PaiementPro :
+    // elles sont confirmées côté serveur et les billets sont envoyés immédiatement.
+    if (!isFreeOrder && method !== "card" && method !== "wave") {
       // Mobile money number must be valid 10-digit number
       const numOnly = phoneNumber.replace(/\s+/g, "");
       if (numOnly.length < 8) {
@@ -94,7 +97,7 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
       }
     }
 
-    if (method === "card") {
+    if (!isFreeOrder && method === "card") {
       if (!cardName || cardNumber.length < 12 || !expiry || cvv.length < 3) {
         setError("Veuillez vérifier vos informations bancaires de paiement.");
         return;
@@ -144,6 +147,14 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || "Une erreur est survenue lors de la validation du paiement.");
+      }
+
+      if (isFreeOrder) {
+        setPaymentUrl(null);
+        window.dispatchEvent(new CustomEvent("refresh_tickets"));
+        setStep("success");
+        onSuccess(data.tickets);
+        return;
       }
 
       // INTEGRATION PAIEMENT PRO (CÔTE D'IVOIRE)
@@ -345,26 +356,32 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
               </div>
 
               {/* Choose Payment Operator Gateway */}
-              <div className="space-y-2">
-                <label className="text-xs font-black text-gray-700 block">Choisissez votre Moyen de Paiement</label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {GATEWAYS.map((gw) => (
-                    <button
-                      key={gw.id}
-                      onClick={() => setMethod(gw.id)}
-                      className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition-all ${
-                        method === gw.id
-                          ? `${gw.color} ring-1 ring-orange-500 border-orange-500`
-                          : "border-gray-200 bg-white hover:bg-gray-50 text-gray-600"
-                      }`}
-                    >
-                      <Smartphone className="h-4 w-4 mb-1 text-gray-400" />
-                      <span className="text-[11px] font-black block">{gw.name}</span>
-                      <span className="text-[8px] text-gray-400 font-bold block mt-0.5">{gw.desc}</span>
-                    </button>
-                  ))}
+              {isFreeOrder ? (
+                <div className="rounded-xl border border-green-100 bg-green-50 p-3 text-[11px] font-bold text-green-700">
+                  Aucun paiement n'est nécessaire pour cette commande gratuite. Vos billets seront confirmés directement.
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-gray-700 block">Choisissez votre Moyen de Paiement</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {GATEWAYS.map((gw) => (
+                      <button
+                        key={gw.id}
+                        onClick={() => setMethod(gw.id)}
+                        className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition-all ${
+                          method === gw.id
+                            ? `${gw.color} ring-1 ring-orange-500 border-orange-500`
+                            : "border-gray-200 bg-white hover:bg-gray-50 text-gray-600"
+                        }`}
+                      >
+                        <Smartphone className="h-4 w-4 mb-1 text-gray-400" />
+                        <span className="text-[11px] font-black block">{gw.name}</span>
+                        <span className="text-[8px] text-gray-400 font-bold block mt-0.5">{gw.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="pt-4 border-t border-gray-100 flex items-center justify-between">
                 <div>
@@ -398,8 +415,12 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
                 </div>
               </div>
 
-              {/* Mobile Mobile Inputs (Orange Money, MTN, Moov, Wave) */}
-              {method !== "card" ? (
+              {isFreeOrder ? (
+                <div className="rounded-xl border border-green-100 bg-green-50 p-4 text-xs font-semibold leading-relaxed text-green-700">
+                  Cette inscription est gratuite : cliquez sur confirmer pour générer vos QR codes sans ouvrir Paiement Pro.
+                </div>
+              ) : method !== "card" ? (
+                /* Mobile Money Inputs (Orange Money, MTN, Moov, Wave) */
                 <div className="space-y-3">
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-gray-700">Numéro de téléphone Mobile Money</label>
@@ -496,12 +517,14 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
               )}
 
               {/* Affichage de l'ID marchand Paiement Pro configure */}
-              <div className="p-3 bg-orange-50/20 border border-orange-150/20 rounded-2xl space-y-1">
-                <div className="flex items-center justify-between text-[10px] text-gray-500 font-semibold">
-                  <span>Passerelle Actrice :</span>
-                  <span className="text-orange-600 font-extrabold uppercase">Paiement Pro (CI)</span>
+              {!isFreeOrder && (
+                <div className="p-3 bg-orange-50/20 border border-orange-150/20 rounded-2xl space-y-1">
+                  <div className="flex items-center justify-between text-[10px] text-gray-500 font-semibold">
+                    <span>Passerelle Actrice :</span>
+                    <span className="text-orange-600 font-extrabold uppercase">Paiement Pro (CI)</span>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Action buttons triggers */}
               <div className="pt-6 border-t border-gray-100 flex items-center justify-between">
@@ -518,7 +541,7 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
                   className="rounded-xl bg-orange-600 px-6 py-3.5 text-xs font-black text-white hover:bg-orange-700 transition shadow-md shadow-orange-100 flex items-center space-x-1.5 active:scale-95"
                 >
                   <ShieldCheck className="h-4 w-4" />
-                  <span>Payer {totalPrice.toLocaleString("fr-FR")} XOF</span>
+                  <span>{isFreeOrder ? "Confirmer l'inscription gratuite" : `Payer ${totalPrice.toLocaleString("fr-FR")} XOF`}</span>
                 </button>
               </div>
             </form>
@@ -531,8 +554,10 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
                 <Smartphone className="absolute top-1/2 left-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 text-orange-500 animate-pulse" />
               </div>
               <div>
-                <h4 className="text-sm font-black text-gray-900">Communication avec l'opérateur en cours...</h4>
-                <p className="text-[11px] text-gray-400 mt-1 font-semibold">Vérification de la transaction réglementée via Wave, OM ou MTN.</p>
+                <h4 className="text-sm font-black text-gray-900">{isFreeOrder ? "Confirmation de l'inscription gratuite..." : "Communication avec l'opérateur en cours..."}</h4>
+                <p className="text-[11px] text-gray-400 mt-1 font-semibold">
+                  {isFreeOrder ? "Génération de vos billets sans passerelle de paiement." : "Vérification de la transaction réglementée via Wave, OM ou MTN."}
+                </p>
               </div>
               <div className="inline-flex items-center space-x-1 border border-orange-50 bg-orange-50/20 rounded-md px-2.5 py-1 text-[9px] text-orange-700 font-extrabold uppercase tracking-wide">
                 <span>Protocole SSL 256 bits</span>
@@ -546,8 +571,12 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
                 <Check className="h-7 w-7" strokeWidth={3} />
               </div>
               <div>
-                <h4 className="text-base font-black text-gray-900">Commande Initiale Validée !</h4>
-                {isGuest ? (
+                <h4 className="text-base font-black text-gray-900">{isFreeOrder ? "Inscription Gratuite Confirmée !" : "Commande Initiale Validée !"}</h4>
+                {isFreeOrder ? (
+                  <p className="text-xs text-gray-500 mt-1 pb-1">
+                    Vos billets gratuits avec QR codes ont été confirmés et envoyés à <strong className="text-orange-600">{buyerEmail}</strong>.
+                  </p>
+                ) : isGuest ? (
                   <p className="text-xs text-gray-500 mt-1 pb-1">
                     Vos billets (avec QR codes) seront envoyés à <strong className="text-orange-600">{buyerEmail}</strong> après confirmation du paiement.
                   </p>
@@ -556,7 +585,11 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
                 )}
               </div>
 
-              {paymentUrl ? (
+              {isFreeOrder ? (
+                <div className="p-4 bg-green-50 border border-green-100 rounded-2xl w-full text-xs font-semibold text-green-700">
+                  Aucun paiement n'a été demandé : la commande gratuite est validée directement.
+                </div>
+              ) : paymentUrl ? (
                 <div className="p-4 bg-orange-50 border border-orange-100 rounded-2xl w-full space-y-3">
                   <p className="text-xs text-orange-850 font-semibold leading-relaxed">
                     Une passerelle sécurisée <strong className="text-orange-600">Paiement Pro (CI)</strong> a été initiée pour effectuer le transfert. Si la page ne s'est pas ouverte automatiquement, cliquez ci-dessous :
@@ -577,9 +610,11 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
                 </div>
               )}
 
-              <div className="text-[10px] text-gray-450 font-medium tracking-wide">
-                Passerelle : <strong className="text-gray-600">Paiement Pro (CI)</strong>
-              </div>
+              {!isFreeOrder && (
+                <div className="text-[10px] text-gray-450 font-medium tracking-wide">
+                  Passerelle : <strong className="text-gray-600">Paiement Pro (CI)</strong>
+                </div>
+              )}
 
               <button
                 onClick={onClose}
