@@ -345,6 +345,57 @@ function saveDB(data: typeof INITIAL_DATABASE) {
   }
 }
 
+const DEFAULT_TICKET_COMMISSION_RATE = 0.10;
+
+// Taux de commission plateforme par défaut, lu depuis platform_config (voir supabase_setup.sql
+// section 11). Un événement peut le surcharger individuellement via events.commission_rate.
+async function getDefaultCommissionRate(): Promise<number> {
+  if (!supabase) return DEFAULT_TICKET_COMMISSION_RATE;
+  try {
+    const { data, error } = await supabase
+      .from("platform_config")
+      .select("value")
+      .eq("key", "ticket_commission_rate")
+      .maybeSingle();
+    if (error || !data) return DEFAULT_TICKET_COMMISSION_RATE;
+    const parsed = Number(data.value);
+    return Number.isFinite(parsed) ? parsed : DEFAULT_TICKET_COMMISSION_RATE;
+  } catch {
+    return DEFAULT_TICKET_COMMISSION_RATE;
+  }
+}
+
+// Calcule la commission plateforme événement par événement (chacun applique son propre
+// taux négocié s'il en a un, sinon le taux par défaut) avant de sommer : impossible
+// d'appliquer un taux unique sur le total agrégé dès qu'un événement a un taux différent.
+function computeCommissionBreakdown(
+  tickets: any[],
+  eventCommissionRateById: Map<string, number | null | undefined>,
+  defaultRate: number
+): { totalGrossRevenue: number; totalCommission: number; totalRevenue: number; effectiveCommissionRate: number } {
+  const grossByEvent = new Map<string, number>();
+  for (const t of tickets) {
+    const eventId = t.event_id ?? t.eventId;
+    const price = Number(t.price_paid ?? t.pricePaid ?? 0);
+    grossByEvent.set(eventId, (grossByEvent.get(eventId) || 0) + price);
+  }
+
+  let totalGrossRevenue = 0;
+  let totalCommission = 0;
+  for (const [eventId, gross] of grossByEvent) {
+    const rate = eventCommissionRateById.get(eventId) ?? defaultRate;
+    totalGrossRevenue += gross;
+    totalCommission += Math.floor(gross * rate);
+  }
+
+  return {
+    totalGrossRevenue,
+    totalCommission,
+    totalRevenue: totalGrossRevenue - totalCommission,
+    effectiveCommissionRate: totalGrossRevenue > 0 ? totalCommission / totalGrossRevenue : defaultRate
+  };
+}
+
 // Un événement est "passé" dès que sa date + heure de début sont dépassées (miroir de
 // src/lib/eventStatus.ts côté frontend — pas d'import cross src/server dans ce repo).
 function isEventPast(evt: { date: string; time: string }): boolean {
@@ -2782,11 +2833,10 @@ app.get("/api/organizer/stats", async (req: express.Request, res: express.Respon
         matchedTickets = tkts || [];
       }
 
-      const totalGrossRevenue = matchedTickets.reduce((sum: number, t: any) => sum + Number(t.price_paid || 0), 0);
-      const commissionRate = 0.10;
-      const totalCommission = Math.floor(totalGrossRevenue * commissionRate);
-      const totalRevenue = totalGrossRevenue - totalCommission;
-      
+      const defaultCommissionRate = await getDefaultCommissionRate();
+      const eventCommissionRateById = new Map((organizerEvents || []).map((e: any) => [e.id, e.commission_rate != null ? Number(e.commission_rate) : null]));
+      const { totalGrossRevenue, totalCommission, totalRevenue, effectiveCommissionRate: commissionRate } = computeCommissionBreakdown(matchedTickets, eventCommissionRateById, defaultCommissionRate);
+
       const ticketsSold = matchedTickets.reduce((sum: number, t: any) => sum + Number(t.quantity || 1), 0);
       const activeEvents = (organizerEvents || []).length;
 
@@ -2836,11 +2886,10 @@ app.get("/api/organizer/stats", async (req: express.Request, res: express.Respon
 
   const matchedTickets = db.tickets.filter((t: any) => eventIds.includes(t.eventId));
 
-  const totalGrossRevenue = matchedTickets.reduce((sum: number, t: any) => sum + t.pricePaid, 0);
-  const commissionRate = 0.10; // 10% ClicBillet Plateforme Commission
-  const totalCommission = Math.floor(totalGrossRevenue * commissionRate);
-  const totalRevenue = totalGrossRevenue - totalCommission; // Le solde chez l'organisateur (après déduction)
-  
+  const defaultCommissionRate = await getDefaultCommissionRate();
+  const eventCommissionRateById = new Map<string, number | null>(organizerEvents.map((e: any) => [e.id, e.commissionRate != null ? Number(e.commissionRate) : null]));
+  const { totalGrossRevenue, totalCommission, totalRevenue, effectiveCommissionRate: commissionRate } = computeCommissionBreakdown(matchedTickets, eventCommissionRateById, defaultCommissionRate);
+
   const ticketsSold = matchedTickets.reduce((sum: number, t: any) => sum + t.quantity, 0);
   const activeEvents = organizerEvents.length;
 
@@ -3010,9 +3059,9 @@ app.get("/api/admin/stats", async (req: express.Request, res: express.Response) 
       if (tErr) throw tErr;
 
       const matchedTickets = tickets || [];
-      const totalRevenue = matchedTickets.reduce((sum: number, t: any) => sum + Number(t.price_paid || 0), 0);
-      const commissionRate = 0.10;
-      const totalPlatformCommission = Math.floor(totalRevenue * commissionRate);
+      const defaultCommissionRate = await getDefaultCommissionRate();
+      const eventCommissionRateById = new Map((events || []).map((e: any) => [e.id, e.commission_rate != null ? Number(e.commission_rate) : null]));
+      const { totalGrossRevenue: totalRevenue, totalCommission: totalPlatformCommission, effectiveCommissionRate: commissionRate } = computeCommissionBreakdown(matchedTickets, eventCommissionRateById, defaultCommissionRate);
       const totalOrganizerPayout = totalRevenue - totalPlatformCommission;
 
       const totalTicketsSold = matchedTickets.reduce((sum: number, t: any) => sum + Number(t.quantity || 1), 0);
@@ -3036,7 +3085,8 @@ app.get("/api/admin/stats", async (req: express.Request, res: express.Response) 
         organizerName: e.organizer_name,
         status: e.status || "approved",
         waitingRoomEnabled: e.waiting_room_enabled,
-        waitingRoomCapacity: e.waiting_room_capacity
+        waitingRoomCapacity: e.waiting_room_capacity,
+        commissionRate: e.commission_rate != null ? Number(e.commission_rate) : null
       }));
       const mappedTickets = matchedTickets.map(t => ({
         id: t.id,
@@ -3077,9 +3127,9 @@ app.get("/api/admin/stats", async (req: express.Request, res: express.Response) 
   }
 
   const db = getDB();
-  const totalRevenue = db.tickets.reduce((sum: number, t: any) => sum + t.pricePaid, 0); // Total Gross XOF
-  const commissionRate = 0.10;
-  const totalPlatformCommission = Math.floor(totalRevenue * commissionRate); // Total collected by platform
+  const defaultCommissionRate = await getDefaultCommissionRate();
+  const eventCommissionRateById = new Map<string, number | null>(db.events.map((e: any) => [e.id, e.commissionRate != null ? Number(e.commissionRate) : null]));
+  const { totalGrossRevenue: totalRevenue, totalCommission: totalPlatformCommission, effectiveCommissionRate: commissionRate } = computeCommissionBreakdown(db.tickets, eventCommissionRateById, defaultCommissionRate);
   const totalOrganizerPayout = totalRevenue - totalPlatformCommission;
   
   const totalTicketsSold = db.tickets.reduce((sum: number, t: any) => sum + t.quantity, 0);
@@ -3234,6 +3284,64 @@ app.patch("/api/admin/events/:id/status", async (req: express.Request, res: expr
     return res.json({ success: true, message: `Événement ${status}` });
   }
   res.status(404).json({ error: "Événement introuvable" });
+});
+
+// Surcharge de commission par événement (accord négocié avec un organisateur, offre
+// promotionnelle). commissionRate: null réinitialise l'événement sur le taux par défaut
+// de platform_config (cf. getDefaultCommissionRate).
+app.patch("/api/admin/events/:id/commission", async (req: express.Request, res: express.Response) => {
+  const { id } = req.params;
+  const { commissionRate } = req.body;
+
+  if (commissionRate !== null && (typeof commissionRate !== "number" || !Number.isFinite(commissionRate) || commissionRate < 0 || commissionRate > 1)) {
+    return res.status(400).json({ error: "Taux de commission invalide (attendu : nombre entre 0 et 1, ou null pour réinitialiser)." });
+  }
+
+  const adminClient = supabaseAdmin;
+  if (adminClient) {
+    try {
+      const { error } = await adminClient.from("events").update({ commission_rate: commissionRate }).eq("id", id);
+      if (error) throw error;
+      return res.json({ success: true, message: "Taux de commission mis à jour." });
+    } catch (err: any) {
+      console.warn("[Supabase Error] Admin event commission update:", err.message);
+    }
+  }
+
+  const db = getDB();
+  const event = db.events.find((e: any) => e.id === id) as any;
+  if (!event) return res.status(404).json({ error: "Événement introuvable." });
+  event.commissionRate = commissionRate;
+  saveDB(db);
+  res.json({ success: true, message: "Taux de commission mis à jour." });
+});
+
+// Taux de commission par défaut de la plateforme (platform_config), utilisé pour tout
+// événement sans surcharge individuelle (cf. route ci-dessus).
+app.get("/api/admin/commission-config", async (req: express.Request, res: express.Response) => {
+  const defaultRate = await getDefaultCommissionRate();
+  res.json({ defaultCommissionRate: defaultRate });
+});
+
+app.put("/api/admin/commission-config", async (req: express.Request, res: express.Response) => {
+  const { defaultCommissionRate } = req.body;
+  if (typeof defaultCommissionRate !== "number" || !Number.isFinite(defaultCommissionRate) || defaultCommissionRate < 0 || defaultCommissionRate > 1) {
+    return res.status(400).json({ error: "Taux de commission invalide (attendu : nombre entre 0 et 1)." });
+  }
+
+  if (!supabase) {
+    return res.status(400).json({ error: "Supabase non configuré : le taux par défaut reste celui codé en dur côté serveur." });
+  }
+
+  const { error } = await supabase
+    .from("platform_config")
+    .upsert({ key: "ticket_commission_rate", value: String(defaultCommissionRate), updated_at: new Date().toISOString() });
+
+  if (error) {
+    return res.status(500).json({ error: "Échec de la mise à jour du taux de commission par défaut." });
+  }
+
+  res.json({ success: true, defaultCommissionRate });
 });
 
 // --- Payouts (Demandes de retrait) ---

@@ -28,6 +28,7 @@ export interface Event {
   status?: "pending" | "approved" | "rejected";
   waitingRoomEnabled?: boolean;
   waitingRoomCapacity?: number;
+  commissionRate?: number | null; // Taux négocié pour cet événement (null = taux plateforme par défaut)
 }
 
 export interface WaitingRoomStatus {

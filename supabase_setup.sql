@@ -281,3 +281,54 @@ CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON public.password_resets
 ALTER TABLE public.password_resets ENABLE ROW LEVEL SECURITY;
 -- Pas de policy anon/authenticated : accès exclusif via la clé service_role (server.ts),
 -- comme les autres tables sensibles (cf. section 8 ci-dessus).
+
+-- ==========================================
+-- 11. CONFIGURATION PLATEFORME — taux de commission
+-- ==========================================
+-- Remplace la constante `commissionRate = 0.10` auparavant codée en dur à plusieurs endroits
+-- de server.ts. Le taux par défaut vit ici ; un événement peut le surcharger individuellement
+-- (accord négocié avec un organisateur, offre promotionnelle) via events.commission_rate.
+CREATE TABLE IF NOT EXISTS public.platform_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+INSERT INTO public.platform_config (key, value)
+VALUES ('ticket_commission_rate', '0.10')
+ON CONFLICT (key) DO NOTHING;
+
+ALTER TABLE public.platform_config ENABLE ROW LEVEL SECURITY;
+-- Pas de policy anon/authenticated : accès exclusif via la clé service_role (server.ts),
+-- comme les autres tables sensibles (cf. section 8 ci-dessus).
+
+-- Surcharge de commission par événement (accord négocié / offre promo). NULL = utilise le
+-- taux par défaut de platform_config ci-dessus.
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS commission_rate NUMERIC;
+
+-- ==========================================
+-- 12. LECTURE PUBLIQUE DIRECTE (contournement du cold start serverless)
+-- ==========================================
+-- La liste publique d'événements (page d'accueil) passait jusqu'ici par /api/events
+-- (fonction serverless Vercel), sujette au cold start. La RLS section 8 autorise déjà la
+-- lecture publique de public.events (status = 'approved') : le frontend peut donc lire
+-- cette table directement via le client Supabase (clé anon), sans passer par server.ts.
+--
+-- Seule la disponibilité par palier (ticketsSoldByTier, cf. /api/events) nécessite encore
+-- une fonction dédiée : elle est calculée à partir de public.tickets, dont la RLS
+-- (tickets_select_own) ne donne accès qu'à SES PROPRES billets. Cette fonction SECURITY
+-- DEFINER expose uniquement des compteurs agrégés (event_id, tier, nombre vendu) — aucune
+-- donnée acheteur — soit exactement ce que /api/events affichait déjà publiquement sur
+-- chaque carte événement, sans élargir la surface d'exposition.
+CREATE OR REPLACE FUNCTION public.get_public_events_tier_sold()
+RETURNS TABLE(event_id TEXT, tier TEXT, sold BIGINT) AS $$
+  SELECT t.event_id, t.tier, COUNT(*) AS sold
+  FROM public.tickets t
+  JOIN public.events e ON e.id = t.event_id
+  WHERE e.status = 'approved'
+    AND t.transaction_ref NOT LIKE 'PENDING-%'
+    AND t.transaction_ref NOT LIKE 'FAILED-%'
+  GROUP BY t.event_id, t.tier;
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+GRANT EXECUTE ON FUNCTION public.get_public_events_tier_sold() TO anon, authenticated;
