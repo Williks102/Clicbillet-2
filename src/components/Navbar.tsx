@@ -39,14 +39,18 @@ export default function Navbar({ user, onLogout, activeTab, setActiveTab, onOpen
             <button
               id="tab-voting-btn"
               onClick={() => setActiveTab("voting")}
-              className={`flex items-center space-x-1.5 rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
+              className={`relative flex items-center space-x-1.5 rounded-xl px-4 py-2 text-sm font-black shadow-md shadow-orange-200 transition-all active:scale-95 ${
                 activeTab === "voting"
-                  ? "bg-orange-50 text-orange-600"
-                  : "text-gray-600 hover:bg-gray-50 hover:text-gray-950"
+                  ? "bg-orange-700 text-white"
+                  : "bg-gradient-to-r from-orange-600 to-amber-500 text-white hover:from-orange-700 hover:to-amber-600"
               }`}
             >
+              <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
+              </span>
               <Vote className="h-4 w-4" />
-              <span>Vote</span>
+              <span>Voter</span>
             </button>
             {user ? (
               <>

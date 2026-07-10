@@ -73,12 +73,16 @@ export default function MobileNavDrawer({ user, activeTab, setActiveTab, onLogou
           <button
             id="mobile-nav-voting-btn"
             onClick={() => go("voting")}
-            className={`flex w-full items-center space-x-3 rounded-xl px-3 py-3 text-sm font-bold transition-colors ${
-              activeTab === "voting" ? "bg-orange-50 text-orange-600" : "text-gray-600 hover:bg-gray-50"
+            className={`relative flex w-full items-center space-x-3 rounded-xl px-3 py-3 text-sm font-black shadow-md shadow-orange-200 transition-all active:scale-95 ${
+              activeTab === "voting" ? "bg-orange-700 text-white" : "bg-gradient-to-r from-orange-600 to-amber-500 text-white"
             }`}
           >
+            <span className="absolute top-2 right-3 flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
+            </span>
             <Vote className="h-4.5 w-4.5" />
-            <span>Vote</span>
+            <span>Voter</span>
           </button>
 
           {user && (

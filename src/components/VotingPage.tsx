@@ -8,9 +8,11 @@ import VotePremiumSheet from "./VotePremiumSheet";
 interface VotingPageProps {
   user: User | null;
   pushToast: (message: string) => void;
+  deepLinkCampaignId?: string | null;
+  onDeepLinkConsumed?: () => void;
 }
 
-export default function VotingPage({ user, pushToast }: VotingPageProps) {
+export default function VotingPage({ user, pushToast, deepLinkCampaignId, onDeepLinkConsumed }: VotingPageProps) {
   const [campaigns, setCampaigns] = useState<VotingCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCampaign, setSelectedCampaign] = useState<VotingCampaign | null>(null);
@@ -24,6 +26,16 @@ export default function VotingPage({ user, pushToast }: VotingPageProps) {
       setLoading(false);
     });
   }, []);
+
+  // Arrivée depuis la page d'accueil sur une campagne précise (cf. LandingPage) : on ouvre
+  // directement son détail dès que la liste des campagnes est chargée, puis on "consomme"
+  // le deep-link pour ne pas ré-ouvrir la même campagne si l'utilisateur revient en arrière.
+  useEffect(() => {
+    if (!deepLinkCampaignId || campaigns.length === 0) return;
+    const match = campaigns.find((c) => c.id === deepLinkCampaignId);
+    if (match) setSelectedCampaign(match);
+    onDeepLinkConsumed?.();
+  }, [deepLinkCampaignId, campaigns]);
 
   useEffect(() => {
     if (!selectedCampaign) return;

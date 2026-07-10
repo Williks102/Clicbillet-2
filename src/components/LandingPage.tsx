@@ -1,19 +1,26 @@
-import { useState } from "react";
-import { Search, Calendar, MapPin, Tag, ArrowRight, Sparkles, Filter } from "lucide-react";
-import { Event } from "../types";
+import { useEffect, useState } from "react";
+import { Search, Calendar, MapPin, Tag, ArrowRight, Sparkles, Filter, Vote, Users } from "lucide-react";
+import { Event, VotingCampaign } from "../types";
 import { isEventPast } from "../lib/eventStatus";
+import { fetchActiveCampaigns } from "../lib/publicVoting";
 
 interface LandingPageProps {
   events: Event[];
   onBuyTicket: (event: Event) => void;
   userRole?: string;
+  onSelectCampaign: (campaignId: string) => void;
 }
 
 const CATEGORIES = ["Tous", "Concert", "Festivals", "Théâtre & Humour", "Sport"];
 
-export default function LandingPage({ events, onBuyTicket, userRole }: LandingPageProps) {
+export default function LandingPage({ events, onBuyTicket, userRole, onSelectCampaign }: LandingPageProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Tous");
+  const [campaigns, setCampaigns] = useState<VotingCampaign[]>([]);
+
+  useEffect(() => {
+    fetchActiveCampaigns().then(setCampaigns);
+  }, []);
 
   // Filter events based on search query, selected category, and exclude events whose
   // date is already past (dépublication automatique côté acheteur).
@@ -56,6 +63,70 @@ export default function LandingPage({ events, onBuyTicket, userRole }: LandingPa
           </div>
         </div>
       </section>
+
+      {/* Campagnes de vote en cours : mises en avant juste sous le hero, avant même les
+          événements, pour maximiser leur visibilité sur la page d'accueil. */}
+      {campaigns.length > 0 && (
+        <section id="home-voting-section" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-lg font-black text-gray-950">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-orange-600 to-amber-500 text-white shadow-md shadow-orange-200">
+                <Vote className="h-4 w-4" />
+              </span>
+              Votes en cours
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+              </span>
+            </h2>
+          </div>
+
+          <div className="-mx-4 flex gap-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0 scrollbar-none">
+            {campaigns.map((campaign) => (
+              <button
+                key={campaign.id}
+                onClick={() => onSelectCampaign(campaign.id)}
+                id={`home-campaign-card-${campaign.id}`}
+                className="group relative flex w-72 shrink-0 flex-col overflow-hidden rounded-2xl border border-orange-100 bg-white text-left shadow-xs transition-all duration-300 hover:-translate-y-1 hover:shadow-lg sm:w-80"
+              >
+                <div className="relative h-32 w-full overflow-hidden bg-gray-100">
+                  {campaign.banner ? (
+                    <img
+                      src={campaign.banner}
+                      alt={campaign.title}
+                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-orange-100 to-amber-100">
+                      <Vote className="h-8 w-8 text-orange-400" />
+                    </div>
+                  )}
+                  <div className="absolute top-2.5 left-2.5 rounded-lg bg-red-600 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-white shadow-md">
+                    En direct
+                  </div>
+                </div>
+                <div className="flex flex-1 flex-col p-4">
+                  <h3 className="line-clamp-1 text-sm font-extrabold text-gray-900 group-hover:text-orange-600 transition-colors">
+                    {campaign.title}
+                  </h3>
+                  <p className="mt-1 line-clamp-2 flex-1 text-[11px] text-gray-500 leading-relaxed">
+                    {campaign.description}
+                  </p>
+                  <div className="mt-3 flex items-center justify-between">
+                    <span className="flex items-center gap-1 text-[10px] font-bold text-gray-400">
+                      <Users className="h-3 w-3" /> {(campaign.candidates || []).length} candidat(s)
+                    </span>
+                    <span className="flex items-center gap-1 rounded-lg bg-orange-600 px-2.5 py-1.5 text-[10px] font-black text-white">
+                      Voter <ArrowRight className="h-3 w-3" />
+                    </span>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Control panel: search input & filtering categories */}
       <section className="space-y-6" id="search-filter-section">

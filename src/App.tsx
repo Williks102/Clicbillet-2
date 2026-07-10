@@ -39,6 +39,7 @@ export default function App() {
   const [resetToken, setResetToken] = useState<string | null>(null);
   const [systemAlert, setSystemAlert] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [votingDeepLinkCampaignId, setVotingDeepLinkCampaignId] = useState<string | null>(null);
 
   function pushToast(message: string) {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -295,13 +296,22 @@ export default function App() {
                     events={events}
                     onBuyTicket={handleBuyTicketTrigger}
                     userRole={user?.role}
+                    onSelectCampaign={(campaignId) => {
+                      setVotingDeepLinkCampaignId(campaignId);
+                      setActiveTab("voting");
+                    }}
                   />
                 )}
               </>
             )}
 
             {activeTab === "voting" && (
-              <VotingPage user={user} pushToast={pushToast} />
+              <VotingPage
+                user={user}
+                pushToast={pushToast}
+                deepLinkCampaignId={votingDeepLinkCampaignId}
+                onDeepLinkConsumed={() => setVotingDeepLinkCampaignId(null)}
+              />
             )}
 
             {activeTab === "client-dashboard" && user && (

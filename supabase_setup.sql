@@ -340,3 +340,145 @@ GRANT EXECUTE ON FUNCTION public.get_public_events_tier_sold() TO anon, authenti
 -- sans validation admin préalable). Vote gratuit : 1 voix/candidat/électeur/jour (dédupliqué
 -- via dedup_key). Vote premium : packs de voix payants via PaiementPro, même pattern
 -- PENDING-/PAID- que les tickets (cf. transaction_ref sur public.tickets).
+CREATE TABLE IF NOT EXISTS public.voting_campaigns (
+    id TEXT PRIMARY KEY,
+    organizer_id TEXT NOT NULL,
+    organizer_name TEXT,
+    event_id TEXT REFERENCES public.events(id) ON DELETE SET NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    banner TEXT,
+    status TEXT NOT NULL DEFAULT 'draft', -- 'draft' | 'active' | 'closed' | 'suspended'
+    start_date TIMESTAMP WITH TIME ZONE,
+    end_date TIMESTAMP WITH TIME ZONE,
+    free_vote_window_hours INTEGER NOT NULL DEFAULT 24,
+    premium_vote_packs JSONB NOT NULL DEFAULT '[]', -- [{ "votes": 10, "price": 1000 }, ...]
+    commission_rate NUMERIC, -- override optionnel, sinon platform_config.vote_commission_rate
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_voting_campaigns_organizer_id ON public.voting_campaigns (organizer_id);
+
+CREATE TABLE IF NOT EXISTS public.candidates (
+    id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL REFERENCES public.voting_campaigns(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    photo TEXT,
+    description TEXT,
+    display_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_candidates_campaign_id ON public.candidates (campaign_id);
+
+CREATE TABLE IF NOT EXISTS public.votes (
+    id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL REFERENCES public.voting_campaigns(id) ON DELETE CASCADE,
+    candidate_id TEXT NOT NULL REFERENCES public.candidates(id) ON DELETE CASCADE,
+    order_id TEXT, -- regroupe les lignes d'un même achat de pack premium
+    type TEXT NOT NULL, -- 'free' | 'premium'
+    quantity INTEGER NOT NULL DEFAULT 1,
+    voter_user_id TEXT,
+    voter_email TEXT,
+    voter_phone TEXT,
+    -- Dédup du vote gratuit : hash(campagne + candidat + identité électeur + jour), NULL pour le premium.
+    dedup_key TEXT,
+    transaction_ref TEXT, -- PENDING-VOTE-xxx / PAID-VOTE-xxx / FAILED-VOTE-xxx, NULL pour le gratuit (immédiatement définitif)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_votes_campaign_id ON public.votes (campaign_id);
+CREATE INDEX IF NOT EXISTS idx_votes_candidate_id ON public.votes (candidate_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_votes_dedup_key_unique ON public.votes (dedup_key) WHERE type = 'free';
+
+-- Log des tentatives d'achat de voix (montant, statut, moyen de paiement) — même rôle que
+-- public.transactions pour les billets, utilisé pour les stats organisateur/admin.
+CREATE TABLE IF NOT EXISTS public.vote_transactions (
+    id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL,
+    buyer_email TEXT,
+    buyer_phone TEXT,
+    votes_qty INTEGER NOT NULL,
+    amount NUMERIC NOT NULL,
+    status TEXT NOT NULL, -- 'pending' | 'paid' | 'failed'
+    method TEXT,
+    date TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+INSERT INTO public.platform_config (key, value)
+VALUES ('vote_commission_rate', '0.15')
+ON CONFLICT (key) DO NOTHING;
+
+ALTER TABLE public.voting_campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.candidates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.votes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vote_transactions ENABLE ROW LEVEL SECURITY;
+
+-- Lecture publique directe (même logique que la section 12 pour les events) : le frontend
+-- lit les campagnes actives et leurs candidats directement via Supabase, sans passer par
+-- server.ts. L'écriture (création/édition de campagne, enregistrement d'un vote) continue
+-- de passer exclusivement par server.ts (service_role).
+DROP POLICY IF EXISTS "Public read access to active campaigns" ON public.voting_campaigns;
+CREATE POLICY "Public read access to active campaigns"
+  ON public.voting_campaigns
+  FOR SELECT
+  TO anon, authenticated
+  USING (status = 'active');
+
+DROP POLICY IF EXISTS "Public read access to candidates of active campaigns" ON public.candidates;
+CREATE POLICY "Public read access to candidates of active campaigns"
+  ON public.candidates
+  FOR SELECT
+  TO anon, authenticated
+  USING (EXISTS (
+    SELECT 1 FROM public.voting_campaigns c
+    WHERE c.id = candidates.campaign_id AND c.status = 'active'
+  ));
+
+-- Aucune policy anon/authenticated sur votes/vote_transactions (données électeur/paiement) :
+-- accès exclusif via service_role, comme tickets/transactions. Les décomptes publics passent
+-- par la fonction agrégée ci-dessous (aucune ligne individuelle, aucun email exposé).
+CREATE OR REPLACE FUNCTION public.get_public_campaign_vote_counts(p_campaign_id TEXT)
+RETURNS TABLE(candidate_id TEXT, votes BIGINT) AS $$
+  SELECT v.candidate_id, COALESCE(SUM(v.quantity), 0) AS votes
+  FROM public.votes v
+  JOIN public.voting_campaigns c ON c.id = v.campaign_id
+  WHERE v.campaign_id = p_campaign_id
+    AND c.status = 'active'
+    AND (v.transaction_ref IS NULL OR (v.transaction_ref NOT LIKE 'PENDING-%' AND v.transaction_ref NOT LIKE 'FAILED-%'))
+  GROUP BY v.candidate_id;
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+GRANT EXECUTE ON FUNCTION public.get_public_campaign_vote_counts(TEXT) TO anon, authenticated;
+
+-- Réplication temps réel du décompte de voix (toast/mise à jour live côté organisateur et
+-- électeurs), même mécanisme que public.tickets (cf. section 8bis).
+ALTER TABLE public.votes REPLICA IDENTITY FULL;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.votes;
+
+-- ==========================================
+-- 14. SEEDS DE CAMPAGNES DE VOTE DE DÉMONSTRATION
+-- ==========================================
+-- Données d'exemple pour tester le parcours de vote sans avoir à créer une campagne
+-- manuellement. Rattachées à l'organisateur de démo 'org-1' (cf. section 6/7 ci-dessus).
+-- Dates glissantes (now() ± intervalle) pour rester "active" quel que soit le jour où ce
+-- script est exécuté.
+INSERT INTO public.voting_campaigns (id, organizer_id, organizer_name, event_id, title, description, banner, status, start_date, end_date, free_vote_window_hours, premium_vote_packs)
+VALUES
+('vc-demo-1', 'org-1', 'Overcom Production', NULL, 'Meilleur Artiste Ivoirien 2026',
+ 'Votez pour votre artiste préféré parmi les nommés de l''année ! Un vote gratuit par jour, ou boostez votre favori avec des voix premium.',
+ 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800&auto=format&fit=crop&q=60',
+ 'active', now() - interval '2 days', now() + interval '30 days', 24,
+ '[{"votes":10,"price":1000},{"votes":50,"price":4000},{"votes":100,"price":7000}]'),
+('vc-demo-2', 'org-1', 'Overcom Production', 'evt-1', 'Prix du Public — Concert Didi B',
+ 'Élisez la meilleure prestation de la soirée à l''Agora d''Abobo.',
+ 'https://images.unsplash.com/photo-1470229538611-16ba8c7ffbd7?w=800&auto=format&fit=crop&q=60',
+ 'active', now() - interval '1 day', now() + interval '14 days', 24,
+ '[{"votes":5,"price":500},{"votes":20,"price":1500}]')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.candidates (id, campaign_id, name, photo, description, display_order)
+VALUES
+('cand-demo-1-1', 'vc-demo-1', 'Didi B', 'https://images.unsplash.com/photo-1516280440614-37939bbacd6a?w=400&auto=format&fit=crop&q=60', 'Le Shogun du rap ivoirien.', 0),
+('cand-demo-1-2', 'vc-demo-1', 'Suspect96', 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&auto=format&fit=crop&q=60', 'Star montante de la scène urbaine.', 1),
+('cand-demo-1-3', 'vc-demo-1', 'Serge Beynaud', 'https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=400&auto=format&fit=crop&q=60', 'Le roi du Coupé-Décalé.', 2),
+('cand-demo-1-4', 'vc-demo-1', 'Josey', 'https://images.unsplash.com/photo-1521119989659-a83eee488004?w=400&auto=format&fit=crop&q=60', 'Voix emblématique de la musique ivoirienne.', 3),
+('cand-demo-2-1', 'vc-demo-2', 'Première partie', NULL, 'Ouverture de la soirée.', 0),
+('cand-demo-2-2', 'vc-demo-2', 'Deuxième partie', NULL, 'Clôture de la soirée.', 1)
+ON CONFLICT (id) DO NOTHING;
