@@ -360,6 +360,43 @@ async function computeCampaignStats(campaignId: string, campaign: any) {
 }
 
 // ============================================================
+// PUBLIC : lecture (repli serveur quand le client ne peut pas lire Supabase
+// directement, ex: VITE_SUPABASE_URL absent sur cet environnement de déploiement
+// — même rôle que GET /api/events pour src/lib/publicEvents.ts).
+// ============================================================
+
+router.get("/api/voting/campaigns", async (req: express.Request, res: express.Response) => {
+  if (!requireSupabase(res)) return;
+  const { data, error } = await supabase!
+    .from("voting_campaigns")
+    .select("*, candidates(*)")
+    .eq("status", "active")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("[Voting] Erreur liste campagnes publiques:", error.message);
+    return res.status(500).json({ error: "Erreur lors du chargement des campagnes." });
+  }
+  res.set("Cache-Control", "public, max-age=20, stale-while-revalidate=60");
+  res.json((data || []).map(mapCampaign));
+});
+
+router.get("/api/voting/campaigns/:campaignId/vote-counts", async (req: express.Request, res: express.Response) => {
+  if (!requireSupabase(res)) return;
+  const { campaignId } = req.params;
+  const { data, error } = await supabase!.rpc("get_public_campaign_vote_counts", { p_campaign_id: campaignId });
+  if (error) {
+    console.error("[Voting] Erreur décompte de voix publiques:", error.message);
+    return res.status(500).json({ error: "Erreur lors du chargement des voix." });
+  }
+  const counts: Record<string, number> = {};
+  for (const row of data || []) {
+    counts[row.candidate_id] = Number(row.votes);
+  }
+  res.json(counts);
+});
+
+// ============================================================
 // PUBLIC : voter (gratuit + premium)
 // ============================================================
 

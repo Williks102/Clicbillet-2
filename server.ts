@@ -29,14 +29,14 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: isProduction
-        ? ["'self'", "https://paiementpro.net"]
-        : ["'self'", "'unsafe-inline'", "https://paiementpro.net"],
-      connectSrc: ["'self'", `ws://127.0.0.1:${HMR_PORT}`, `ws://localhost:${HMR_PORT}`, ...PAYMENT_GATEWAY_ORIGINS, ...SUPABASE_REALTIME_ORIGINS],
+        ? ["'self'", "https://paiementpro.net", "https://vercel.live"]
+        : ["'self'", "'unsafe-inline'", "https://paiementpro.net", "https://vercel.live"],
+      connectSrc: ["'self'", `ws://127.0.0.1:${HMR_PORT}`, `ws://localhost:${HMR_PORT}`, "https://vercel.live", "wss://ws-us3.pusher.com", ...PAYMENT_GATEWAY_ORIGINS, ...SUPABASE_REALTIME_ORIGINS],
       styleSrc: ["'self'", "https:", "'unsafe-inline'"],
       imgSrc: ["'self'", "https:", "data:"],
       fontSrc: ["'self'", "https:", "data:"],
       objectSrc: ["'none'"],
-      frameSrc: ["'self'", ...PAYMENT_GATEWAY_ORIGINS],
+      frameSrc: ["'self'", "https://vercel.live", ...PAYMENT_GATEWAY_ORIGINS],
       frameAncestors: ["'self'"],
       baseUri: ["'self'"],
       formAction: ["'self'", ...PAYMENT_GATEWAY_ORIGINS],
