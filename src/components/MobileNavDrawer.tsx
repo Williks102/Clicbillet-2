@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { Ticket, LogOut, User as UserIcon, LayoutDashboard, Camera, ShieldCheck, X, Home } from "lucide-react";
+import { Ticket, LogOut, User as UserIcon, LayoutDashboard, Camera, ShieldCheck, X, Home, Vote } from "lucide-react";
 import { User } from "../types";
 
 interface MobileNavDrawerProps {
@@ -68,6 +68,17 @@ export default function MobileNavDrawer({ user, activeTab, setActiveTab, onLogou
           >
             <Home className="h-4.5 w-4.5" />
             <span>Accueil</span>
+          </button>
+
+          <button
+            id="mobile-nav-voting-btn"
+            onClick={() => go("voting")}
+            className={`flex w-full items-center space-x-3 rounded-xl px-3 py-3 text-sm font-bold transition-colors ${
+              activeTab === "voting" ? "bg-orange-50 text-orange-600" : "text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            <Vote className="h-4.5 w-4.5" />
+            <span>Vote</span>
           </button>
 
           {user && (

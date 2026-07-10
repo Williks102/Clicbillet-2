@@ -1,0 +1,85 @@
+import crypto from "crypto";
+import dotenv from "dotenv";
+import { createClient } from "@supabase/supabase-js";
+
+// Charge .env avant toute lecture de process.env ci-dessous (et avant tout autre module
+// lib/route qui importerait ce fichier) : c'est l'unique point d'entrée dotenv.config()
+// du backend, remplace l'appel qui vivait auparavant en tête de server.ts.
+dotenv.config();
+
+export const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
+export const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+export const PAYMENT_PRO_CALLBACK_SECRET = (process.env.PAYMENT_PRO_CALLBACK_SECRET || "").trim();
+export const PAYMENT_WEBHOOK_SECRET = (process.env.PAYMENT_WEBHOOK_SECRET || "").trim();
+export const PAYMENT_PRO_CALLBACK_ORIGIN = (process.env.PAYMENT_PRO_CALLBACK_ORIGIN || "https://paiementpro.net").trim();
+export const RESEND_API_KEY = (process.env.RESEND_API_KEY || "").trim();
+export const RESEND_FROM_EMAIL = (process.env.RESEND_FROM_EMAIL || "ClicBillet <no-reply@monticket.online>").trim();
+export const ADMIN_NOTIFICATION_EMAIL = (process.env.ADMIN_NOTIFICATION_EMAIL || "admin@monticket.online").trim();
+export const SUPABASE_WEBHOOK_SECRET = (process.env.SUPABASE_WEBHOOK_SECRET || "").trim();
+
+// Le serveur n'utilise que la clé service_role : toutes les routes qui touchent à des
+// données sensibles sont déjà protégées par requireAuth/requireRole côté Express, donc un
+// client "anon" séparé (qui ne ferait que retomber sur service_role en pratique) n'apporte
+// rien ici et n'est jamais sollicité par le frontend (qui ne parle jamais à Supabase
+// directement).
+const useSupabaseAdmin = Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
+export const supabaseAdmin = useSupabaseAdmin ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) : null;
+export const supabase = supabaseAdmin;
+export const isSupabaseEnabled = Boolean(supabase);
+
+export function createEphemeralAuthClient() {
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+}
+
+export const LOCAL_ADMIN_PASSWORD = process.env.LOCAL_ADMIN_PASSWORD || crypto.randomBytes(12).toString("hex");
+export const LOCAL_CLIENT_PASSWORD = process.env.LOCAL_CLIENT_PASSWORD || crypto.randomBytes(12).toString("hex");
+export const LOCAL_ORGANIZER_PASSWORD = process.env.LOCAL_ORGANIZER_PASSWORD || crypto.randomBytes(12).toString("hex");
+
+if (process.env.NODE_ENV !== "production") {
+  console.info("[Dev login] Local fallback passwords are available only in development mode:");
+  console.info(`  admin: ${LOCAL_ADMIN_PASSWORD}`);
+  console.info(`  client: ${LOCAL_CLIENT_PASSWORD}`);
+  console.info(`  organizer: ${LOCAL_ORGANIZER_PASSWORD}`);
+}
+
+if (!isSupabaseEnabled) {
+  console.warn("[Supabase Warning] Configuration Supabase incomplète (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY manquante). Le backend bascule vers db.json en local.");
+}
+
+if (!isSupabaseEnabled && process.env.NODE_ENV === "production") {
+  console.error("[Security] Aucune connexion Supabase valide détectée en production. Arrêt du serveur : le repli db.json ne doit jamais servir de base en production.");
+  process.exit(1);
+}
+
+export const PORT = Number(process.env.PORT) || 3000;
+export const HMR_PORT = Number(process.env.HMR_PORT || process.env.WS_PORT) || 24678;
+
+export const PAYMENT_GATEWAY_ORIGINS = [
+  "https://monticket.online",
+  "https://www.monticket.online",
+  "https://*.paiementpro.net",
+  "https://paiementpro.net",
+  "https://mpayment.orange-money.com",
+  "https://multi.app.orange-money.com",
+  "https://maxit-link.com",
+  "https://pay.wave.com",
+  "https://www.wave.com",
+  "https://*.confirm.wave.com",
+  "https://promo.wave.com",
+];
+
+export const isProduction = process.env.NODE_ENV === "production";
+
+export const SUPABASE_HOST = (() => {
+  try {
+    return SUPABASE_URL ? new URL(SUPABASE_URL).host : "";
+  } catch {
+    return "";
+  }
+})();
+export const SUPABASE_REALTIME_ORIGINS = SUPABASE_HOST
+  ? [`https://${SUPABASE_HOST}`, `wss://${SUPABASE_HOST}`]
+  : [];
+

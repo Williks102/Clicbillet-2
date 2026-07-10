@@ -2,11 +2,12 @@ import React, { useState, useEffect } from "react";
 import { User, Event, Ticket } from "../types";
 import {
   Building2, Users, Calendar, DollarSign, Trash2, ShieldCheck,
-  Search, ShieldAlert, Sparkles, LogOut, Ticket as TicketIcon, TrendingUp, Filter
+  Search, ShieldAlert, Sparkles, LogOut, Ticket as TicketIcon, TrendingUp, Filter, Percent, Vote
 } from "lucide-react";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 import { isEventPast } from "../lib/eventStatus";
 import DashboardMobileMenu from "./DashboardMobileMenu";
+import AdminVotingTab from "./AdminVotingTab";
 
 interface AdminDashboardProps {
   user: User;
@@ -27,9 +28,9 @@ interface AdminStats {
   tickets: Ticket[];
 }
 
-type AdminSubTab = "overview" | "events" | "users" | "tickets" | "payouts" | "transactions";
+type AdminSubTab = "overview" | "events" | "users" | "tickets" | "payouts" | "transactions" | "voting";
 
-const ADMIN_SUB_TABS: AdminSubTab[] = ["overview", "events", "users", "tickets", "payouts", "transactions"];
+const ADMIN_SUB_TABS: AdminSubTab[] = ["overview", "events", "users", "tickets", "payouts", "transactions", "voting"];
 
 const ADMIN_SUB_TAB_LABELS: Record<AdminSubTab, string> = {
   overview: "Tableau de Bord",
@@ -37,7 +38,8 @@ const ADMIN_SUB_TAB_LABELS: Record<AdminSubTab, string> = {
   users: "Membres & Rôles",
   tickets: "Billets Vendus",
   payouts: "Demandes de Retrait",
-  transactions: "Log Transactions"
+  transactions: "Log Transactions",
+  voting: "Campagnes de Vote"
 };
 
 const ADMIN_SUB_TAB_ICONS: Record<AdminSubTab, React.ReactNode> = {
@@ -46,7 +48,8 @@ const ADMIN_SUB_TAB_ICONS: Record<AdminSubTab, React.ReactNode> = {
   users: <Users className="h-4 w-4" />,
   tickets: <TicketIcon className="h-4 w-4" />,
   payouts: <DollarSign className="h-4 w-4" />,
-  transactions: <TrendingUp className="h-4 w-4" />
+  transactions: <TrendingUp className="h-4 w-4" />,
+  voting: <Vote className="h-4 w-4" />
 };
 
 export default function AdminDashboard({ user, onLogout, onTokenRefresh }: AdminDashboardProps) {
@@ -151,6 +154,40 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
       fetchAdminData(); // Refresh metrics
     } catch (err: any) {
       alert(err.message || "Erreur lors de la suppression de l'événement.");
+    }
+  }
+
+  async function handleUpdateCommission(evt: Event) {
+    const currentPercent = evt.commissionRate != null ? (evt.commissionRate * 100).toString() : "";
+    const input = window.prompt(
+      `Taux de commission pour "${evt.title}" (en %, ex: 15). Laisser vide pour revenir au taux par défaut de la plateforme.`,
+      currentPercent
+    );
+    if (input === null) return; // Annulé
+
+    let commissionRate: number | null = null;
+    if (input.trim() !== "") {
+      const percent = Number(input.replace(",", "."));
+      if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+        alert("Taux invalide : entrez un nombre entre 0 et 100.");
+        return;
+      }
+      commissionRate = percent / 100;
+    }
+
+    try {
+      const response = await authFetch(`/api/admin/events/${evt.id}/commission`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ commissionRate })
+      }, user, onTokenRefresh);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erreur de mise à jour de la commission.");
+      }
+      fetchAdminData();
+    } catch (err: any) {
+      alert(err.message || "Erreur lors de la mise à jour du taux de commission.");
     }
   }
 
@@ -492,6 +529,7 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                     <th className="pb-3">Date, Heure & Lieu</th>
                     <th className="pb-3">Tickets Vaudou</th>
                     <th className="pb-3 text-right">Tarif Base</th>
+                    <th className="pb-3 text-center">Commission</th>
                     <th className="pb-3 text-center">Action</th>
                   </tr>
                 </thead>
@@ -534,6 +572,20 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                         </td>
                         <td className="py-3 text-right font-black text-orange-650">{evt.price.toLocaleString("fr-FR")} XOF</td>
                         <td className="py-3 text-center">
+                          <button
+                            onClick={() => handleUpdateCommission(evt)}
+                            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold uppercase border transition ${
+                              evt.commissionRate != null
+                                ? "bg-orange-50 text-orange-650 border-orange-200 hover:bg-orange-100"
+                                : "bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200"
+                            }`}
+                            title="Définir un taux de commission négocié pour cet événement"
+                          >
+                            <Percent className="h-3 w-3" />
+                            {evt.commissionRate != null ? `${(evt.commissionRate * 100).toFixed(0)}%` : "Défaut"}
+                          </button>
+                        </td>
+                        <td className="py-3 text-center">
                           <div className="flex items-center justify-center space-x-1">
                             {evt.status === "pending" && (
                               <>
@@ -559,7 +611,7 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                   })}
                   {filteredEvents.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="text-center text-gray-400 font-semibold py-10">Aucun événement ne correspond à ce critère de recherche.</td>
+                      <td colSpan={8} className="text-center text-gray-400 font-semibold py-10">Aucun événement ne correspond à ce critère de recherche.</td>
                     </tr>
                   )}
                 </tbody>
@@ -831,6 +883,10 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
               </table>
             </div>
           </div>
+        )}
+
+        {activeSubTab === "voting" && (
+          <AdminVotingTab user={user} onTokenRefresh={onTokenRefresh} />
         )}
 
       </section>

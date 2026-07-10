@@ -11,10 +11,11 @@ import WaitingRoom from "./components/WaitingRoom";
 import GuestOrAuthModal, { GuestInfo } from "./components/GuestOrAuthModal";
 import ToastStack, { ToastItem } from "./components/ToastStack";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
+import VotingPage from "./components/VotingPage";
 import { User, Event } from "./types";
 import { Calendar, Compass, ShieldAlert, Sparkles } from "lucide-react";
 import { supabaseClient } from "./lib/supabaseClient";
-import { cachedFetch } from "./lib/fetchCache";
+import { fetchPublicEvents } from "./lib/publicEvents";
 
 export default function App() {
   const [user, setUser] = useState<User | null>((() => {
@@ -57,7 +58,7 @@ export default function App() {
   async function fetchEvents(force = false) {
     setLoadingEvents(true);
     try {
-      const data = await cachedFetch<Event[]>("/api/events", { ttlMs: 20_000, force });
+      const data = await fetchPublicEvents({ ttlMs: 20_000, force });
       setEvents(data);
     } catch (err: any) {
       console.error(err);
@@ -297,6 +298,10 @@ export default function App() {
                   />
                 )}
               </>
+            )}
+
+            {activeTab === "voting" && (
+              <VotingPage user={user} pushToast={pushToast} />
             )}
 
             {activeTab === "client-dashboard" && user && (
