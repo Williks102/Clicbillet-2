@@ -1,11 +1,11 @@
 import express from "express";
-import { isSupabaseEnabled, supabase, supabaseAdmin } from "../lib/config";
-import { getDB, saveDB } from "../lib/db";
-import { requireAuth, requireRole } from "../lib/auth";
-import { validateEvent } from "../lib/validators";
-import { runInBackground } from "../lib/utils";
-import { sendOrganizerEventStatusEmail } from "../lib/email";
-import { getDefaultCommissionRate } from "../lib/commission";
+import { isSupabaseEnabled, supabase, supabaseAdmin } from "../lib/config.js";
+import { getDB, saveDB } from "../lib/db.js";
+import { requireAuth, requireRole } from "../lib/auth.js";
+import { validateEvent } from "../lib/validators.js";
+import { runInBackground } from "../lib/utils.js";
+import { sendOrganizerEventStatusEmail } from "../lib/email.js";
+import { getDefaultCommissionRate } from "../lib/commission.js";
 
 const router = express.Router();
 

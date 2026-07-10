@@ -1,4 +1,4 @@
-import { supabase } from "./config";
+import { supabase } from "./config.js";
 
 // Miroir de paymentConfirmation.ts (tickets) pour les achats de voix premium. Une commande
 // de voix (order_id, VOTE-ORD-xxxxx) crée une seule ligne "votes" (type=premium, quantity=N)

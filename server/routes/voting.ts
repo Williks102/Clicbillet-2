@@ -1,11 +1,11 @@
 import express from "express";
 import crypto from "crypto";
-import { isSupabaseEnabled, supabase } from "../lib/config";
-import { requireRole, optionalAuth } from "../lib/auth";
-import { runInBackground } from "../lib/utils";
-import { buildWebhookNotificationUrl } from "../lib/security";
-import { voteFreeRateLimiter } from "../lib/rateLimiters";
-import { getDefaultCommissionRate, computeCommissionForAmounts } from "../lib/commission";
+import { isSupabaseEnabled, supabase } from "../lib/config.js";
+import { requireRole, optionalAuth } from "../lib/auth.js";
+import { runInBackground } from "../lib/utils.js";
+import { buildWebhookNotificationUrl } from "../lib/security.js";
+import { voteFreeRateLimiter } from "../lib/rateLimiters.js";
+import { getDefaultCommissionRate, computeCommissionForAmounts } from "../lib/commission.js";
 
 const router = express.Router();
 

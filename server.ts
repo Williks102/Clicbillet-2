@@ -2,18 +2,18 @@ import express from "express";
 import path from "path";
 import helmet from "helmet";
 
-import { PORT, HMR_PORT, PAYMENT_GATEWAY_ORIGINS, SUPABASE_REALTIME_ORIGINS, isProduction } from "./server/lib/config";
-import { apiGeneralRateLimiter } from "./server/lib/rateLimiters";
-import { requireAuth, requireRole } from "./server/lib/auth";
-import { sanitizeObject } from "./server/lib/security";
+import { PORT, HMR_PORT, PAYMENT_GATEWAY_ORIGINS, SUPABASE_REALTIME_ORIGINS, isProduction } from "./server/lib/config.js";
+import { apiGeneralRateLimiter } from "./server/lib/rateLimiters.js";
+import { requireAuth, requireRole } from "./server/lib/auth.js";
+import { sanitizeObject } from "./server/lib/security.js";
 
-import eventsRouter from "./server/routes/events";
-import authRouter from "./server/routes/auth";
-import ticketsRouter from "./server/routes/tickets";
-import webhooksRouter from "./server/routes/webhooks";
-import organizerRouter from "./server/routes/organizer";
-import adminRouter from "./server/routes/admin";
-import votingRouter from "./server/routes/voting";
+import eventsRouter from "./server/routes/events.js";
+import authRouter from "./server/routes/auth.js";
+import ticketsRouter from "./server/routes/tickets.js";
+import webhooksRouter from "./server/routes/webhooks.js";
+import organizerRouter from "./server/routes/organizer.js";
+import adminRouter from "./server/routes/admin.js";
+import votingRouter from "./server/routes/voting.js";
 
 const app = express();
 
