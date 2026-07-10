@@ -332,3 +332,11 @@ RETURNS TABLE(event_id TEXT, tier TEXT, sold BIGINT) AS $$
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 GRANT EXECUTE ON FUNCTION public.get_public_events_tier_sold() TO anon, authenticated;
+
+-- ==========================================
+-- 13. SYSTÈME DE VOTE (gratuit + premium payant)
+-- ==========================================
+-- Campagnes créées en self-service par les organisateurs (même workflow que les events,
+-- sans validation admin préalable). Vote gratuit : 1 voix/candidat/électeur/jour (dédupliqué
+-- via dedup_key). Vote premium : packs de voix payants via PaiementPro, même pattern
+-- PENDING-/PAID- que les tickets (cf. transaction_ref sur public.tickets).

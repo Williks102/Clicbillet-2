@@ -121,3 +121,42 @@ export interface SalesStatus {
     quantity: number;
   }[];
 }
+
+export interface Candidate {
+  id: string;
+  campaignId: string;
+  name: string;
+  photo: string | null;
+  description: string;
+  displayOrder: number;
+}
+
+export type VotingCampaignStatus = "draft" | "active" | "closed" | "suspended";
+
+export interface VotingCampaign {
+  id: string;
+  organizerId: string;
+  organizerName: string;
+  eventId: string | null;
+  title: string;
+  description: string;
+  banner: string | null;
+  status: VotingCampaignStatus;
+  startDate: string;
+  endDate: string;
+  freeVoteWindowHours: number;
+  premiumVotePacks: { votes: number; price: number }[];
+  commissionRate: number | null;
+  createdAt: string;
+  candidates?: Candidate[];
+}
+
+export interface VotingCampaignStats {
+  freeVotes: number;
+  premiumVotes: number;
+  totalGrossRevenue: number;
+  totalCommission: number;
+  totalRevenue: number;
+  commissionRate: number;
+  byCandidate: Record<string, { free: number; premium: number }>;
+}

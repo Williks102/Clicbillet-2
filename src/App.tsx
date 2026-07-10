@@ -11,6 +11,7 @@ import WaitingRoom from "./components/WaitingRoom";
 import GuestOrAuthModal, { GuestInfo } from "./components/GuestOrAuthModal";
 import ToastStack, { ToastItem } from "./components/ToastStack";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
+import VotingPage from "./components/VotingPage";
 import { User, Event } from "./types";
 import { Calendar, Compass, ShieldAlert, Sparkles } from "lucide-react";
 import { supabaseClient } from "./lib/supabaseClient";
@@ -297,6 +298,10 @@ export default function App() {
                   />
                 )}
               </>
+            )}
+
+            {activeTab === "voting" && (
+              <VotingPage user={user} pushToast={pushToast} />
             )}
 
             {activeTab === "client-dashboard" && user && (

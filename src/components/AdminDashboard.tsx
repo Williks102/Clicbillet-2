@@ -2,11 +2,12 @@ import React, { useState, useEffect } from "react";
 import { User, Event, Ticket } from "../types";
 import {
   Building2, Users, Calendar, DollarSign, Trash2, ShieldCheck,
-  Search, ShieldAlert, Sparkles, LogOut, Ticket as TicketIcon, TrendingUp, Filter, Percent
+  Search, ShieldAlert, Sparkles, LogOut, Ticket as TicketIcon, TrendingUp, Filter, Percent, Vote
 } from "lucide-react";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 import { isEventPast } from "../lib/eventStatus";
 import DashboardMobileMenu from "./DashboardMobileMenu";
+import AdminVotingTab from "./AdminVotingTab";
 
 interface AdminDashboardProps {
   user: User;
@@ -27,9 +28,9 @@ interface AdminStats {
   tickets: Ticket[];
 }
 
-type AdminSubTab = "overview" | "events" | "users" | "tickets" | "payouts" | "transactions";
+type AdminSubTab = "overview" | "events" | "users" | "tickets" | "payouts" | "transactions" | "voting";
 
-const ADMIN_SUB_TABS: AdminSubTab[] = ["overview", "events", "users", "tickets", "payouts", "transactions"];
+const ADMIN_SUB_TABS: AdminSubTab[] = ["overview", "events", "users", "tickets", "payouts", "transactions", "voting"];
 
 const ADMIN_SUB_TAB_LABELS: Record<AdminSubTab, string> = {
   overview: "Tableau de Bord",
@@ -37,7 +38,8 @@ const ADMIN_SUB_TAB_LABELS: Record<AdminSubTab, string> = {
   users: "Membres & Rôles",
   tickets: "Billets Vendus",
   payouts: "Demandes de Retrait",
-  transactions: "Log Transactions"
+  transactions: "Log Transactions",
+  voting: "Campagnes de Vote"
 };
 
 const ADMIN_SUB_TAB_ICONS: Record<AdminSubTab, React.ReactNode> = {
@@ -46,7 +48,8 @@ const ADMIN_SUB_TAB_ICONS: Record<AdminSubTab, React.ReactNode> = {
   users: <Users className="h-4 w-4" />,
   tickets: <TicketIcon className="h-4 w-4" />,
   payouts: <DollarSign className="h-4 w-4" />,
-  transactions: <TrendingUp className="h-4 w-4" />
+  transactions: <TrendingUp className="h-4 w-4" />,
+  voting: <Vote className="h-4 w-4" />
 };
 
 export default function AdminDashboard({ user, onLogout, onTokenRefresh }: AdminDashboardProps) {
@@ -880,6 +883,10 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
               </table>
             </div>
           </div>
+        )}
+
+        {activeSubTab === "voting" && (
+          <AdminVotingTab user={user} onTokenRefresh={onTokenRefresh} />
         )}
 
       </section>

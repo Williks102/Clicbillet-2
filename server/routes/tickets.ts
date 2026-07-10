@@ -9,6 +9,7 @@ import { buildWebhookNotificationUrl, corsAllowedOrigin, getWebhookSecretFromReq
 import { checkoutRateLimiter } from "../lib/rateLimiters";
 import { getWaitingRoomEventConfig, advanceAndGetWaitingRoomStatus } from "../lib/waitingRoom";
 import { normalizeReferenceIdentifier, findTicketsByReference, confirmPaymentForTickets, notifyPaymentFailedForTickets } from "../lib/paymentConfirmation";
+import { findVoteOrderByReference, confirmVoteOrder, failVoteOrder } from "../lib/voteConfirmation";
 import { PAYMENT_WEBHOOK_SECRET, PAYMENT_PRO_CALLBACK_SECRET } from "../lib/config";
 
 const router = express.Router();
@@ -567,14 +568,30 @@ router.post("/api/payment/callback", async (req: express.Request, res: express.R
   // compatibilité avec les anciens billets, un id/transaction_ref individuel.
   const resolvedTickets = await findTicketsByReference([referenceNumber, rawReferenceNumberDisplay]);
 
-  if (resolvedTickets.length === 0) {
-    console.warn(`[PaiementPro Callback] Aucun billet trouvé pour la référence : ${referenceNumber}`);
-  } else if (!isSuccess) {
-    console.log(`[PaiementPro Callback] Callback NON-succès pour la référence ${referenceNumber} (responsecode=${numericResponseCode}). Aucune mise à jour appliquée.`);
-    await notifyPaymentFailedForTickets(resolvedTickets);
+  if (resolvedTickets.length > 0) {
+    if (!isSuccess) {
+      console.log(`[PaiementPro Callback] Callback NON-succès pour la référence ${referenceNumber} (responsecode=${numericResponseCode}). Aucune mise à jour appliquée.`);
+      await notifyPaymentFailedForTickets(resolvedTickets);
+    } else {
+      const confirmedCount = await confirmPaymentForTickets(resolvedTickets);
+      console.log(`[PaiementPro Callback] ${confirmedCount}/${resolvedTickets.length} billet(s) confirmé(s) pour la référence ${referenceNumber}.`);
+    }
+    return res.status(200).json({ status: "success", message: "Notification traitée" });
+  }
+
+  // Aucun billet trouvé : la référence correspond peut-être à un achat de voix premium
+  // (cf. /api/voting/.../vote-premium/checkout, même pattern PENDING-/PAID-).
+  const resolvedVoteOrder = await findVoteOrderByReference([referenceNumber, rawReferenceNumberDisplay]);
+  if (resolvedVoteOrder) {
+    if (!isSuccess) {
+      console.log(`[PaiementPro Callback] Callback NON-succès (vote) pour la référence ${referenceNumber}.`);
+      await failVoteOrder(resolvedVoteOrder);
+    } else {
+      const confirmed = await confirmVoteOrder(resolvedVoteOrder);
+      console.log(`[PaiementPro Callback] Commande de voix ${referenceNumber} confirmée : ${confirmed}.`);
+    }
   } else {
-    const confirmedCount = await confirmPaymentForTickets(resolvedTickets);
-    console.log(`[PaiementPro Callback] ${confirmedCount}/${resolvedTickets.length} billet(s) confirmé(s) pour la référence ${referenceNumber}.`);
+    console.warn(`[PaiementPro Callback] Aucun billet ni commande de voix trouvé pour la référence : ${referenceNumber}`);
   }
 
   res.status(200).json({ status: "success", message: "Notification traitée" });
@@ -596,12 +613,18 @@ router.post("/api/dev/simulate-payment", async (req: express.Request, res: expre
   }
 
   const resolvedTickets = await findTicketsByReference([rawReferenceNumber]);
-  if (resolvedTickets.length === 0) {
-    return res.status(404).json({ error: "Billet introuvable pour simulation." });
+  if (resolvedTickets.length > 0) {
+    await confirmPaymentForTickets(resolvedTickets);
+    return res.json({ success: true, message: "Simulation de paiement effectuée." });
   }
 
-  await confirmPaymentForTickets(resolvedTickets);
-  res.json({ success: true, message: "Simulation de paiement effectuée." });
+  const resolvedVoteOrder = await findVoteOrderByReference([rawReferenceNumber]);
+  if (resolvedVoteOrder) {
+    await confirmVoteOrder(resolvedVoteOrder);
+    return res.json({ success: true, message: "Simulation de paiement (voix) effectuée." });
+  }
+
+  res.status(404).json({ error: "Billet ou commande de voix introuvable pour simulation." });
 });
 
 // Ticket Verification Endpoint (QR Scanning Verification)

@@ -13,6 +13,7 @@ import ticketsRouter from "./server/routes/tickets";
 import webhooksRouter from "./server/routes/webhooks";
 import organizerRouter from "./server/routes/organizer";
 import adminRouter from "./server/routes/admin";
+import votingRouter from "./server/routes/voting";
 
 const app = express();
 
@@ -81,6 +82,7 @@ app.use(ticketsRouter);
 app.use(webhooksRouter);
 app.use(organizerRouter);
 app.use(adminRouter);
+app.use(votingRouter);
 
 // Configure Vite middleware and static serving as requested
 async function startServer() {
