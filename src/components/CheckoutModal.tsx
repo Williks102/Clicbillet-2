@@ -170,7 +170,17 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
         diagContext.sdkLoaded = !!LibPaiementPro;
         diagContext.sdkIsFallback = !!LibPaiementPro?.isFallback;
 
-        if (LibPaiementPro) {
+        // Le SDK de secours (public/paiementpro-fallback.js) s'auto-enregistre quand le vrai
+        // script CDN échoue à charger (réseau lent, bloqueur de pub, CDN indisponible) — il
+        // "réussit" toujours artificiellement sans jamais contacter une vraie passerelle ni
+        // débiter le client, ce qui laissait des commandes bloquées en PENDING- indéfiniment
+        // (aucun webhook réel ne pouvait jamais arriver). On ne l'accepte donc qu'en
+        // développement (où /api/dev/simulate-payment prend le relais au retour) ; en
+        // production on le traite comme un SDK non chargé.
+        const isRealSdk = LibPaiementPro && !LibPaiementPro.isFallback;
+        const allowFallback = (import.meta as any).env?.DEV;
+
+        if (LibPaiementPro && (isRealSdk || allowFallback)) {
           console.log("[PaiementPro] Initialisation du SDK avec l'ID marchand :", merchantId);
           const pPro = new LibPaiementPro(merchantId);
 
@@ -225,6 +235,9 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
 
           console.error("[PaiementPro] Initialisation refusée par la passerelle (success=false).", diagContext);
           paymentFailureReason = "La passerelle de paiement a refusé d'initialiser la transaction. Vérifiez vos informations ou réessayez.";
+        } else if (LibPaiementPro?.isFallback) {
+          console.error("[PaiementPro] SDK de secours détecté en production, paiement refusé (pas de vraie passerelle).", diagContext);
+          paymentFailureReason = "Le service de paiement est temporairement indisponible (connexion trop lente ou instable). Veuillez réessayer dans quelques instants.";
         } else {
           console.error("[PaiementPro] SDK non chargé globalement dans l'index.html.", diagContext);
           paymentFailureReason = "Le module de paiement n'a pas pu être chargé (connexion réseau ?). Veuillez réessayer.";

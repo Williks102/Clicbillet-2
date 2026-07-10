@@ -92,8 +92,18 @@ export const PaiementProButton: React.FC<PaiementProButtonProps> = ({
 
       // 2. Récupérer le SDK PaiementPro attaché à la fenêtre globale
       const LibPaiementPro = (window as any).PaiementPro;
-      if (!LibPaiementPro) {
-        throw new Error("Le SDK PaiementPro n'a pas pu être chargé. Veuillez vérifier votre connexion.");
+      // Le SDK de secours (public/paiementpro-fallback.js) s'auto-enregistre quand le vrai
+      // script CDN échoue à charger — il "réussit" toujours artificiellement sans jamais
+      // contacter une vraie passerelle ni débiter le client. On ne l'accepte qu'en
+      // développement ; en production il doit être traité comme un SDK non chargé, sinon la
+      // commande reste bloquée en PENDING- indéfiniment (aucun webhook réel ne peut arriver).
+      const allowFallback = (import.meta as any).env?.DEV;
+      if (!LibPaiementPro || (LibPaiementPro.isFallback && !allowFallback)) {
+        throw new Error(
+          LibPaiementPro?.isFallback
+            ? "Le service de paiement est temporairement indisponible (connexion trop lente ou instable). Veuillez réessayer dans quelques instants."
+            : "Le guichet de paiement n'a pas pu être chargé. Veuillez vérifier votre connexion."
+        );
       }
 
       console.log(`[PaiementPro React Component] Démarrage transaction pour le marchand : ${config.merchantId}`);
