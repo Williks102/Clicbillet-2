@@ -417,7 +417,7 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
 
               {isFreeOrder ? (
                 <div className="rounded-xl border border-green-100 bg-green-50 p-4 text-xs font-semibold leading-relaxed text-green-700">
-                  Cette inscription est gratuite : cliquez sur confirmer pour générer vos QR codes sans ouvrir Paiement Pro.
+                  Cette inscription est gratuite : cliquez sur confirmer pour générer vos QR codes directement, sans passer par une passerelle de paiement.
                 </div>
               ) : method !== "card" ? (
                 /* Mobile Money Inputs (Orange Money, MTN, Moov, Wave) */
@@ -516,12 +516,11 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
                 </div>
               )}
 
-              {/* Affichage de l'ID marchand Paiement Pro configure */}
               {!isFreeOrder && (
                 <div className="p-3 bg-orange-50/20 border border-orange-150/20 rounded-2xl space-y-1">
                   <div className="flex items-center justify-between text-[10px] text-gray-500 font-semibold">
-                    <span>Passerelle Actrice :</span>
-                    <span className="text-orange-600 font-extrabold uppercase">Paiement Pro (CI)</span>
+                    <span>Paiement :</span>
+                    <span className="text-orange-600 font-extrabold uppercase">Passerelle sécurisée</span>
                   </div>
                 </div>
               )}
@@ -592,7 +591,7 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
               ) : paymentUrl ? (
                 <div className="p-4 bg-orange-50 border border-orange-100 rounded-2xl w-full space-y-3">
                   <p className="text-xs text-orange-850 font-semibold leading-relaxed">
-                    Une passerelle sécurisée <strong className="text-orange-600">Paiement Pro (CI)</strong> a été initiée pour effectuer le transfert. Si la page ne s'est pas ouverte automatiquement, cliquez ci-dessous :
+                    Une passerelle de paiement sécurisée a été initiée pour effectuer le transfert. Si la page ne s'est pas ouverte automatiquement, cliquez ci-dessous :
                   </p>
                   <a
                     href={paymentUrl}
@@ -601,18 +600,12 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
                     className="inline-flex w-full justify-center items-center rounded-xl bg-orange-600 px-4 py-3 text-xs font-black text-white hover:bg-orange-700 transition shadow-md shadow-orange-100"
                     id="paiement-pro-direct-link"
                   >
-                    Ouvrir le guichet Paiement Pro
+                    Ouvrir le guichet de paiement
                   </a>
                 </div>
               ) : (
                 <div className="p-4 bg-gray-50 border border-gray-150 rounded-2xl w-full text-xs text-gray-500">
                   Transaction simulée terminée avec succès.
-                </div>
-              )}
-
-              {!isFreeOrder && (
-                <div className="text-[10px] text-gray-450 font-medium tracking-wide">
-                  Passerelle : <strong className="text-gray-600">Paiement Pro (CI)</strong>
                 </div>
               )}
 

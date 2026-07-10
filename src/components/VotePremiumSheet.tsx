@@ -88,7 +88,7 @@ export default function VotePremiumSheet({ campaign, candidate, user, onClose }:
         customerPhoneNumber: guestPhone || "0700000000",
         description: `${selectedPack?.votes} voix pour ${candidate.name} - ${campaign.title}`,
         notificationURL: `${window.location.origin}/api/payment/callback`,
-        returnURL: window.location.href
+        returnURL: `${window.location.origin}/?payment_success=true&order_id=${checkoutData.orderId}`
       }
     : null;
 

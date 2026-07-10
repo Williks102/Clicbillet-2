@@ -130,6 +130,29 @@ export async function sendTicketEmail(order: { buyerEmail: string; buyerName: st
   });
 }
 
+// --- Acheteur : confirmation d'achat de voix premium ---
+export function buildVoteConfirmationHtml(order: { candidateName: string; campaignTitle: string; votesQty: number }): string {
+  return emailLayout("Vos voix sont créditées !", `
+    <p>Bonjour,</p>
+    <p>Merci pour votre soutien ! Voici les détails de votre commande :</p>
+    <ul>
+      <li><strong>Campagne :</strong> ${order.campaignTitle}</li>
+      <li><strong>Candidat soutenu :</strong> ${order.candidateName}</li>
+      <li><strong>Voix créditées :</strong> ${order.votesQty}</li>
+    </ul>
+    <p>Vos voix ont été comptabilisées immédiatement, retournez sur la page de la campagne pour suivre le classement en direct.</p>
+  `);
+}
+
+export async function sendVoteConfirmationEmail(order: { buyerEmail: string; candidateName: string; campaignTitle: string; votesQty: number }): Promise<void> {
+  if (!order.buyerEmail) return;
+  await sendEmail({
+    to: order.buyerEmail,
+    subject: `Vos voix pour ${order.candidateName} sont créditées`,
+    html: buildVoteConfirmationHtml(order)
+  });
+}
+
 // --- Acheteur : échec de paiement ---
 export function buildPaymentFailedHtml(ticket: any): string {
   return emailLayout("Échec de votre paiement", `

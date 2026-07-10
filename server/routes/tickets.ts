@@ -627,6 +627,60 @@ router.post("/api/dev/simulate-payment", async (req: express.Request, res: expre
   res.status(404).json({ error: "Billet ou commande de voix introuvable pour simulation." });
 });
 
+// Statut d'une commande (billets ou voix) par référence, pour la page de confirmation
+// affichée au retour de la passerelle de paiement. Public par nécessité (l'acheteur peut
+// être un invité sans compte) : ne renvoie que le strict nécessaire à l'affichage (statut,
+// titre de l'événement/de la campagne), jamais d'email/téléphone/nom acheteur.
+router.get("/api/orders/:orderId/status", async (req: express.Request, res: express.Response) => {
+  const orderId = normalizeReferenceIdentifier(req.params.orderId);
+  if (!orderId) {
+    return res.status(400).json({ error: "Référence de commande invalide." });
+  }
+
+  function statusFromRef(ref: string): "pending" | "paid" | "failed" {
+    if (ref.startsWith("FAILED-")) return "failed";
+    if (ref.startsWith("PENDING-")) return "pending";
+    return "paid"; // PAID- ou FREE-
+  }
+
+  const resolvedTickets = await findTicketsByReference([orderId]);
+  if (resolvedTickets.length > 0) {
+    const refs = resolvedTickets.map((r) => String(r.source === "supabase" ? r.raw.transaction_ref : r.raw.transactionRef || ""));
+    const status = refs.some((r) => r.startsWith("FAILED-"))
+      ? "failed"
+      : refs.some((r) => r.startsWith("PENDING-"))
+      ? "pending"
+      : "paid";
+    const first = resolvedTickets[0].raw;
+    const eventTitle = resolvedTickets[0].source === "supabase" ? first.event_title : first.eventTitle;
+    return res.json({ type: "ticket", status, eventTitle, ticketsCount: resolvedTickets.length });
+  }
+
+  const resolvedVoteOrder = await findVoteOrderByReference([orderId]);
+  if (resolvedVoteOrder) {
+    const status = statusFromRef(String(resolvedVoteOrder.row.transaction_ref || ""));
+    let campaignTitle: string | null = null;
+    let candidateName: string | null = null;
+    if (supabase) {
+      const [{ data: campaign }, { data: candidate }] = await Promise.all([
+        supabase.from("voting_campaigns").select("title").eq("id", resolvedVoteOrder.row.campaign_id).maybeSingle(),
+        supabase.from("candidates").select("name").eq("id", resolvedVoteOrder.row.candidate_id).maybeSingle()
+      ]);
+      campaignTitle = campaign?.title || null;
+      candidateName = candidate?.name || null;
+    }
+    return res.json({
+      type: "vote",
+      status,
+      campaignTitle,
+      candidateName,
+      votesQty: resolvedVoteOrder.row.quantity
+    });
+  }
+
+  res.status(404).json({ error: "Commande introuvable." });
+});
+
 // Ticket Verification Endpoint (QR Scanning Verification)
 router.post("/api/verify-ticket", requireAuth, requireRole("organizer", "admin"), validateVerifyTicket, async (req: express.Request, res: express.Response) => {
   const { qrCodeData, organizerId } = req.body;

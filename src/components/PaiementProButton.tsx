@@ -150,9 +150,9 @@ export const PaiementProButton: React.FC<PaiementProButtonProps> = ({
   };
 
   const statusLabels = {
-    loading: "Chargement du CDN sécurisé...",
-    ready: "Guichet Paiement Pro sécurisé",
-    fallback: "Guichet Paiement Pro simulé"
+    loading: "Chargement du guichet sécurisé...",
+    ready: "Guichet de paiement sécurisé",
+    fallback: "Guichet de paiement (mode simulation)"
   };
 
   const isOmOrMtnOrMoov = config.channel !== "CARD" && config.channel !== "WAVECI";
@@ -160,18 +160,13 @@ export const PaiementProButton: React.FC<PaiementProButtonProps> = ({
   return (
     <div className={`space-y-4`} id="paiement-pro-react-container">
       {/* Visual Indicator of Secure Gateway Integrity */}
-      <div className={`flex items-center justify-between p-3.5 rounded-2xl border text-[11px] font-bold ${statusColors[sdkStatus]}`}>
-        <div className="flex items-center space-x-2">
-          {sdkStatus === "loading" ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Check className="h-3.5 w-3.5 text-emerald-500" strokeWidth={3} />
-          )}
-          <span>{statusLabels[sdkStatus]}</span>
-        </div>
-        <span className="font-mono bg-white px-2 py-0.5 rounded shadow-xs font-black shrink-0 text-[10px]">
-          ID : {config.merchantId}
-        </span>
+      <div className={`flex items-center space-x-2 p-3.5 rounded-2xl border text-[11px] font-bold ${statusColors[sdkStatus]}`}>
+        {sdkStatus === "loading" ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Check className="h-3.5 w-3.5 text-emerald-500" strokeWidth={3} />
+        )}
+        <span>{statusLabels[sdkStatus]}</span>
       </div>
 
       {internalError && (
@@ -211,7 +206,7 @@ export const PaiementProButton: React.FC<PaiementProButtonProps> = ({
 
       {/* Visual details under payment button */}
       <p className="text-[10px] text-center text-gray-400 font-semibold">
-        Opération sécurisée cryptée de bout en bout par la plateforme <strong className="text-gray-600">Paiement Pro™</strong>.
+        Opération sécurisée et cryptée de bout en bout.
       </p>
     </div>
   );

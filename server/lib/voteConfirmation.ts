@@ -1,4 +1,6 @@
 import { supabase } from "./config.js";
+import { runInBackground } from "./utils.js";
+import { sendVoteConfirmationEmail } from "./email.js";
 
 // Miroir de paymentConfirmation.ts (tickets) pour les achats de voix premium. Une commande
 // de voix (order_id, VOTE-ORD-xxxxx) crée une seule ligne "votes" (type=premium, quantity=N)
@@ -35,6 +37,24 @@ export async function confirmVoteOrder(resolved: ResolvedVoteOrder): Promise<boo
     return false;
   }
   await supabase.from("vote_transactions").update({ status: "paid" }).eq("id", resolved.orderId);
+
+  if (resolved.row.voter_email) {
+    try {
+      const [{ data: campaign }, { data: candidate }] = await Promise.all([
+        supabase.from("voting_campaigns").select("title").eq("id", resolved.row.campaign_id).maybeSingle(),
+        supabase.from("candidates").select("name").eq("id", resolved.row.candidate_id).maybeSingle()
+      ]);
+      runInBackground(sendVoteConfirmationEmail({
+        buyerEmail: resolved.row.voter_email,
+        candidateName: candidate?.name || "votre candidat",
+        campaignTitle: campaign?.title || "la campagne",
+        votesQty: resolved.row.quantity
+      }));
+    } catch (e: any) {
+      console.warn("[Email] Notification acheteur (voix) échouée :", e.message);
+    }
+  }
+
   return true;
 }
 

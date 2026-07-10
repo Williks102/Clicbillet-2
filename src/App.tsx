@@ -12,6 +12,7 @@ import GuestOrAuthModal, { GuestInfo } from "./components/GuestOrAuthModal";
 import ToastStack, { ToastItem } from "./components/ToastStack";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
 import VotingPage from "./components/VotingPage";
+import PaymentConfirmationPage from "./components/PaymentConfirmationPage";
 import { User, Event } from "./types";
 import { Calendar, Compass, ShieldAlert, Sparkles } from "lucide-react";
 import { supabaseClient } from "./lib/supabaseClient";
@@ -40,6 +41,7 @@ export default function App() {
   const [systemAlert, setSystemAlert] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [votingDeepLinkCampaignId, setVotingDeepLinkCampaignId] = useState<string | null>(null);
+  const [paymentConfirmationOrderId, setPaymentConfirmationOrderId] = useState<string | null>(null);
 
   function pushToast(message: string) {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -86,32 +88,26 @@ export default function App() {
 
     if (params.get("payment_success") === "true") {
       const orderId = params.get("order_id");
-      const finishPaymentReturn = () => {
-        window.history.replaceState({}, document.title, window.location.pathname);
-        window.dispatchEvent(new CustomEvent("refresh_tickets"));
-        if (user?.role === "client") {
-          setActiveTab("client-dashboard");
-        } else {
-          setActiveTab("home");
+      window.history.replaceState({}, document.title, window.location.pathname);
+      if (orderId) {
+        if ((import.meta as any).env?.DEV) {
+          console.log("Validation du paiement post-redirection en développement pour la commande :", orderId);
+          fetch("/api/dev/simulate-payment", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ referenceNumber: orderId })
+          }).catch((e) => console.error("Could not simulate redirect payment:", e));
         }
-      };
-
-      if ((import.meta as any).env?.DEV && orderId) {
-        console.log("Validation du paiement post-redirection en développement pour la commande :", orderId);
-        fetch("/api/dev/simulate-payment", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ referenceNumber: orderId })
-        }).then(() => {
-          finishPaymentReturn();
-        }).catch(e => console.error("Could not simulate redirect payment:", e));
-      } else {
-        finishPaymentReturn();
+        setPaymentConfirmationOrderId(orderId);
       }
     }
   }, [user]);
+
+  function handlePaymentConfirmationDone(destination: "tickets" | "home") {
+    setPaymentConfirmationOrderId(null);
+    window.dispatchEvent(new CustomEvent("refresh_tickets"));
+    setActiveTab(destination === "tickets" && user?.role === "client" ? "client-dashboard" : "home");
+  }
 
   useEffect(() => {
     // Dynamic tab routing after refreshing user session
@@ -271,7 +267,14 @@ export default function App() {
 
       {/* Primary viewport content context router */}
       <main className="flex-1 mx-auto w-full max-w-7xl overflow-hidden px-3 py-6 sm:px-6 sm:py-8">
-        {authModalVisible ? (
+        {paymentConfirmationOrderId ? (
+          <PaymentConfirmationPage
+            orderId={paymentConfirmationOrderId}
+            user={user}
+            onGoToTickets={() => handlePaymentConfirmationDone("tickets")}
+            onGoHome={() => handlePaymentConfirmationDone("home")}
+          />
+        ) : authModalVisible ? (
           <AuthPage
             onSuccess={handleLoginSuccess}
             initialResetToken={resetToken}
