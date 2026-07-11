@@ -123,7 +123,14 @@ export const INITIAL_DATABASE = {
 export function getDB() {
   try {
     if (!fs.existsSync(DB_FILE)) {
-      fs.writeFileSync(DB_FILE, JSON.stringify(INITIAL_DATABASE, null, 2), "utf8");
+      // Sur un FS en lecture seule (Vercel : /var/task), la création échoue avec EROFS. Ce
+      // n'est pas fatal — on renvoie simplement le jeu initial en mémoire sans écrire. (En prod
+      // Supabase est de toute façon la source de vérité, cf. config.ts.)
+      try {
+        fs.writeFileSync(DB_FILE, JSON.stringify(INITIAL_DATABASE, null, 2), "utf8");
+      } catch (writeErr) {
+        console.warn("db.json non persistable (FS en lecture seule ?), utilisation en mémoire.", writeErr);
+      }
       return INITIAL_DATABASE;
     }
     const raw = fs.readFileSync(DB_FILE, "utf8");

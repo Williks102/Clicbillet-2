@@ -69,7 +69,7 @@ export interface Ticket {
   buyerId: string;
   buyerName: string;
   buyerEmail: string;
-  tier: 'standard' | 'vip';
+  tier: string; // Nom du palier tel que défini par l'organisateur (event.ticketTypes) — libre
   pricePaid: number; // in XOF
   qrCodeData: string; // Contains JSON state or verification hash
   scanned: boolean;

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Ticket as TicketIcon, Calendar, MapPin, Download, CheckCircle2, AlertTriangle, ExternalLink, Printer, Sparkles } from "lucide-react";
 import { Ticket, User } from "../types";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
+import { tierBadgeClasses } from "../lib/tierBadge";
 import ResponsiveSheet from "./ResponsiveSheet";
 
 interface ClientDashboardProps {
@@ -238,12 +239,8 @@ export default function ClientDashboard({ user, onTokenRefresh }: ClientDashboar
                 className="group cursor-pointer overflow-hidden rounded-2xl border border-gray-100 bg-white p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-md active:scale-98"
               >
                 <div className="flex justify-between items-start">
-                  <span className={`inline-flex items-center space-x-0.5 rounded-md px-2 py-0.5 text-[9px] font-extrabold uppercase ${
-                    tkt.tier === "vip" 
-                      ? "bg-amber-100 text-amber-800" 
-                      : "bg-blue-100 text-blue-800"
-                  }`}>
-                    {tkt.tier === "vip" ? "Pass VIP" : "Pass Standard"}
+                  <span className={`inline-flex items-center space-x-0.5 rounded-md px-2 py-0.5 text-[9px] font-extrabold uppercase ${tierBadgeClasses(tkt.tier)}`}>
+                    Pass {tkt.tier}
                   </span>
 
                   <span className={`inline-flex items-center text-xs font-bold ${
@@ -324,13 +321,9 @@ export default function ClientDashboard({ user, onTokenRefresh }: ClientDashboar
             <div className="p-6 md:p-8 space-y-6" id="printable-ticket-content">
               {/* Event Badge and Title */}
               <div className="text-center space-y-2">
-                <span className={`inline-flex items-center space-x-1 rounded-sm px-2.5 py-0.5 text-[10px] font-black uppercase ${
-                  selectedTicket.tier === "vip" 
-                    ? "bg-amber-100 text-amber-900 border border-amber-200" 
-                    : "bg-blue-100 text-blue-900 border border-blue-200"
-                }`}>
+                <span className={`inline-flex items-center space-x-1 rounded-sm px-2.5 py-0.5 text-[10px] font-black uppercase ${tierBadgeClasses(selectedTicket.tier)}`}>
                   <Sparkles className="h-3 w-3 text-amber-600 shrink-0" />
-                  <span>{selectedTicket.tier === "vip" ? "Pass VIP" : "Pass Standard"}</span>
+                  <span>Pass {selectedTicket.tier}</span>
                 </span>
                 
                 <h3 className="text-lg font-black text-gray-900 leading-tight">

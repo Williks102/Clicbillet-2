@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 import { isEventPast } from "../lib/eventStatus";
+import { tierBadgeClasses } from "../lib/tierBadge";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 import AdminVotingTab from "./AdminVotingTab";
 
@@ -759,10 +760,8 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                       </td>
                       <td className="py-3">
                         <span className="font-extrabold font-sans pr-1.5">{tkt.quantity} ticket(s)</span>
-                        <span className={`inline-flex rounded-md px-1.5 py-0.5 text-[8px] font-extrabold uppercase ${
-                          tkt.tier === "vip" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"
-                        }`}>
-                          {tkt.tier === "vip" ? "VIP" : "STD"}
+                        <span className={`inline-flex rounded-md px-1.5 py-0.5 text-[8px] font-extrabold uppercase ${tierBadgeClasses(tkt.tier)}`}>
+                          {tkt.tier}
                         </span>
                       </td>
                       <td className="py-3 text-gray-400 font-mono font-semibold">{new Date(tkt.purchaseDate).toLocaleString("fr-FR")}</td>

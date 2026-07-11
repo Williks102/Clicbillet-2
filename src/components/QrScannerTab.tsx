@@ -3,6 +3,7 @@ import { Camera, CheckCircle, XCircle, AlertTriangle, RefreshCw, Smartphone, Key
 import { Html5QrcodeScanner } from "html5-qrcode";
 import { User } from "../types";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
+import { tierBadgeClasses } from "../lib/tierBadge";
 
 interface QrScannerTabProps {
   user: User;
@@ -197,10 +198,8 @@ export default function QrScannerTab({ user, onTokenRefresh }: QrScannerTabProps
                   </div>
                   <div className="flex justify-between border-b border-gray-100 pb-1.5 font-mono">
                     <span className="text-gray-400 font-bold">Catégorie Pass</span>
-                    <span className={`px-1.5 py-0.5 rounded-sm font-bold uppercase text-[9px] ${
-                      scanResult.ticket.tier === "vip" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"
-                    }`}>
-                      {scanResult.ticket.tier === "vip" ? "VIP" : "Standard"}
+                    <span className={`px-1.5 py-0.5 rounded-sm font-bold uppercase text-[9px] ${tierBadgeClasses(scanResult.ticket.tier)}`}>
+                      {scanResult.ticket.tier}
                     </span>
                   </div>
                   <div className="flex justify-between">

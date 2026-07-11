@@ -77,7 +77,7 @@ export const validateResetPassword = (req: express.Request, res: express.Respons
 
 // Middleware de validation pour la création / modification d'événements
 export const validateEvent = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const { title, date, time, price, venue, category, banner, totalTickets, organizerId } = req.body;
+  const { title, date, time, price, venue, category, banner, totalTickets, organizerId, ticketTypes } = req.body;
 
   if (!title || !date || !time || !venue || !category || !organizerId) {
     return res.status(400).json({ error: "Veuillez remplir tous les champs obligatoires correctement." });
@@ -116,12 +116,48 @@ export const validateEvent = (req: express.Request, res: express.Response, next:
     return res.status(400).json({ error: "L'URL de l'image de couverture est invalide (doit commencer par http://, https:// ou être une image uploadée)." });
   }
 
+  // Paliers de billets personnalisés (optionnels). S'ils sont fournis, on borne leur forme :
+  // le checkout facture au prix du palier correspondant (match par nom, insensible à la casse,
+  // cf. POST /api/checkout), donc un nom vide, un prix négatif ou des noms en double doivent
+  // être rejetés ici plutôt que de créer un événement dont les prix seraient incohérents.
+  if (ticketTypes !== undefined && ticketTypes !== null) {
+    if (!Array.isArray(ticketTypes)) {
+      return res.status(400).json({ error: "Le format des paliers de billets est invalide." });
+    }
+    if (ticketTypes.length > 20) {
+      return res.status(400).json({ error: "Un événement ne peut pas définir plus de 20 paliers de billets." });
+    }
+    const seenNames = new Set<string>();
+    for (const t of ticketTypes) {
+      const name = typeof t?.name === "string" ? t.name.trim() : "";
+      if (!name || name.length > 50) {
+        return res.status(400).json({ error: "Chaque palier doit avoir un nom (1 à 50 caractères)." });
+      }
+      const key = name.toLowerCase();
+      if (seenNames.has(key)) {
+        return res.status(400).json({ error: `Le palier "${name}" est défini en double.` });
+      }
+      seenNames.add(key);
+
+      if (t?.price === undefined || t?.price === null || isNaN(Number(t.price)) || Number(t.price) < 0 || Number(t.price) > 50000000) {
+        return res.status(400).json({ error: `Le prix du palier "${name}" doit être un nombre entre 0 et 50 000 000.` });
+      }
+      if (t?.total !== undefined && t?.total !== null && t?.total !== "" && (isNaN(Number(t.total)) || Number(t.total) < 0 || Number(t.total) > 1000000)) {
+        return res.status(400).json({ error: `Le quota du palier "${name}" doit être un nombre entre 0 et 1 000 000.` });
+      }
+    }
+  }
+
   next();
 };
 
 // Middleware de validation de commande de billet (Checkout)
 // Une commande (panier) contient un ou plusieurs items, un par type de billet distinct
-// (ex: { tier: "standard", quantity: 2 } + { tier: "vip", quantity: 1 }).
+// (ex: { tier: "standard", quantity: 2 } + { tier: "gp", quantity: 1 }). Le nom du palier
+// est libre (défini par l'organisateur via event.ticketTypes, cf. POST /api/events) — cette
+// validation ne fait que borner la forme de la chaîne ; la correspondance avec un palier
+// réellement défini sur l'événement est vérifiée plus loin dans POST /api/checkout, où
+// l'événement est chargé.
 export const validateCheckout = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const { eventId, buyerId, buyerName, buyerEmail, guestPhone, items, paymentDetails } = req.body;
   const isGuest = !buyerId && !!buyerEmail;
@@ -143,9 +179,9 @@ export const validateCheckout = (req: express.Request, res: express.Response, ne
   let totalQuantity = 0;
 
   for (const item of items) {
-    const normalizedTier = typeof item?.tier === "string" ? item.tier.toLowerCase() : item?.tier;
-    if (normalizedTier !== "standard" && normalizedTier !== "vip") {
-      return res.status(400).json({ error: "Chaque billet doit être de type 'standard' ou 'vip'." });
+    const normalizedTier = typeof item?.tier === "string" ? item.tier.trim().toLowerCase() : "";
+    if (!normalizedTier || normalizedTier.length > 50) {
+      return res.status(400).json({ error: "Chaque billet doit indiquer un palier valide." });
     }
 
     const qtyVal = Number(item?.quantity);

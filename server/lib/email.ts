@@ -103,7 +103,7 @@ export async function sendPasswordResetEmail(user: { email: string; name: string
 export function buildTicketConfirmationHtml(order: { buyerName: string; eventTitle: string; eventDate: string; eventTime: string; eventVenue: string; tickets: { tier: string; qrCodeData: string }[] }): string {
   const qrBlocks = order.tickets.map((t, i) => `
     <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid #e5e7eb;">
-      <p style="margin: 0 0 8px; font-weight: bold;">Billet ${i + 1}/${order.tickets.length} — ${t.tier === "vip" ? "VIP" : "Standard"}</p>
+      <p style="margin: 0 0 8px; font-weight: bold;">Billet ${i + 1}/${order.tickets.length} — ${t.tier.charAt(0).toUpperCase() + t.tier.slice(1)}</p>
       <img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(t.qrCodeData)}" alt="QR Code billet ${i + 1}" width="220" height="220" />
     </div>
   `).join("");

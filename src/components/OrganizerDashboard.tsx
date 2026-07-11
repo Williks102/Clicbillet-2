@@ -4,6 +4,7 @@ import { Event, User, SalesStatus } from "../types";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
 import { isEventPast } from "../lib/eventStatus";
+import { tierBadgeClasses } from "../lib/tierBadge";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 import OrganizerVotingTab from "./OrganizerVotingTab";
 
@@ -111,7 +112,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   // Sandbox Simulator States
   const [simSelectedEventId, setSimSelectedEventId] = useState("");
   const [simQuantity, setSimQuantity] = useState("1");
-  const [simTier, setSimTier] = useState<"standard" | "vip">("standard");
+  const [simTier, setSimTier] = useState<string>("standard");
   const [simBuyerName, setSimBuyerName] = useState("Sylla Lansana");
   const [simBuyerEmail, setSimBuyerEmail] = useState("lansana@fofana.ci");
   const [simPaymentMethod, setSimPaymentMethod] = useState("orange_money");
@@ -489,6 +490,22 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   // Filter events created specifically by this organizer
   const myEvents = events.filter((e) => e.organizerId === user.id);
 
+  // Simulateur : les paliers proposés reflètent ceux réellement définis sur l'événement
+  // sélectionné (event.ticketTypes), avec le même repli "Standard/VIP ×2" que CheckoutModal
+  // quand l'événement n'a pas de paliers personnalisés.
+  const simSelectedEvent = myEvents.find((e) => e.id === simSelectedEventId);
+  const simTierOptions = simSelectedEvent?.ticketTypes && simSelectedEvent.ticketTypes.length > 0
+    ? simSelectedEvent.ticketTypes
+    : simSelectedEvent
+    ? [{ name: "Standard", price: simSelectedEvent.price }, { name: "VIP", price: simSelectedEvent.price * 2 }]
+    : [];
+
+  useEffect(() => {
+    if (simTierOptions.length > 0 && !simTierOptions.some((t) => t.name.toLowerCase() === simTier)) {
+      setSimTier(simTierOptions[0].name.toLowerCase());
+    }
+  }, [simSelectedEventId]);
+
   // CA brut par événement, pour l'afficher sur la jauge de ventes de chaque carte évènement.
   const eventRevenueByEventId = useMemo(() => {
     const map: Record<string, number> = {};
@@ -727,7 +744,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                       <div className="text-right shrink-0">
                         <span className="text-xs font-extrabold text-orange-650 block">+{sale.amount.toLocaleString("fr-FR")} F</span>
                         <span className="text-[9px] text-gray-400 uppercase font-mono font-semibold">
-                          {sale.tier === "vip" ? "VIP" : "STD"}
+                          {sale.tier}
                         </span>
                       </div>
                     </div>
@@ -1252,11 +1269,13 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                   <label className="text-[10px] font-black uppercase text-gray-400">Catégorie :</label>
                   <select
                     value={simTier}
-                    onChange={(e) => setSimTier(e.target.value as any)}
+                    onChange={(e) => setSimTier(e.target.value)}
                     className="w-full rounded-xl border border-gray-200 p-3 text-xs bg-white text-gray-800 font-bold"
+                    disabled={simTierOptions.length === 0}
                   >
-                    <option value="standard">Standard</option>
-                    <option value="vip">VIP (+10k CFA)</option>
+                    {simTierOptions.map((t) => (
+                      <option key={t.name} value={t.name.toLowerCase()}>{t.name} ({t.price.toLocaleString("fr-FR")} F)</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -1368,10 +1387,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                         </td>
                         <td className="py-3 leading-tight">
                           <span className="block font-bold text-gray-950">{tkt.buyerName || "Inconnu"}</span>
-                          <span className={`inline-flex px-1.5 rounded text-[8px] mt-0.5 font-black uppercase ${
-                            tkt.tier === "vip" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"
-                          }`}>
-                            {tkt.tier === "vip" ? "VIP" : "STD"}
+                          <span className={`inline-flex px-1.5 rounded text-[8px] mt-0.5 font-black uppercase ${tierBadgeClasses(tkt.tier)}`}>
+                            {tkt.tier}
                           </span>
                         </td>
                         <td className="py-3">

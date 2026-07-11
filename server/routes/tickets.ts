@@ -213,6 +213,18 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
 
       const ticketTypes = event.ticket_types || [];
 
+      // Le nom du palier est libre (défini par l'organisateur), mais s'il a défini des
+      // paliers personnalisés pour cet événement, chaque item de la commande doit
+      // correspondre à l'un d'eux — sinon le prix retomberait silencieusement sur
+      // event.price (base), ce qui permettrait de payer moins cher en envoyant un tier
+      // inventé.
+      if (ticketTypes.length > 0) {
+        const unknownItem = items.find((item: any) => !ticketTypes.some((t: any) => typeof t.name === "string" && t.name.toLowerCase() === item.tier));
+        if (unknownItem) {
+          return res.status(400).json({ error: `Le palier "${unknownItem.tier}" n'existe pas pour cet événement.` });
+        }
+      }
+
       // Per-tier capacity check (only when tiers define a total)
       for (const item of items) {
         const tierDef = ticketTypes.find((t: any) => typeof t.name === "string" && t.name.toLowerCase() === item.tier);
@@ -252,7 +264,7 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
             buyer_id: buyerId,
             buyer_name: buyerName,
             buyer_email: buyerEmail,
-            tier: item.tier as "standard" | "vip",
+            tier: item.tier,
             price_paid: unitPrice,
             qr_code_data: `clicbillet-verify:${ticketId}`,
             scanned: false,
@@ -386,6 +398,16 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
   }
 
   const ticketTypes = event.ticketTypes || [];
+
+  // Même garde-fou que la branche Supabase ci-dessus : refuse un palier qui n'existe pas
+  // pour cet événement plutôt que de retomber silencieusement sur le prix de base.
+  if (ticketTypes.length > 0) {
+    const unknownItem = items.find((item: any) => !ticketTypes.some((t: any) => typeof t.name === "string" && t.name.toLowerCase() === item.tier));
+    if (unknownItem) {
+      return res.status(400).json({ error: `Le palier "${unknownItem.tier}" n'existe pas pour cet événement.` });
+    }
+  }
+
   let totalPrice = 0;
   // Même logique que la branche Supabase ci-dessus : une ligne par billet unitaire, pas
   // par type de billet.
@@ -408,7 +430,7 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
         buyerId,
         buyerName,
         buyerEmail,
-        tier: item.tier as "standard" | "vip",
+        tier: item.tier,
         pricePaid: unitPrice,
         qrCodeData: `clicbillet-verify:${ticketId}`,
         scanned: false,

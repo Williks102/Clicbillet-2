@@ -49,6 +49,12 @@ export async function findTicketsByReference(candidates: Array<string | null | u
     } catch (err: any) {
       console.error("[Payment Reference Lookup] Exception Supabase :", err.message || err);
     }
+    // Supabase est la source de vérité en production (cf. config.ts : le serveur s'arrête si
+    // Supabase est absent en prod). On ne doit JAMAIS retomber sur db.json ici : sur Vercel le
+    // système de fichiers est en lecture seule, donc getDB() lèverait EROFS puis renverrait le
+    // jeu de données de démonstration (faux billets), ce qui pollue la recherche de référence.
+    // Le repli db.json ci-dessous n'existe que pour le dev local sans Supabase.
+    return [];
   }
 
   const db = getDB();
