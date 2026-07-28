@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Plus, LayoutDashboard, Calendar, MapPin, Tag, TrendingUp, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X, Vote } from "lucide-react";
+import { Plus, LayoutDashboard, Calendar, MapPin, Tag, TrendingUp, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X } from "lucide-react";
 import { Event, User, SalesStatus } from "../types";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
 import { isEventPast } from "../lib/eventStatus";
 import DashboardMobileMenu from "./DashboardMobileMenu";
-import OrganizerVotingTab from "./OrganizerVotingTab";
 
 interface OrganizerDashboardProps {
   user: User;
@@ -15,22 +14,20 @@ interface OrganizerDashboardProps {
   onTokenRefresh: TokenRefreshHandler;
 }
 
-type OrganizerSubTab = "dashboard" | "create" | "simulator" | "payouts" | "voting";
+type OrganizerSubTab = "dashboard" | "create" | "simulator" | "payouts";
 
 const ORGANIZER_SUB_TAB_LABELS: Record<OrganizerSubTab, string> = {
   dashboard: "Suivi des Ventes",
   create: "Créer un Événement",
   simulator: "🧪 Simulateur Sandbox",
-  payouts: "Retraits & Soldes",
-  voting: "Campagnes de Vote"
+  payouts: "Retraits & Soldes"
 };
 
 const ORGANIZER_SUB_TAB_ICONS: Record<OrganizerSubTab, React.ReactNode> = {
   dashboard: <LayoutDashboard className="h-4 w-4" />,
   create: <Plus className="h-4 w-4" />,
   simulator: <Hammer className="h-4 w-4" />,
-  payouts: <DollarSign className="h-4 w-4" />,
-  voting: <Vote className="h-4 w-4" />
+  payouts: <DollarSign className="h-4 w-4" />
 };
 
 const CATEGORIES = ["Concert", "Festivals", "Théâtre & Humour", "Sport"];
@@ -561,18 +558,6 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
           >
             <DollarSign className="h-4 w-4" />
             <span>Retraits & Soldes</span>
-          </button>
-          <button
-            id="orga-voting-view-tab"
-            onClick={() => setSubTab("voting")}
-            className={`flex items-center space-x-1.5 rounded-xl px-4 py-2.5 text-xs font-black transition-all active:scale-95 ${
-              subTab === "voting"
-                ? "bg-slate-950 text-white shadow-md"
-                : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-150"
-            }`}
-          >
-            <Vote className="h-4 w-4" />
-            <span>Campagnes de Vote</span>
           </button>
         </div>
 
@@ -1747,10 +1732,6 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             </div>
           </div>
         </div>
-      )}
-
-      {subTab === "voting" && (
-        <OrganizerVotingTab user={user} onTokenRefresh={onTokenRefresh} />
       )}
 
     </div>
