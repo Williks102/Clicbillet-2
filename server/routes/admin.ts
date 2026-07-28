@@ -1,11 +1,11 @@
 import express from "express";
-import { isSupabaseEnabled, supabase, supabaseAdmin } from "../lib/config";
-import { getDB, saveDB } from "../lib/db";
-import { requireAuth, requireRole } from "../lib/auth";
-import { runInBackground } from "../lib/utils";
-import { sendOrganizerPayoutStatusEmail } from "../lib/email";
-import { getDefaultCommissionRate, computeCommissionBreakdown } from "../lib/commission";
-import { findTicketsByReference, confirmPaymentForTickets } from "../lib/paymentConfirmation";
+import { isSupabaseEnabled, supabase, supabaseAdmin } from "../lib/config.js";
+import { getDB, saveDB } from "../lib/db.js";
+import { requireAuth, requireRole } from "../lib/auth.js";
+import { runInBackground } from "../lib/utils.js";
+import { sendOrganizerPayoutStatusEmail } from "../lib/email.js";
+import { getDefaultCommissionRate, computeCommissionBreakdown } from "../lib/commission.js";
+import { findTicketsByReference, confirmPaymentForTickets } from "../lib/paymentConfirmation.js";
 
 const router = express.Router();
 

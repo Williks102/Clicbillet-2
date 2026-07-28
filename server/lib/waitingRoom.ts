@@ -1,4 +1,4 @@
-import { isSupabaseEnabled, supabase } from "./config";
+import { isSupabaseEnabled, supabase } from "./config.js";
 
 // ==========================================
 // SALLE D'ATTENTE VIRTUELLE (pics de trafic billetterie)

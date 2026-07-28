@@ -1,4 +1,4 @@
-import { supabase } from "./config";
+import { supabase } from "./config.js";
 
 export const DEFAULT_TICKET_COMMISSION_RATE = 0.10;
 

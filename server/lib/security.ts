@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import express from "express";
-import { PAYMENT_PRO_CALLBACK_SECRET, PAYMENT_PRO_CALLBACK_ORIGIN, PAYMENT_WEBHOOK_SECRET } from "./config";
+import { PAYMENT_PRO_CALLBACK_SECRET, PAYMENT_PRO_CALLBACK_ORIGIN, PAYMENT_WEBHOOK_SECRET } from "./config.js";
 
 export function getPaymentSignature(req: express.Request): string | null {
   const headerValue = req.headers["x-paiementpro-signature"] || req.headers["x-signature"] || req.headers["x-webhook-signature"];

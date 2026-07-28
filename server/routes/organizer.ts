@@ -1,10 +1,10 @@
 import express from "express";
-import { supabase, supabaseAdmin } from "../lib/config";
-import { getDB, saveDB } from "../lib/db";
-import { requireRole } from "../lib/auth";
-import { runInBackground } from "../lib/utils";
-import { sendAdminPayoutRequestEmail } from "../lib/email";
-import { getDefaultCommissionRate, computeCommissionBreakdown } from "../lib/commission";
+import { supabase, supabaseAdmin } from "../lib/config.js";
+import { getDB, saveDB } from "../lib/db.js";
+import { requireRole } from "../lib/auth.js";
+import { runInBackground } from "../lib/utils.js";
+import { sendAdminPayoutRequestEmail } from "../lib/email.js";
+import { getDefaultCommissionRate, computeCommissionBreakdown } from "../lib/commission.js";
 
 const router = express.Router();
 

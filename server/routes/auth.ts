@@ -1,13 +1,13 @@
 import express from "express";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
-import { isSupabaseEnabled, supabase, supabaseAdmin, createEphemeralAuthClient } from "../lib/config";
-import { getDB, saveDB } from "../lib/db";
-import { runInBackground } from "../lib/utils";
-import { sendWelcomeEmail, sendAdminNewOrganizerEmail, sendPasswordResetEmail } from "../lib/email";
-import { buildAppOrigin } from "../lib/security";
-import { loginRateLimiter, forgotPasswordRateLimiter } from "../lib/rateLimiters";
-import { validateRegister, validateLogin, validateForgotPassword, validateResetPassword } from "../lib/validators";
+import { isSupabaseEnabled, supabase, supabaseAdmin, createEphemeralAuthClient } from "../lib/config.js";
+import { getDB, saveDB } from "../lib/db.js";
+import { runInBackground } from "../lib/utils.js";
+import { sendWelcomeEmail, sendAdminNewOrganizerEmail, sendPasswordResetEmail } from "../lib/email.js";
+import { buildAppOrigin } from "../lib/security.js";
+import { loginRateLimiter, forgotPasswordRateLimiter } from "../lib/rateLimiters.js";
+import { validateRegister, validateLogin, validateForgotPassword, validateResetPassword } from "../lib/validators.js";
 
 const router = express.Router();
 

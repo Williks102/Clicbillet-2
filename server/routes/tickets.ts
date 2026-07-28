@@ -1,15 +1,15 @@
 import express from "express";
-import { isSupabaseEnabled, supabase } from "../lib/config";
-import { getDB, saveDB } from "../lib/db";
-import { requireAuth, requireRole, optionalAuth } from "../lib/auth";
-import { validateCheckout, validateVerifyTicket } from "../lib/validators";
-import { runInBackground, isEventPast } from "../lib/utils";
-import { sendOrganizerSaleEmail, sendTicketEmail } from "../lib/email";
-import { buildWebhookNotificationUrl, corsAllowedOrigin, getWebhookSecretFromRequest, verifyPaymentSignature } from "../lib/security";
-import { checkoutRateLimiter } from "../lib/rateLimiters";
-import { getWaitingRoomEventConfig, advanceAndGetWaitingRoomStatus } from "../lib/waitingRoom";
-import { normalizeReferenceIdentifier, findTicketsByReference, confirmPaymentForTickets, notifyPaymentFailedForTickets } from "../lib/paymentConfirmation";
-import { PAYMENT_WEBHOOK_SECRET, PAYMENT_PRO_CALLBACK_SECRET } from "../lib/config";
+import { isSupabaseEnabled, supabase } from "../lib/config.js";
+import { getDB, saveDB } from "../lib/db.js";
+import { requireAuth, requireRole, optionalAuth } from "../lib/auth.js";
+import { validateCheckout, validateVerifyTicket } from "../lib/validators.js";
+import { runInBackground, isEventPast } from "../lib/utils.js";
+import { sendOrganizerSaleEmail, sendTicketEmail } from "../lib/email.js";
+import { buildWebhookNotificationUrl, corsAllowedOrigin, getWebhookSecretFromRequest, verifyPaymentSignature } from "../lib/security.js";
+import { checkoutRateLimiter } from "../lib/rateLimiters.js";
+import { getWaitingRoomEventConfig, advanceAndGetWaitingRoomStatus } from "../lib/waitingRoom.js";
+import { normalizeReferenceIdentifier, findTicketsByReference, confirmPaymentForTickets, notifyPaymentFailedForTickets } from "../lib/paymentConfirmation.js";
+import { PAYMENT_WEBHOOK_SECRET, PAYMENT_PRO_CALLBACK_SECRET } from "../lib/config.js";
 
 const router = express.Router();
 

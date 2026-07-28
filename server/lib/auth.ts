@@ -1,6 +1,6 @@
 import express from "express";
-import { isSupabaseEnabled, supabase } from "./config";
-import { getDB } from "./db";
+import { isSupabaseEnabled, supabase } from "./config.js";
+import { getDB } from "./db.js";
 
 export function extractBearerToken(req: express.Request): string | null {
   const authHeader = req.headers.authorization;
