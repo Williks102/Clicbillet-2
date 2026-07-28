@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import bcrypt from "bcryptjs";
-import { LOCAL_ADMIN_PASSWORD, LOCAL_CLIENT_PASSWORD, LOCAL_ORGANIZER_PASSWORD } from "./config";
+import { LOCAL_ADMIN_PASSWORD, LOCAL_CLIENT_PASSWORD, LOCAL_ORGANIZER_PASSWORD } from "./config.js";
 
 // Path to durable local JSON Database
 export const DB_FILE = path.join(process.cwd(), "db.json");

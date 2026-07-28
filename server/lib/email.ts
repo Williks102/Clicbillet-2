@@ -1,4 +1,4 @@
-import { RESEND_API_KEY, RESEND_FROM_EMAIL, ADMIN_NOTIFICATION_EMAIL } from "./config";
+import { RESEND_API_KEY, RESEND_FROM_EMAIL, ADMIN_NOTIFICATION_EMAIL } from "./config.js";
 
 // ==========================================
 // SERVICE D'ENVOI D'EMAILS (Resend)

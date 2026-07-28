@@ -1,8 +1,8 @@
 import express from "express";
-import { SUPABASE_WEBHOOK_SECRET } from "../lib/config";
-import { extractBearerToken } from "../lib/auth";
-import { runInBackground } from "../lib/utils";
-import { sendWelcomeEmail, sendAdminNewOrganizerEmail } from "../lib/email";
+import { SUPABASE_WEBHOOK_SECRET } from "../lib/config.js";
+import { extractBearerToken } from "../lib/auth.js";
+import { runInBackground } from "../lib/utils.js";
+import { sendWelcomeEmail, sendAdminNewOrganizerEmail } from "../lib/email.js";
 
 const router = express.Router();
 

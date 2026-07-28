@@ -1,8 +1,8 @@
-import { isSupabaseEnabled, supabase } from "./config";
-import { getDB, saveDB } from "./db";
-import { runInBackground } from "./utils";
-import { sendTicketEmail, sendPaymentFailedEmail } from "./email";
-import { releaseWaitingRoomSlot } from "./waitingRoom";
+import { isSupabaseEnabled, supabase } from "./config.js";
+import { getDB, saveDB } from "./db.js";
+import { runInBackground } from "./utils.js";
+import { sendTicketEmail, sendPaymentFailedEmail } from "./email.js";
+import { releaseWaitingRoomSlot } from "./waitingRoom.js";
 
 // Callback / Webhook endpoint pour recevoir les notifications de Paiement Pro (CI)
 export function normalizeReferenceIdentifier(value: any): string | null {
