@@ -20,6 +20,14 @@ export const RESEND_FROM_EMAIL = (process.env.RESEND_FROM_EMAIL || "ClicBillet <
 export const ADMIN_NOTIFICATION_EMAIL = (process.env.ADMIN_NOTIFICATION_EMAIL || "admin@monticket.online").trim();
 export const SUPABASE_WEBHOOK_SECRET = (process.env.SUPABASE_WEBHOOK_SECRET || "").trim();
 
+// Secret injecté automatiquement par Vercel Cron dans le header Authorization ("Bearer <secret>")
+// pour authentifier ses propres appels programmés — cf. /api/cron/expire-pending-tickets.
+export const CRON_SECRET = (process.env.CRON_SECRET || "").trim();
+
+// Délai au-delà duquel un billet resté "PENDING-" (paiement jamais confirmé ni explicitement
+// échoué) est considéré abandonné et annulé automatiquement, libérant l'inventaire réservé.
+export const PENDING_TICKET_EXPIRY_MINUTES = Number(process.env.PENDING_TICKET_EXPIRY_MINUTES) || 30;
+
 // Le serveur n'utilise que la clé service_role : toutes les routes qui touchent à des
 // données sensibles sont déjà protégées par requireAuth/requireRole côté Express, donc un
 // client "anon" séparé (qui ne ferait que retomber sur service_role en pratique) n'apporte

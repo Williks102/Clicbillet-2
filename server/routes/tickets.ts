@@ -4,12 +4,12 @@ import { getDB, saveDB } from "../lib/db.js";
 import { requireAuth, requireRole, optionalAuth } from "../lib/auth.js";
 import { validateCheckout, validateVerifyTicket } from "../lib/validators.js";
 import { runInBackground, isEventPast } from "../lib/utils.js";
-import { sendOrganizerSaleEmail, sendTicketEmail } from "../lib/email.js";
+import { sendOrganizerSaleEmail, sendTicketEmail, sendReservationExpiredEmail } from "../lib/email.js";
 import { verifyPaystackSignature } from "../lib/security.js";
 import { checkoutRateLimiter } from "../lib/rateLimiters.js";
-import { getWaitingRoomEventConfig, advanceAndGetWaitingRoomStatus } from "../lib/waitingRoom.js";
-import { normalizeReferenceIdentifier, findTicketsByReference, confirmPaymentForTickets, notifyPaymentFailedForTickets } from "../lib/paymentConfirmation.js";
-import { PAYSTACK_SECRET_KEY, PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL } from "../lib/config.js";
+import { getWaitingRoomEventConfig, advanceAndGetWaitingRoomStatus, releaseWaitingRoomSlot } from "../lib/waitingRoom.js";
+import { normalizeReferenceIdentifier, findTicketsByReference, confirmPaymentForTickets, notifyPaymentFailedForTickets, ticketEmailShape, groupTicketsByOrder } from "../lib/paymentConfirmation.js";
+import { PAYSTACK_SECRET_KEY, PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL, CRON_SECRET, PENDING_TICKET_EXPIRY_MINUTES } from "../lib/config.js";
 
 const router = express.Router();
 const PAYSTACK_API_BASE = "https://api.paystack.co";
@@ -603,6 +603,92 @@ router.post("/api/payment/verify", checkoutRateLimiter, async (req: express.Requ
   }
 
   res.json({ success: false, status: paystackStatus });
+});
+
+// Annule automatiquement les billets restés "PENDING-" (paiement jamais confirmé ni
+// explicitement échoué) au-delà de PENDING_TICKET_EXPIRY_MINUTES, et libère l'inventaire
+// qu'ils réservaient — sans cette expiration, un panier abandonné bloque des places pour
+// toujours puisque tickets_sold n'est jamais décrémenté ailleurs. Appelée par Vercel Cron
+// (cf. vercel.json), qui injecte automatiquement Authorization: Bearer <CRON_SECRET>.
+router.get("/api/cron/expire-pending-tickets", async (req: express.Request, res: express.Response) => {
+  if (CRON_SECRET && req.headers.authorization !== `Bearer ${CRON_SECRET}`) {
+    return res.status(401).json({ error: "Non autorisé." });
+  }
+
+  const cutoffIso = new Date(Date.now() - PENDING_TICKET_EXPIRY_MINUTES * 60 * 1000).toISOString();
+
+  if (isSupabaseEnabled && supabase) {
+    const { data: staleTickets, error } = await supabase
+      .from("tickets")
+      .select("*")
+      .like("transaction_ref", "PENDING-%")
+      .lt("purchase_date", cutoffIso);
+
+    if (error) {
+      console.error("[Cron] Erreur récupération billets PENDING expirés:", error.message);
+      return res.status(500).json({ error: "Erreur lors de la récupération des billets expirés." });
+    }
+
+    if (!staleTickets || staleTickets.length === 0) {
+      return res.json({ expired: 0 });
+    }
+
+    // Une décrémentation par événement (pas par billet) pour limiter les allers-retours,
+    // sur le même modèle que l'incrémentation faite à la création de la commande.
+    const qtyByEvent: Record<string, number> = {};
+    for (const t of staleTickets) {
+      qtyByEvent[t.event_id] = (qtyByEvent[t.event_id] || 0) + Number(t.quantity || 1);
+    }
+    for (const [eventId, qty] of Object.entries(qtyByEvent)) {
+      const { data: event } = await supabase.from("events").select("tickets_sold").eq("id", eventId).maybeSingle();
+      if (event) {
+        const newCount = Math.max(0, Number(event.tickets_sold || 0) - qty);
+        await supabase.from("events").update({ tickets_sold: newCount }).eq("id", eventId);
+      }
+    }
+
+    for (const t of staleTickets) {
+      const newRef = String(t.transaction_ref).replace("PENDING-", "EXPIRED-");
+      await supabase.from("tickets").update({ transaction_ref: newRef }).eq("id", t.id);
+      runInBackground(releaseWaitingRoomSlot(t.event_id, t.buyer_id));
+    }
+
+    const shaped = staleTickets.map((t: any) => ticketEmailShape({ source: "supabase" as const, raw: t }));
+    for (const group of groupTicketsByOrder(shaped)) {
+      runInBackground(sendReservationExpiredEmail(group[0]));
+    }
+
+    console.log(`[Cron] ${staleTickets.length} billet(s) PENDING expiré(s) (délai ${PENDING_TICKET_EXPIRY_MINUTES} min).`);
+    return res.json({ expired: staleTickets.length });
+  }
+
+  const db = getDB();
+  const stale = (db.tickets || []).filter((t: any) =>
+    String(t.transactionRef || "").startsWith("PENDING-") && new Date(t.purchaseDate) < new Date(cutoffIso)
+  );
+
+  if (stale.length === 0) {
+    return res.json({ expired: 0 });
+  }
+
+  const qtyByEventLocal: Record<string, number> = {};
+  for (const t of stale) {
+    qtyByEventLocal[t.eventId] = (qtyByEventLocal[t.eventId] || 0) + Number(t.quantity || 1);
+    t.transactionRef = t.transactionRef.replace("PENDING-", "EXPIRED-");
+  }
+  for (const event of db.events || []) {
+    if (qtyByEventLocal[event.id]) {
+      event.ticketsSold = Math.max(0, event.ticketsSold - qtyByEventLocal[event.id]);
+    }
+  }
+  saveDB(db);
+
+  for (const group of groupTicketsByOrder(stale)) {
+    runInBackground(sendReservationExpiredEmail(group[0]));
+  }
+
+  console.log(`[Cron] ${stale.length} billet(s) PENDING expiré(s) (local, délai ${PENDING_TICKET_EXPIRY_MINUTES} min).`);
+  res.json({ expired: stale.length });
 });
 
 router.post("/api/dev/simulate-payment", async (req: express.Request, res: express.Response) => {
