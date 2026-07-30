@@ -82,33 +82,6 @@ export default function App() {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
-    if (params.get("payment_success") === "true") {
-      const orderId = params.get("order_id");
-      const finishPaymentReturn = () => {
-        window.history.replaceState({}, document.title, window.location.pathname);
-        window.dispatchEvent(new CustomEvent("refresh_tickets"));
-        if (user?.role === "client") {
-          setActiveTab("client-dashboard");
-        } else {
-          setActiveTab("home");
-        }
-      };
-
-      if ((import.meta as any).env?.DEV && orderId) {
-        console.log("Validation du paiement post-redirection en développement pour la commande :", orderId);
-        fetch("/api/dev/simulate-payment", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ referenceNumber: orderId })
-        }).then(() => {
-          finishPaymentReturn();
-        }).catch(e => console.error("Could not simulate redirect payment:", e));
-      } else {
-        finishPaymentReturn();
-      }
-    }
   }, [user]);
 
   useEffect(() => {
@@ -124,7 +97,7 @@ export default function App() {
 
   // Confirmation de paiement instantanée : on s'abonne aux changements de SES PROPRES
   // tickets via Supabase Realtime (policy "tickets_select_own", scoped à buyer_id = auth.uid()).
-  // Dès qu'un ticket passe de PENDING- à PAID- (confirmé par le webhook PaiementPro côté
+  // Dès qu'un ticket passe de PENDING- à PAID- (confirmé par le webhook Paystack côté
   // serveur), on affiche un toast et on rafraîchit la liste de billets affichée.
   useEffect(() => {
     if (!supabaseClient || !user?.id || !user?.token) return;

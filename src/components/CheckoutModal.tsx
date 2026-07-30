@@ -27,7 +27,6 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
   // sélectionnés simultanément dans la même commande (ex: 2 Standard + 1 VIP).
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [method, setMethod] = useState<PaymentMethod>("orange_money");
-  const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
 
   // Payment details state
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -86,7 +85,7 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
     setError(null);
 
     // Dynamic field validation before processing starts.
-    // Les commandes gratuites ne doivent jamais passer par la passerelle PaiementPro :
+    // Les commandes gratuites ne doivent jamais passer par la passerelle Paystack :
     // elles sont confirmées côté serveur et les billets sont envoyés immédiatement.
     if (!isFreeOrder && method !== "card" && method !== "wave") {
       // Mobile money number must be valid 10-digit number
@@ -150,94 +149,86 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
       }
 
       if (isFreeOrder) {
-        setPaymentUrl(null);
         window.dispatchEvent(new CustomEvent("refresh_tickets"));
         setStep("success");
         onSuccess(data.tickets);
         return;
       }
 
-      // INTEGRATION PAIEMENT PRO (CÔTE D'IVOIRE)
-      // diagContext garde la trace de ce qui a été tenté, pour pouvoir comprendre
-      // un échec a posteriori (console du navigateur) sans avoir à reproduire le bug.
-      const diagContext: Record<string, unknown> = { orderId: data.orderId, method };
-      let paymentFailureReason: string | null = null;
-
-      try {
-        const merchantId = (import.meta as any).env.VITE_PAIEMENT_PRO_MERCHANT_ID || "ID_MARCHAND_DEMO";
-        const LibPaiementPro = (window as any).PaiementPro;
-        diagContext.merchantId = merchantId;
-        diagContext.sdkLoaded = !!LibPaiementPro;
-        diagContext.sdkIsFallback = !!LibPaiementPro?.isFallback;
-
-        if (LibPaiementPro) {
-          console.log("[PaiementPro] Initialisation du SDK avec l'ID marchand :", merchantId);
-          const pPro = new LibPaiementPro(merchantId);
-
-          pPro.amount = totalPrice;
-
-          // Mappage des canaux vers les codes officiels de Côte d'Ivoire (CI)
-          const channelMapping: Record<string, string> = {
-            orange_money: "OMCIV2",
-            mtn_momo: "MOMOCI",
-            moov_money: "FLOOZ",
-            wave: "WAVECI",
-            card: "CARD"
-          };
-          pPro.channel = channelMapping[method] || "WAVECI";
-
-          // Référence de la commande (peut regrouper plusieurs types de billets)
-          pPro.referenceNumber = data.orderId || `ORD-${Date.now()}`;
-          pPro.customerEmail = buyerEmail || "customer@example.com";
-
-          const nameParts = buyerName.trim().split(/\s+/);
-          pPro.customerLastname = nameParts[0] || "Client";
-          pPro.customerFirstName = nameParts.slice(1).join(" ") || "Billet";
-
-          pPro.customerPhoneNumber = buyerPhone || "0700000000";
-          pPro.description = `${selectedItems.map((item) => `${item.qty}x ${item.name}`).join(", ")} - ${event.title}`;
-
-          pPro.notificationURL = data.notificationUrl || `${window.location.origin}/api/payment/callback`;
-          pPro.returnURL = `${window.location.origin}/?payment_success=true&order_id=${data.orderId}`;
-          pPro.returnContext = JSON.stringify({ orderId: data.orderId, userId: user?.id ?? null, guestEmail: isGuest ? buyerEmail : null });
-
-          try {
-            await pPro.getUrlPayment();
-          } catch (callErr: any) {
-            // Le SDK PaiementPro échoue silencieusement en cas de coupure réseau ou de
-            // réponse non-JSON du gateway : on capture explicitement pour le diagnostic.
-            diagContext.getUrlPaymentError = callErr?.message || String(callErr);
-            console.error("[PaiementPro] Échec de l'appel getUrlPayment()", diagContext, callErr);
-            throw new Error("La passerelle de paiement n'a pas répondu. Réessayez dans quelques instants.");
+      // Confirme le paiement auprès de notre serveur (qui revérifie auprès de Paystack via
+      // GET /transaction/verify, seule source de vérité) juste après que le popup ait renvoyé
+      // sa référence. Le webhook /api/webhooks/paystack fait la même confirmation de façon
+      // asynchrone (idempotente) si l'utilisateur ferme l'onglet avant que cet appel n'aboutisse.
+      async function verifyAndFinish(reference: string) {
+        try {
+          const verifyRes = await fetch("/api/payment/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reference })
+          });
+          const verifyBody = await verifyRes.json();
+          if (verifyRes.ok && verifyBody.success) {
+            window.dispatchEvent(new CustomEvent("refresh_tickets"));
+            setStep("success");
+            onSuccess(data.tickets);
+            return;
           }
-
-          diagContext.pProSuccess = pPro.success;
-          diagContext.pProUrl = pPro.url;
-
-          if (pPro.success && pPro.url) {
-            console.log("[PaiementPro] Lien de paiement généré :", pPro.url);
-            setPaymentUrl(pPro.url);
-
-            // Rediriger la page courante vers la passerelle de paiement
-            window.location.href = pPro.url;
-            return; // on arrête le JS ici puisque l'on quitte la page
-          }
-
-          console.error("[PaiementPro] Initialisation refusée par la passerelle (success=false).", diagContext);
-          paymentFailureReason = "La passerelle de paiement a refusé d'initialiser la transaction. Vérifiez vos informations ou réessayez.";
-        } else {
-          console.error("[PaiementPro] SDK non chargé globalement dans l'index.html.", diagContext);
-          paymentFailureReason = "Le module de paiement n'a pas pu être chargé (connexion réseau ?). Veuillez réessayer.";
+          console.error("[Paystack] Vérification refusée", verifyBody);
+          setError("Le paiement n'a pas pu être confirmé. Vérifiez vos billets dans quelques instants ou contactez le support.");
+          setStep("details");
+        } catch (verifyErr) {
+          console.error("[Paystack] Erreur réseau lors de la vérification", verifyErr);
+          setError("Erreur réseau lors de la vérification du paiement.");
+          setStep("details");
         }
-      } catch (sdkErr: any) {
-        console.error("[PaiementPro SDK Integration Error]", diagContext, sdkErr);
-        paymentFailureReason = sdkErr?.message || "Une erreur technique est survenue lors de l'initialisation du paiement.";
       }
 
-      // Le SDK n'a pas pu rediriger vers une vraie passerelle de paiement : on tente le
-      // déblocage de secours réservé au développement (route 404 en production, par design
-      // anti-fraude — cf. /api/dev/simulate-payment). On n'affiche un succès que si cet appel
-      // confirme réellement le billet ; sinon on remonte l'erreur à l'utilisateur.
+      // INTEGRATION PAYSTACK (popup Inline)
+      const publicKey = (import.meta as any).env.VITE_PAYSTACK_PUBLIC_KEY;
+      const PaystackPop = (window as any).PaystackPop;
+
+      if (publicKey && PaystackPop) {
+        // Le paramètre "channels" de Paystack ne filtre qu'au niveau du type de moyen de
+        // paiement (carte vs mobile money) : le choix précis de l'opérateur (Orange/MTN/Moov/
+        // Wave) se fait ensuite dans le popup Paystack lui-même.
+        const channels = method === "card" ? ["card"] : ["mobile_money"];
+
+        try {
+          const handler = PaystackPop.setup({
+            key: publicKey,
+            email: buyerEmail || "customer@example.com",
+            amount: Math.round(totalPrice * 100), // Paystack exige un montant en sous-unité, même pour le XOF
+            currency: "XOF",
+            ref: data.orderId,
+            channels,
+            metadata: {
+              orderId: data.orderId,
+              eventTitle: event.title,
+              buyerName,
+              buyerPhone
+            },
+            callback: (response: any) => {
+              verifyAndFinish(response.reference);
+            },
+            onClose: () => {
+              setError("Paiement annulé. Vous pouvez réessayer.");
+              setStep("details");
+            }
+          });
+          handler.openIframe();
+          return; // La suite se joue dans callback/onClose ci-dessus
+        } catch (sdkErr: any) {
+          console.error("[Paystack] Erreur d'initialisation du popup", sdkErr);
+          setError("Le module de paiement n'a pas pu être initialisé. Réessayez.");
+          setStep("details");
+          return;
+        }
+      }
+
+      // Pas de clé publique Paystack configurée (typiquement en développement local sans
+      // compte Paystack) : on retombe sur le déblocage de secours réservé au développement
+      // (route 404 en production, par design anti-fraude — cf. /api/dev/simulate-payment).
+      console.error("[Paystack] Clé publique manquante ou SDK non chargé : VITE_PAYSTACK_PUBLIC_KEY absent ?");
       try {
         const simRes = await fetch("/api/dev/simulate-payment", {
           method: "POST",
@@ -247,24 +238,18 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
 
         if (simRes.ok) {
           window.dispatchEvent(new CustomEvent("refresh_tickets"));
-          paymentFailureReason = null;
-        } else {
-          const simBody = await simRes.text().catch(() => "");
-          console.error("[Simulation paiement] Refusée par le serveur", { status: simRes.status, simBody, ...diagContext });
+          setStep("success");
+          onSuccess(data.tickets);
+          return;
         }
+        const simBody = await simRes.text().catch(() => "");
+        console.error("[Simulation paiement] Refusée par le serveur", { status: simRes.status, simBody });
       } catch (simErr) {
-        console.error("[Simulation paiement] Erreur réseau", diagContext, simErr);
+        console.error("[Simulation paiement] Erreur réseau", simErr);
       }
 
-      if (paymentFailureReason) {
-        setError(paymentFailureReason);
-        setStep("details");
-        return;
-      }
-
-      // Checkout Success! Go to step 4
-      setStep("success");
-      onSuccess(data.tickets);
+      setError("Le module de paiement Paystack n'est pas configuré (VITE_PAYSTACK_PUBLIC_KEY manquant).");
+      setStep("details");
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Erreur de connexion.");
@@ -417,7 +402,7 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
 
               {isFreeOrder ? (
                 <div className="rounded-xl border border-green-100 bg-green-50 p-4 text-xs font-semibold leading-relaxed text-green-700">
-                  Cette inscription est gratuite : cliquez sur confirmer pour générer vos QR codes sans ouvrir Paiement Pro.
+                  Cette inscription est gratuite : cliquez sur confirmer pour générer vos QR codes sans passer par Paystack.
                 </div>
               ) : method !== "card" ? (
                 /* Mobile Money Inputs (Orange Money, MTN, Moov, Wave) */
@@ -516,12 +501,11 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
                 </div>
               )}
 
-              {/* Affichage de l'ID marchand Paiement Pro configure */}
               {!isFreeOrder && (
                 <div className="p-3 bg-orange-50/20 border border-orange-150/20 rounded-2xl space-y-1">
                   <div className="flex items-center justify-between text-[10px] text-gray-500 font-semibold">
                     <span>Passerelle Actrice :</span>
-                    <span className="text-orange-600 font-extrabold uppercase">Paiement Pro (CI)</span>
+                    <span className="text-orange-600 font-extrabold uppercase">Paystack</span>
                   </div>
                 </div>
               )}
@@ -571,17 +555,15 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
                 <Check className="h-7 w-7" strokeWidth={3} />
               </div>
               <div>
-                <h4 className="text-base font-black text-gray-900">{isFreeOrder ? "Inscription Gratuite Confirmée !" : "Commande Initiale Validée !"}</h4>
+                <h4 className="text-base font-black text-gray-900">{isFreeOrder ? "Inscription Gratuite Confirmée !" : "Paiement Confirmé !"}</h4>
                 {isFreeOrder ? (
                   <p className="text-xs text-gray-500 mt-1 pb-1">
                     Vos billets gratuits avec QR codes ont été confirmés et envoyés à <strong className="text-orange-600">{buyerEmail}</strong>.
                   </p>
-                ) : isGuest ? (
-                  <p className="text-xs text-gray-500 mt-1 pb-1">
-                    Vos billets (avec QR codes) seront envoyés à <strong className="text-orange-600">{buyerEmail}</strong> après confirmation du paiement.
-                  </p>
                 ) : (
-                  <p className="text-xs text-gray-500 mt-1 pb-1">Vos billets ont été configurés avec succès dans votre espace.</p>
+                  <p className="text-xs text-gray-500 mt-1 pb-1">
+                    Votre paiement a été confirmé par Paystack. Vos billets (avec QR codes) ont été envoyés à <strong className="text-orange-600">{buyerEmail}</strong>.
+                  </p>
                 )}
               </div>
 
@@ -589,30 +571,15 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
                 <div className="p-4 bg-green-50 border border-green-100 rounded-2xl w-full text-xs font-semibold text-green-700">
                   Aucun paiement n'a été demandé : la commande gratuite est validée directement.
                 </div>
-              ) : paymentUrl ? (
-                <div className="p-4 bg-orange-50 border border-orange-100 rounded-2xl w-full space-y-3">
-                  <p className="text-xs text-orange-850 font-semibold leading-relaxed">
-                    Une passerelle sécurisée <strong className="text-orange-600">Paiement Pro (CI)</strong> a été initiée pour effectuer le transfert. Si la page ne s'est pas ouverte automatiquement, cliquez ci-dessous :
-                  </p>
-                  <a
-                    href={paymentUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex w-full justify-center items-center rounded-xl bg-orange-600 px-4 py-3 text-xs font-black text-white hover:bg-orange-700 transition shadow-md shadow-orange-100"
-                    id="paiement-pro-direct-link"
-                  >
-                    Ouvrir le guichet Paiement Pro
-                  </a>
-                </div>
               ) : (
-                <div className="p-4 bg-gray-50 border border-gray-150 rounded-2xl w-full text-xs text-gray-500">
-                  Transaction simulée terminée avec succès.
+                <div className="p-4 bg-green-50 border border-green-100 rounded-2xl w-full text-xs font-semibold text-green-700">
+                  Transaction validée par Paystack. Vos billets sont prêts.
                 </div>
               )}
 
               {!isFreeOrder && (
                 <div className="text-[10px] text-gray-450 font-medium tracking-wide">
-                  Passerelle : <strong className="text-gray-600">Paiement Pro (CI)</strong>
+                  Passerelle : <strong className="text-gray-600">Paystack</strong>
                 </div>
               )}
 

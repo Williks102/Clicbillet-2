@@ -28,8 +28,8 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: isProduction
-        ? ["'self'", "https://paiementpro.net"]
-        : ["'self'", "'unsafe-inline'", "https://paiementpro.net"],
+        ? ["'self'", "https://js.paystack.co"]
+        : ["'self'", "'unsafe-inline'", "https://js.paystack.co"],
       connectSrc: ["'self'", `ws://127.0.0.1:${HMR_PORT}`, `ws://localhost:${HMR_PORT}`, ...PAYMENT_GATEWAY_ORIGINS, ...SUPABASE_REALTIME_ORIGINS],
       styleSrc: ["'self'", "https:", "'unsafe-inline'"],
       imgSrc: ["'self'", "https:", "data:"],
@@ -42,7 +42,7 @@ app.use(helmet({
       upgradeInsecureRequests: [],
     },
   },
-  // Le SDK Paiement Pro est chargé en cross-origin sans header CORP ; le COEP par défaut
+  // Le SDK Paystack Inline est chargé en cross-origin sans header CORP ; le COEP par défaut
   // de helmet ("require-corp") le bloque silencieusement (NotSameOriginAfterDefaultedToSameOriginByCoep).
   crossOriginEmbedderPolicy: false,
 }));

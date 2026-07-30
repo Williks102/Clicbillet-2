@@ -9,9 +9,12 @@ dotenv.config();
 
 export const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
 export const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
-export const PAYMENT_PRO_CALLBACK_SECRET = (process.env.PAYMENT_PRO_CALLBACK_SECRET || "").trim();
-export const PAYMENT_WEBHOOK_SECRET = (process.env.PAYMENT_WEBHOOK_SECRET || "").trim();
-export const PAYMENT_PRO_CALLBACK_ORIGIN = (process.env.PAYMENT_PRO_CALLBACK_ORIGIN || "https://paiementpro.net").trim();
+export const PAYSTACK_SECRET_KEY = (process.env.PAYSTACK_SECRET_KEY || "").trim();
+// Paystack n'autorise qu'UNE SEULE URL de webhook par compte marchand (limitation Paystack,
+// pas la nôtre) — ce compte étant partagé avec une autre application, tout événement dont la
+// référence n'utilise pas notre préfixe "ORD-" est relayé tel quel vers cette URL plutôt que
+// traité ou perdu (cf. server/routes/tickets.ts, /api/webhooks/paystack).
+export const PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL = (process.env.PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL || "").trim();
 export const RESEND_API_KEY = (process.env.RESEND_API_KEY || "").trim();
 export const RESEND_FROM_EMAIL = (process.env.RESEND_FROM_EMAIL || "ClicBillet <no-reply@monticket.online>").trim();
 export const ADMIN_NOTIFICATION_EMAIL = (process.env.ADMIN_NOTIFICATION_EMAIL || "admin@monticket.online").trim();
@@ -56,18 +59,16 @@ if (!isSupabaseEnabled && process.env.NODE_ENV === "production") {
 export const PORT = Number(process.env.PORT) || 3000;
 export const HMR_PORT = Number(process.env.HMR_PORT || process.env.WS_PORT) || 24678;
 
+// Domaines Paystack : js.paystack.co sert le SDK Inline, api.paystack.co reçoit les appels
+// XHR du popup, checkout.paystack.com/standard.paystack.co hébergent l'iframe affichée pour
+// la saisie carte/OTP/3-D Secure pendant la transaction.
 export const PAYMENT_GATEWAY_ORIGINS = [
   "https://monticket.online",
   "https://www.monticket.online",
-  "https://*.paiementpro.net",
-  "https://paiementpro.net",
-  "https://mpayment.orange-money.com",
-  "https://multi.app.orange-money.com",
-  "https://maxit-link.com",
-  "https://pay.wave.com",
-  "https://www.wave.com",
-  "https://*.confirm.wave.com",
-  "https://promo.wave.com",
+  "https://js.paystack.co",
+  "https://api.paystack.co",
+  "https://checkout.paystack.com",
+  "https://standard.paystack.co",
 ];
 
 export const isProduction = process.env.NODE_ENV === "production";
