@@ -499,7 +499,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     <div className="space-y-8 py-6" id="organizer-dashboard-wrapper">
       
       {/* Header and Toggle Navigation */}
-      <section className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-100 pb-5">
+      <section className="space-y-4 border-b border-gray-100 pb-5">
         <div className="min-w-0">
           <h2 className="flex items-start gap-1.5 text-lg font-black text-gray-900 sm:items-center sm:text-xl">
             <LayoutDashboard className="mt-0.5 h-5 w-5 shrink-0 text-orange-600 sm:mt-0" />
@@ -510,7 +510,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
           </p>
         </div>
 
-        {/* Dash selector pills (desktop / large screens uniquement) */}
+        {/* Dash selector pills (desktop / large écrans uniquement), sur leur propre ligne
+            pleine largeur pour ne pas se faire écraser par un nom d'organisateur long. */}
         <div className="hidden lg:flex flex-wrap gap-2">
           <button
             id="orga-dashboard-view-tab"
@@ -616,7 +617,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
               <div>
                 <span className="text-[10px] font-black uppercase text-gray-400 font-sans tracking-wider block">Tickets Vendus</span>
                 <span className="text-xl font-extrabold text-gray-950 font-sans">
-                  {loadingStats ? "Chargement..." : `${stats?.ticketsSold || 0} tickets`}
+                  {loadingStats ? "Chargement..." : `${stats?.ticketsSold || 0} ticket${(stats?.ticketsSold || 0) > 1 ? "s" : ""}`}
                 </span>
               </div>
             </div>
@@ -1177,7 +1178,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             </button>
           </div>
         </form>
-      ) : (
+      ) : subTab === "simulator" ? (
         /* Sandbox Simulator Layout */
         <div className="grid gap-6 lg:grid-cols-3 animate-fade-in" id="orga-simulator-panel">
           {/* Simulator Controller Column Left */}
@@ -1390,7 +1391,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             )}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* OVERLAY EDIT EVENT MODAL */}
       {editingEvent && (
