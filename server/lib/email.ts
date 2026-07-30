@@ -148,6 +148,24 @@ export async function sendPaymentFailedEmail(ticket: any): Promise<void> {
   });
 }
 
+// --- Acheteur : réservation expirée faute de paiement dans les temps ---
+export function buildReservationExpiredHtml(ticket: any): string {
+  return emailLayout("Votre réservation a expiré", `
+    <p>Bonjour ${ticket.buyerName || ticket.buyer_name},</p>
+    <p>Votre réservation pour l'événement <strong>${ticket.eventTitle || ticket.event_title}</strong> a expiré car le paiement n'a pas été finalisé dans le délai imparti.</p>
+    <p>Aucun montant n'a été débité. Les places ont été remises en vente ; vous pouvez retenter votre achat depuis la plateforme si des billets sont encore disponibles.</p>
+  `);
+}
+
+export async function sendReservationExpiredEmail(ticket: any): Promise<void> {
+  const to = ticket.buyerEmail || ticket.buyer_email;
+  await sendEmail({
+    to,
+    subject: `Votre réservation pour ${ticket.eventTitle || ticket.event_title} a expiré`,
+    html: buildReservationExpiredHtml(ticket)
+  });
+}
+
 // --- Organisateur : nouvelle vente ---
 export function buildOrganizerSaleHtml(eventTitle: string, organizerName: string, ticket: any): string {
   return emailLayout("Nouvelle vente de billet !", `
