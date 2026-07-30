@@ -2,15 +2,15 @@ import React, { useState, useEffect } from "react";
 import { User, Event, Ticket } from "../types";
 import {
   Building2, Users, Calendar, DollarSign, Trash2, ShieldCheck,
-  Search, ShieldAlert, Sparkles, LogOut, Ticket as TicketIcon, TrendingUp, Filter, Percent
+  Search, ShieldAlert, Sparkles, Ticket as TicketIcon, TrendingUp, Filter, Percent
 } from "lucide-react";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 import { isEventPast } from "../lib/eventStatus";
 import DashboardMobileMenu from "./DashboardMobileMenu";
+import CommissionSheet from "./CommissionSheet";
 
 interface AdminDashboardProps {
   user: User;
-  onLogout: () => void;
   onTokenRefresh: TokenRefreshHandler;
 }
 
@@ -49,7 +49,7 @@ const ADMIN_SUB_TAB_ICONS: Record<AdminSubTab, React.ReactNode> = {
   transactions: <TrendingUp className="h-4 w-4" />
 };
 
-export default function AdminDashboard({ user, onLogout, onTokenRefresh }: AdminDashboardProps) {
+export default function AdminDashboard({ user, onTokenRefresh }: AdminDashboardProps) {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [payouts, setPayouts] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -84,6 +84,7 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
     }
   };
   const [roleFilter, setRoleFilter] = useState("Tous");
+  const [commissionSheetEvent, setCommissionSheetEvent] = useState<Event | null>(null);
 
   async function fetchAdminData() {
     setLoading(true);
@@ -154,38 +155,18 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
     }
   }
 
-  async function handleUpdateCommission(evt: Event) {
-    const currentPercent = evt.commissionRate != null ? (evt.commissionRate * 100).toString() : "";
-    const input = window.prompt(
-      `Taux de commission pour "${evt.title}" (en %, ex: 15). Laisser vide pour revenir au taux par défaut de la plateforme.`,
-      currentPercent
-    );
-    if (input === null) return; // Annulé
-
-    let commissionRate: number | null = null;
-    if (input.trim() !== "") {
-      const percent = Number(input.replace(",", "."));
-      if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
-        alert("Taux invalide : entrez un nombre entre 0 et 100.");
-        return;
-      }
-      commissionRate = percent / 100;
+  async function handleSaveCommission(evt: Event, commissionRate: number | null) {
+    const response = await authFetch(`/api/admin/events/${evt.id}/commission`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ commissionRate })
+    }, user, onTokenRefresh);
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Erreur de mise à jour de la commission.");
     }
-
-    try {
-      const response = await authFetch(`/api/admin/events/${evt.id}/commission`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ commissionRate })
-      }, user, onTokenRefresh);
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Erreur de mise à jour de la commission.");
-      }
-      fetchAdminData();
-    } catch (err: any) {
-      alert(err.message || "Erreur lors de la mise à jour du taux de commission.");
-    }
+    setCommissionSheetEvent(null);
+    fetchAdminData();
   }
 
   async function handleDeleteUser(id: string) {
@@ -216,10 +197,140 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
   }) || [];
 
   const filteredTickets = stats?.tickets.filter(t => {
-    return t.eventTitle.toLowerCase().includes(ticketSearch.toLowerCase()) || 
+    return t.eventTitle.toLowerCase().includes(ticketSearch.toLowerCase()) ||
            t.buyerName.toLowerCase().includes(ticketSearch.toLowerCase()) ||
            t.transactionRef.toLowerCase().includes(ticketSearch.toLowerCase());
   }) || [];
+
+  // Fragments réutilisés entre la vue tableau (desktop) et la vue cartes (mobile) de l'onglet
+  // Événements, pour ne pas dupliquer la logique de statut/actions dans les deux rendus.
+  function eventStatusBadge(evt: Event) {
+    const isPast = evt.status === "approved" && isEventPast(evt);
+    if (evt.status === "pending") {
+      return <span className="px-2 py-1 bg-amber-50 text-amber-600 rounded-md text-[10px] font-bold uppercase border border-amber-200 shrink-0">En Attente</span>;
+    }
+    if (evt.status === "rejected") {
+      return <span className="px-2 py-1 bg-red-50 text-red-600 rounded-md text-[10px] font-bold uppercase border border-red-200 shrink-0">Rejeté</span>;
+    }
+    if (isPast) {
+      return <span className="px-2 py-1 bg-slate-100 text-slate-500 rounded-md text-[10px] font-bold uppercase border border-slate-200 shrink-0">Terminé</span>;
+    }
+    return <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-md text-[10px] font-bold uppercase border border-emerald-200 shrink-0">Approuvé</span>;
+  }
+
+  function commissionButton(evt: Event) {
+    return (
+      <button
+        onClick={() => setCommissionSheetEvent(evt)}
+        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold uppercase border transition ${
+          evt.commissionRate != null
+            ? "bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100"
+            : "bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200"
+        }`}
+        title="Définir un taux de commission négocié pour cet événement"
+      >
+        <Percent className="h-3 w-3" />
+        {evt.commissionRate != null ? `${(evt.commissionRate * 100).toFixed(0)}%` : "Défaut"}
+      </button>
+    );
+  }
+
+  function eventActionButtons(evt: Event) {
+    return (
+      <>
+        {evt.status === "pending" && (
+          <>
+            <button onClick={() => handleUpdateEventStatus(evt.id, "approved")} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-2.5 py-1.5 text-[10px] font-bold uppercase rounded-md transition" title="Approuver">
+              Valid
+            </button>
+            <button onClick={() => handleUpdateEventStatus(evt.id, "rejected")} className="bg-gray-100 hover:bg-gray-200 text-gray-600 px-2.5 py-1.5 text-[10px] font-bold uppercase rounded-md transition" title="Rejeter">
+              Rejet
+            </button>
+          </>
+        )}
+        <button
+          onClick={() => handleDeleteEvent(evt.id)}
+          className="bg-red-50 hover:bg-red-100 text-red-600 p-1.5 rounded-md transition ml-2"
+          title="Supprimer l'événement de la plateforme"
+        >
+          <Trash2 className="h-4 w-4 text-red-500" />
+        </button>
+      </>
+    );
+  }
+
+  // Fragments réutilisés entre la vue tableau (desktop) et la vue cartes (mobile) de l'onglet Membres.
+  function userRoleBadge(role: string) {
+    return (
+      <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[8px] font-black uppercase tracking-wider ${
+        role === "admin"
+          ? "bg-purple-100 text-purple-800"
+          : role === "organizer"
+          ? "bg-orange-100 text-orange-800"
+          : "bg-blue-100 text-blue-800"
+      }`}>
+        {role === "admin" ? "Administrateur" : role === "organizer" ? "Organisateur" : "Client / Acheteur"}
+      </span>
+    );
+  }
+
+  function userDeleteAction(usr: { id: string }) {
+    if (usr.id === "usr-admin") {
+      return <span className="text-[10px] text-gray-400 font-bold uppercase italic">Intouchable</span>;
+    }
+    return (
+      <button
+        onClick={() => handleDeleteUser(usr.id)}
+        className="bg-red-50 hover:bg-red-100 text-red-600 p-2 rounded-xl transition"
+        title="Révoquer le compte définitivement"
+      >
+        <Trash2 className="h-4 w-4 text-red-500" />
+      </button>
+    );
+  }
+
+  // Réutilisé entre la vue tableau (desktop) et la vue cartes (mobile) de l'onglet Billets Vendus.
+  function ticketStatusAction(tkt: { id: string; paymentStatus?: string }) {
+    if (tkt.paymentStatus === "pending") {
+      return (
+        <button onClick={() => handleValidatePayment(tkt.id)} className="bg-amber-100 hover:bg-amber-200 text-amber-800 text-[10px] font-bold px-3 py-1.5 rounded-lg active:scale-95 transition-all shrink-0">
+          Valider manuellement
+        </button>
+      );
+    }
+    return (
+      <div className="inline-flex items-center space-x-1 text-green-700 bg-green-50 px-2 py-1 rounded-md shrink-0">
+        <span className="text-[10px] font-bold uppercase tracking-wider">Payé</span>
+      </div>
+    );
+  }
+
+  // Réutilisé entre la vue tableau (desktop) et la vue cartes (mobile) de l'onglet Demandes de Retrait.
+  function payoutStatusAction(p: { id: string; status: string }) {
+    if (p.status === "pending") {
+      return (
+        <div className="flex items-center justify-center space-x-2">
+          <button onClick={() => handleUpdatePayout(p.id, "completed")} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-2 py-1 text-[10px] font-bold rounded">Payer</button>
+          <button onClick={() => handleUpdatePayout(p.id, "rejected")} className="bg-red-50 hover:bg-red-100 text-red-600 px-2 py-1 text-[10px] font-bold rounded">Refuser</button>
+        </div>
+      );
+    }
+    if (p.status === "completed") {
+      return <span className="text-emerald-500 font-bold text-[10px] uppercase">Réglé</span>;
+    }
+    return <span className="text-red-500 font-bold text-[10px] uppercase">Rejeté</span>;
+  }
+
+  // Réutilisé entre la vue tableau (desktop) et la vue cartes (mobile) de l'onglet Log Transactions.
+  function transactionStatusBadge(status: string) {
+    if (status === "success") {
+      return <span className="text-emerald-500 font-bold text-[10px] uppercase">Succès</span>;
+    }
+    if (status === "failed") {
+      return <span className="text-red-500 font-bold text-[10px] uppercase">Échec</span>;
+    }
+    return <span className="text-amber-500 font-bold text-[10px] uppercase">En Attente</span>;
+  }
 
   if (loading) {
     return (
@@ -243,21 +354,13 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                 <ShieldCheck className="h-3 w-3" />
                 <span>Supervision</span>
               </div>
-              <h2 className="text-xl font-black tracking-tight text-white truncate" title={user.name}>
+              <h2 className="text-lg font-black leading-tight tracking-tight text-white">
                 {user.name}
               </h2>
               <p className="mt-1 text-[10px] text-slate-400 font-medium truncate">
                 {user.email}
               </p>
             </div>
-            
-            <button
-              onClick={onLogout}
-              className="mt-2 inline-flex w-full items-center justify-center space-x-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-4 py-2 text-xs font-bold text-white transition-all active:scale-95 shrink-0 lg:hidden"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              <span>Déconnexion</span>
-            </button>
           </div>
         </section>
 
@@ -291,14 +394,6 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
             </button>
           ))}
         </nav>
-
-        <button
-          onClick={onLogout}
-          className="hidden lg:flex w-full items-center justify-center space-x-2 rounded-xl bg-gray-50 hover:bg-red-50 border border-gray-100 hover:border-red-100 text-gray-500 hover:text-red-600 px-4 py-2.5 text-xs font-bold transition-all active:scale-95 shrink-0"
-        >
-          <LogOut className="h-4 w-4" />
-          <span>Déconnexion</span>
-        </button>
       </aside>
 
       {/* Main Content Area */}
@@ -312,8 +407,8 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
 
         {/* Metrics Banner cards (Only show on overview) */}
         {activeSubTab === "overview" && stats && (
-          <section className="grid grid-cols-2 gap-4 lg:grid-cols-6" id="admin-kpis-grid">
-            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs col-span-2 sm:col-span-1 lg:col-span-2">
+          <section className="grid grid-cols-2 gap-4 sm:grid-cols-3" id="admin-kpis-grid">
+            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="text-gray-400 text-[10px] font-black uppercase tracking-wider">Volume d'affaires Brut</span>
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-50 text-gray-700">
@@ -326,7 +421,7 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
               <p className="mt-1 text-[10px] text-gray-400 font-bold uppercase">Recettes brutes (100%)</p>
             </div>
 
-            <div className="rounded-2xl border border-orange-100 bg-orange-50/25 p-5 shadow-xs col-span-2 sm:col-span-1 lg:col-span-2">
+            <div className="rounded-2xl border border-orange-100 bg-orange-50/25 p-5 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="text-orange-500 text-[10px] font-black uppercase tracking-wider">Commission ClicBillet</span>
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 text-orange-700">
@@ -334,12 +429,12 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                 </div>
               </div>
               <p className="mt-3.5 text-xl font-black text-orange-950 font-sans tracking-tight">
-                {(stats.totalPlatformCommission || 0).toLocaleString("fr-FR")} <span className="text-xs text-orange-650">FCFA</span>
+                {(stats.totalPlatformCommission || 0).toLocaleString("fr-FR")} <span className="text-xs text-orange-600">FCFA</span>
               </p>
               <p className="mt-1 text-[10px] text-orange-500 font-bold uppercase">Revenus Admin (10%)</p>
             </div>
 
-            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs col-span-2 sm:col-span-1 lg:col-span-2">
+            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="text-gray-400 text-[10px] font-black uppercase tracking-wider">Reversement Organisateurs</span>
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
@@ -352,43 +447,43 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
               <p className="mt-1 text-[10px] text-gray-400 font-bold uppercase">Part Organisateur (90%)</p>
             </div>
 
-            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs col-span-1">
+            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="text-gray-400 text-[10px] font-black uppercase tracking-wider">Billets vendus</span>
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
                   <TicketIcon className="h-4 w-4" />
                 </div>
               </div>
-              <p className="mt-1.5 text-base font-black text-slate-900 font-sans tracking-tight">
+              <p className="mt-3.5 text-xl font-black text-slate-900 font-sans tracking-tight">
                 {stats.totalTicketsSold.toLocaleString("fr-FR")}
               </p>
-              <p className="mt-1 text-[9px] text-gray-400 font-bold uppercase">Réservations validées</p>
+              <p className="mt-1 text-[10px] text-gray-400 font-bold uppercase">Réservations validées</p>
             </div>
 
-            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs col-span-1">
+            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="text-gray-400 text-[10px] font-black uppercase tracking-wider">Utilisateurs</span>
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
                   <Users className="h-4 w-4" />
                 </div>
               </div>
-              <p className="mt-1.5 text-base font-black text-slate-900 font-sans tracking-tight">
+              <p className="mt-3.5 text-xl font-black text-slate-900 font-sans tracking-tight">
                 {stats.totalUsers.toLocaleString("fr-FR")}
               </p>
-              <p className="mt-1 text-[9px] text-gray-400 font-bold uppercase">Membres enregistrés</p>
+              <p className="mt-1 text-[10px] text-gray-400 font-bold uppercase">Membres enregistrés</p>
             </div>
 
-            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs col-span-2 sm:col-span-1 lg:col-span-2">
+            <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="text-gray-400 text-[10px] font-black uppercase tracking-wider">Événements</span>
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
                   <Calendar className="h-4 w-4" />
                 </div>
               </div>
-              <p className="mt-1.5 text-base font-black text-slate-900 font-sans tracking-tight">
+              <p className="mt-3.5 text-xl font-black text-slate-900 font-sans tracking-tight">
                 {stats.totalEvents.toLocaleString("fr-FR")}
               </p>
-              <p className="mt-1 text-[9px] text-gray-400 font-bold uppercase">Événements en ligne</p>
+              <p className="mt-1 text-[10px] text-gray-400 font-bold uppercase">Événements en ligne</p>
             </div>
           </section>
         )}
@@ -421,10 +516,10 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                       usr.role === "admin" 
                         ? "bg-purple-100 text-purple-800" 
                         : usr.role === "organizer" 
-                        ? "bg-orange-100 text-orange-850" 
+                        ? "bg-orange-100 text-orange-800" 
                         : "bg-blue-100 text-blue-800"
                     }`}>
-                      {usr.role}
+                      {usr.role === "admin" ? "Admin" : usr.role === "organizer" ? "Orga" : "Client"}
                     </span>
                   </div>
                 ))}
@@ -475,7 +570,7 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                           {tkt.eventTitle}
                         </td>
                         <td className="py-3 text-center font-bold text-gray-600">{tkt.quantity}</td>
-                        <td className="py-3 text-right font-black text-orange-650">{tkt.pricePaid.toLocaleString("fr-FR")} F CFA</td>
+                        <td className="py-3 text-right font-black text-orange-600">{tkt.pricePaid.toLocaleString("fr-FR")} F CFA</td>
                         <td className="py-3 text-center">
                           {tkt.paymentStatus === "pending" ? (
                             <button onClick={() => handleValidatePayment(tkt.id)} className="bg-amber-100 hover:bg-amber-200 text-amber-800 text-[9px] font-bold px-2 py-1 rounded">
@@ -501,7 +596,7 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
         {activeSubTab === "events" && stats && (
           <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
             <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between border-b border-gray-50 pb-4">
-              <h4 className="text-sm font-black text-gray-955">
+              <h4 className="text-sm font-black text-gray-950">
                 Audit des Événements Créés ({filteredEvents.length})
               </h4>
               <div className="relative w-full max-w-xs">
@@ -516,7 +611,13 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
               </div>
             </div>
 
-            <div className="overflow-x-auto">
+            {filteredEvents.length === 0 && (
+              <p className="text-center text-gray-400 font-semibold py-10 text-xs">Aucun événement ne correspond à ce critère de recherche.</p>
+            )}
+
+            {filteredEvents.length > 0 && <>
+            {/* Vue tableau : desktop / large écrans uniquement */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b border-gray-100 text-gray-400 font-extrabold uppercase text-[9px] tracking-wider">
@@ -524,7 +625,7 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                     <th className="pb-3 text-center">Statut</th>
                     <th className="pb-3">Organisateur</th>
                     <th className="pb-3">Date, Heure & Lieu</th>
-                    <th className="pb-3">Tickets Vaudou</th>
+                    <th className="pb-3">Tickets Vendus</th>
                     <th className="pb-3 text-right">Tarif Base</th>
                     <th className="pb-3 text-center">Commission</th>
                     <th className="pb-3 text-center">Action</th>
@@ -533,7 +634,6 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                 <tbody className="divide-y divide-gray-50">
                   {filteredEvents.map((evt) => {
                     const remains = evt.totalTickets - evt.ticketsSold;
-                    const isPast = evt.status === "approved" && isEventPast(evt);
                     return (
                       <tr key={evt.id} className="hover:bg-gray-50/50">
                         <td className="py-3">
@@ -545,17 +645,7 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                             </div>
                           </div>
                         </td>
-                        <td className="py-3 text-center">
-                          {evt.status === "pending" ? (
-                            <span className="px-2 py-1 bg-amber-50 text-amber-600 rounded-md text-[10px] font-bold uppercase border border-amber-200">En Attente</span>
-                          ) : evt.status === "rejected" ? (
-                            <span className="px-2 py-1 bg-red-50 text-red-600 rounded-md text-[10px] font-bold uppercase border border-red-200">Rejeté</span>
-                          ) : isPast ? (
-                            <span className="px-2 py-1 bg-slate-100 text-slate-500 rounded-md text-[10px] font-bold uppercase border border-slate-200">Terminé</span>
-                          ) : (
-                            <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-md text-[10px] font-bold uppercase border border-emerald-200">Approuvé</span>
-                          )}
-                        </td>
+                        <td className="py-3 text-center">{eventStatusBadge(evt)}</td>
                         <td className="py-3 font-semibold text-gray-900">
                           {evt.organizerName} <span className="block text-[9px] text-gray-400 font-mono">ID: {evt.organizerId}</span>
                         </td>
@@ -567,53 +657,65 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                           <span className="block font-black">{evt.ticketsSold} / {evt.totalTickets} vendus</span>
                           <span className="block text-[9px] text-red-500">{remains} restants</span>
                         </td>
-                        <td className="py-3 text-right font-black text-orange-650">{evt.price.toLocaleString("fr-FR")} XOF</td>
-                        <td className="py-3 text-center">
-                          <button
-                            onClick={() => handleUpdateCommission(evt)}
-                            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold uppercase border transition ${
-                              evt.commissionRate != null
-                                ? "bg-orange-50 text-orange-650 border-orange-200 hover:bg-orange-100"
-                                : "bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200"
-                            }`}
-                            title="Définir un taux de commission négocié pour cet événement"
-                          >
-                            <Percent className="h-3 w-3" />
-                            {evt.commissionRate != null ? `${(evt.commissionRate * 100).toFixed(0)}%` : "Défaut"}
-                          </button>
-                        </td>
+                        <td className="py-3 text-right font-black text-orange-600">{evt.price.toLocaleString("fr-FR")} XOF</td>
+                        <td className="py-3 text-center">{commissionButton(evt)}</td>
                         <td className="py-3 text-center">
                           <div className="flex items-center justify-center space-x-1">
-                            {evt.status === "pending" && (
-                              <>
-                                <button onClick={() => handleUpdateEventStatus(evt.id, "approved")} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-2.5 py-1.5 text-[10px] font-bold uppercase rounded-md transition" title="Approuver">
-                                  Valid
-                                </button>
-                                <button onClick={() => handleUpdateEventStatus(evt.id, "rejected")} className="bg-gray-100 hover:bg-gray-200 text-gray-600 px-2.5 py-1.5 text-[10px] font-bold uppercase rounded-md transition" title="Rejeter">
-                                  Rejet
-                                </button>
-                              </>
-                            )}
-                            <button
-                              onClick={() => handleDeleteEvent(evt.id)}
-                              className="bg-red-50 hover:bg-red-150 text-red-650 p-1.5 rounded-md transition ml-2"
-                              title="Supprimer l'événement de la plateforme"
-                            >
-                              <Trash2 className="h-4 w-4 text-red-500" />
-                            </button>
+                            {eventActionButtons(evt)}
                           </div>
                         </td>
                       </tr>
                     );
                   })}
-                  {filteredEvents.length === 0 && (
-                    <tr>
-                      <td colSpan={8} className="text-center text-gray-400 font-semibold py-10">Aucun événement ne correspond à ce critère de recherche.</td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
             </div>
+
+            {/* Vue cartes : mobile / tablette uniquement */}
+            <div className="md:hidden space-y-3">
+              {filteredEvents.map((evt) => {
+                const remains = evt.totalTickets - evt.ticketsSold;
+                return (
+                  <div key={evt.id} className="rounded-2xl border border-gray-100 p-4 space-y-3">
+                    <div className="flex items-start gap-3">
+                      <img src={evt.banner} alt="" className="h-12 w-12 rounded-xl object-cover shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <span className="block text-xs font-black text-gray-950">{evt.title}</span>
+                        <span className="inline-flex rounded-md bg-gray-100 px-1.5 py-0.5 text-[8px] font-extrabold uppercase text-gray-600 mt-1">{evt.category}</span>
+                      </div>
+                      {eventStatusBadge(evt)}
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
+                      <div>
+                        <span className="block text-[9px] font-black uppercase text-gray-400">Organisateur</span>
+                        <span className="font-semibold text-gray-900">{evt.organizerName}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] font-black uppercase text-gray-400">Tarif base</span>
+                        <span className="font-black text-orange-600">{evt.price.toLocaleString("fr-FR")} XOF</span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] font-black uppercase text-gray-400">Date & lieu</span>
+                        <span className="font-semibold text-gray-600">{new Date(evt.date).toLocaleDateString("fr-FR")} à {evt.time}</span>
+                        <span className="block text-gray-400 truncate">{evt.venue}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] font-black uppercase text-gray-400">Tickets</span>
+                        <span className="font-black text-slate-800">{evt.ticketsSold} / {evt.totalTickets}</span>
+                        <span className="block text-red-500">{remains} restants</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-gray-50 pt-3">
+                      {commissionButton(evt)}
+                      <div className="flex items-center space-x-1">
+                        {eventActionButtons(evt)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            </>}
           </div>
         )}
 
@@ -621,7 +723,7 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
         {activeSubTab === "users" && stats && (
           <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
             <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between border-b border-gray-50 pb-4">
-              <h4 className="text-sm font-black text-gray-955">
+              <h4 className="text-sm font-black text-gray-950">
                 Roster des Membres & Comptes ({filteredUsers.length})
               </h4>
               <div className="flex flex-wrap items-center gap-3">
@@ -639,7 +741,7 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
 
                 {/* Role dropdown filter */}
                 <div className="flex items-center space-x-1 border border-gray-200 rounded-xl px-2.5 bg-white">
-                  <Filter className="h-3.5 w-3.5 text-gray-450 shrink-0" />
+                  <Filter className="h-3.5 w-3.5 text-gray-400 shrink-0" />
                   <select
                     value={roleFilter}
                     onChange={(e) => setRoleFilter(e.target.value)}
@@ -654,7 +756,12 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
               </div>
             </div>
 
-            <div className="overflow-x-auto">
+            {filteredUsers.length === 0 && (
+              <p className="text-center text-gray-400 font-semibold py-10 text-xs">Aucun membre ne correspond à votre filtre.</p>
+            )}
+
+            {filteredUsers.length > 0 && <>
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b border-gray-100 text-gray-400 font-extrabold uppercase text-[9px] tracking-wider">
@@ -671,40 +778,28 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                       <td className="py-3 font-mono text-[10px] text-gray-400 font-bold">{usr.id}</td>
                       <td className="py-3 font-black text-gray-950">{usr.name}</td>
                       <td className="py-3 text-gray-600 font-semibold font-mono">{usr.email}</td>
-                      <td className="py-3">
-                        <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[8px] font-black uppercase tracking-wider ${
-                          usr.role === "admin" 
-                            ? "bg-purple-100 text-purple-800" 
-                            : usr.role === "organizer" 
-                            ? "bg-orange-100 text-orange-850" 
-                            : "bg-blue-100 text-blue-800"
-                        }`}>
-                          {usr.role === "admin" ? "Administrateur" : usr.role === "organizer" ? "Organisateur" : "Client / Acheteur"}
-                        </span>
-                      </td>
-                      <td className="py-3 text-center">
-                        {usr.id === "usr-admin" ? (
-                          <span className="text-[10px] text-gray-350 font-bold uppercase italic">Intouchable</span>
-                        ) : (
-                          <button
-                            onClick={() => handleDeleteUser(usr.id)}
-                            className="bg-red-50 hover:bg-red-100 text-red-650 p-2 rounded-xl transition"
-                            title="Révoquer le compte définitivement"
-                          >
-                            <Trash2 className="h-4 w-4 text-red-500" />
-                          </button>
-                        )}
-                      </td>
+                      <td className="py-3">{userRoleBadge(usr.role)}</td>
+                      <td className="py-3 text-center">{userDeleteAction(usr)}</td>
                     </tr>
                   ))}
-                  {filteredUsers.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="text-center text-gray-400 font-semibold py-10">Aucun membre ne correspond à votre filtre.</td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
             </div>
+
+            <div className="md:hidden space-y-3">
+              {filteredUsers.map((usr) => (
+                <div key={usr.id} className="rounded-2xl border border-gray-100 p-4 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-black text-gray-950 truncate">{usr.name}</p>
+                    <p className="text-[10px] text-gray-600 font-semibold font-mono truncate">{usr.email}</p>
+                    <p className="text-[9px] text-gray-400 font-mono mt-0.5">{usr.id}</p>
+                    <div className="mt-1.5">{userRoleBadge(usr.role)}</div>
+                  </div>
+                  <div className="shrink-0">{userDeleteAction(usr)}</div>
+                </div>
+              ))}
+            </div>
+            </>}
           </div>
         )}
 
@@ -712,7 +807,7 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
         {activeSubTab === "tickets" && stats && (
           <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
             <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between border-b border-gray-50 pb-4">
-              <h4 className="text-sm font-black text-gray-955">
+              <h4 className="text-sm font-black text-gray-950">
                 Audit complet des transactions et réservations ({filteredTickets.length})
               </h4>
               <div className="relative w-full max-w-xs">
@@ -727,7 +822,12 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
               </div>
             </div>
 
-            <div className="overflow-x-auto">
+            {filteredTickets.length === 0 && (
+              <p className="text-center text-gray-400 font-semibold py-10 text-xs">Aucun pass de réservation trouvé.</p>
+            )}
+
+            {filteredTickets.length > 0 && <>
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b border-gray-100 text-gray-400 font-extrabold uppercase text-[9px] tracking-wider">
@@ -737,7 +837,7 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                     <th className="pb-3">Acheteur</th>
                     <th className="pb-3">Quantité & Option</th>
                     <th className="pb-3">Date d'achat</th>
-                    <th className="pb-3 text-right">Frais d'approvisionnement</th>
+                    <th className="pb-3 text-right">Montant Payé</th>
                     <th className="pb-3 text-center">Statut / Action</th>
                   </tr>
                 </thead>
@@ -749,12 +849,12 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                         {tkt.paymentStatus === "pending" && <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" title="Paiement en attente"></span>}
                         {tkt.transactionRef}
                       </td>
-                      <td className="py-3 font-black text-slate-950 truncate max-w-[150px]" title={tkt.eventTitle}>{tkt.eventTitle}</td>
-                      <td className="py-3 font-medium text-gray-900 leading-tight">
-                        <span>{tkt.buyerName}</span>
-                        <span className="block text-[9px] text-gray-450 font-mono">{tkt.buyerEmail}</span>
+                      <td className="py-3 pr-4 font-black text-slate-950 truncate max-w-[150px]" title={tkt.eventTitle}>{tkt.eventTitle}</td>
+                      <td className="py-3 pr-4 font-medium text-gray-900 leading-tight max-w-[160px]">
+                        <span className="block truncate">{tkt.buyerName}</span>
+                        <span className="block truncate text-[9px] text-gray-400 font-mono">{tkt.buyerEmail}</span>
                       </td>
-                      <td className="py-3">
+                      <td className="py-3 whitespace-nowrap">
                         <span className="font-extrabold font-sans pr-1.5">{tkt.quantity} ticket(s)</span>
                         <span className={`inline-flex rounded-md px-1.5 py-0.5 text-[8px] font-extrabold uppercase ${
                           tkt.tier === "vip" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"
@@ -763,38 +863,61 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                         </span>
                       </td>
                       <td className="py-3 text-gray-400 font-mono font-semibold">{new Date(tkt.purchaseDate).toLocaleString("fr-FR")}</td>
-                      <td className="py-3 text-right font-black text-orange-650">{tkt.pricePaid.toLocaleString("fr-FR")} XOF</td>
-                      <td className="py-3 text-center">
-                        {tkt.paymentStatus === "pending" ? (
-                          <button onClick={() => handleValidatePayment(tkt.id)} className="bg-amber-100 hover:bg-amber-200 text-amber-800 text-[10px] font-bold px-3 py-1.5 rounded-lg active:scale-95 transition-all">
-                            Valider manuellement
-                          </button>
-                        ) : (
-                          <div className="inline-flex items-center space-x-1 text-green-700 bg-green-50 px-2 py-1 rounded-md">
-                            <span className="text-[10px] font-bold uppercase tracking-wider">Payé</span>
-                          </div>
-                        )}
-                      </td>
+                      <td className="py-3 text-right font-black text-orange-600">{tkt.pricePaid.toLocaleString("fr-FR")} XOF</td>
+                      <td className="py-3 text-center">{ticketStatusAction(tkt)}</td>
                     </tr>
                   ))}
-                  {filteredTickets.length === 0 && (
-                    <tr>
-                      <td colSpan={8} className="text-center text-gray-400 font-semibold py-10">Aucun pass de réservation trouvé.</td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
             </div>
+
+            <div className="md:hidden space-y-3">
+              {filteredTickets.map((tkt) => (
+                <div key={tkt.id} className="rounded-2xl border border-gray-100 p-4 space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-black text-slate-950 truncate">{tkt.eventTitle}</p>
+                      <p className="font-mono font-bold text-xs text-slate-900 flex items-center gap-1 mt-0.5">
+                        {tkt.paymentStatus === "pending" && <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse shrink-0" title="Paiement en attente"></span>}
+                        {tkt.transactionRef}
+                      </p>
+                    </div>
+                    <span className="font-black text-orange-600 shrink-0">{tkt.pricePaid.toLocaleString("fr-FR")} XOF</span>
+                  </div>
+                  <div className="text-[11px] text-gray-600">
+                    <span className="font-semibold">{tkt.buyerName}</span>
+                    <span className="block text-[9px] text-gray-400 font-mono">{tkt.buyerEmail}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-gray-50 pt-2.5">
+                    <div>
+                      <span className="font-extrabold font-sans pr-1.5 text-[11px]">{tkt.quantity} ticket(s)</span>
+                      <span className={`inline-flex rounded-md px-1.5 py-0.5 text-[8px] font-extrabold uppercase ${
+                        tkt.tier === "vip" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"
+                      }`}>
+                        {tkt.tier === "vip" ? "VIP" : "STD"}
+                      </span>
+                    </div>
+                    {ticketStatusAction(tkt)}
+                  </div>
+                </div>
+              ))}
+            </div>
+            </>}
           </div>
         )}
 
         {/* TAB 5: DEMANDES DE RETRAIT (PAYOUTS) */}
         {activeSubTab === "payouts" && (
           <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
-            <h4 className="text-sm font-black text-gray-955 border-b border-gray-50 pb-4">
+            <h4 className="text-sm font-black text-gray-950 border-b border-gray-50 pb-4">
               Demandes de Retrait (Payouts)
             </h4>
-            <div className="overflow-x-auto">
+            {payouts.length === 0 && (
+              <p className="text-center text-gray-400 font-semibold py-10 text-xs">Aucune demande de retrait.</p>
+            )}
+
+            {payouts.length > 0 && <>
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b border-gray-100 text-gray-400 font-extrabold uppercase text-[9px] tracking-wider">
@@ -812,39 +935,53 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                       <td className="py-3 font-mono text-[9px] text-gray-400">{p.id}</td>
                       <td className="py-3 font-bold text-gray-950">{p.organizerName || p.organizerId}</td>
                       <td className="py-3 text-gray-600">{new Date(p.requestDate).toLocaleString("fr-FR")}</td>
-                      <td className="py-3 font-black text-orange-650">{Number(p.amount).toLocaleString("fr-FR")} XOF</td>
+                      <td className="py-3 font-black text-orange-600">{Number(p.amount).toLocaleString("fr-FR")} XOF</td>
                       <td className="py-3">
                         <span className="block font-bold uppercase">{p.method}</span>
                         <span className="block text-[9px] text-gray-400 font-mono">{p.details}</span>
                       </td>
-                      <td className="py-3 text-center">
-                        {p.status === "pending" ? (
-                          <div className="flex justify-center space-x-2">
-                            <button onClick={() => handleUpdatePayout(p.id, "completed")} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-2 py-1 text-[10px] font-bold rounded">Payer</button>
-                            <button onClick={() => handleUpdatePayout(p.id, "rejected")} className="bg-red-50 hover:bg-red-100 text-red-600 px-2 py-1 text-[10px] font-bold rounded">Refuser</button>
-                          </div>
-                        ) : p.status === "completed" ? (
-                          <span className="text-emerald-500 font-bold text-[10px] uppercase">Réglé</span>
-                        ) : (
-                          <span className="text-red-500 font-bold text-[10px] uppercase">Rejeté</span>
-                        )}
-                      </td>
+                      <td className="py-3 text-center">{payoutStatusAction(p)}</td>
                     </tr>
                   ))}
-                  {payouts.length === 0 && <tr><td colSpan={6} className="text-center py-6 text-gray-400">Aucune demande de retrait.</td></tr>}
                 </tbody>
               </table>
             </div>
+
+            <div className="md:hidden space-y-3">
+              {payouts.map((p: any) => (
+                <div key={p.id} className="rounded-2xl border border-gray-100 p-4 space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-bold text-gray-950">{p.organizerName || p.organizerId}</p>
+                      <p className="text-[9px] text-gray-400 font-mono">{p.id}</p>
+                    </div>
+                    <span className="font-black text-orange-600 shrink-0">{Number(p.amount).toLocaleString("fr-FR")} XOF</span>
+                  </div>
+                  <div className="text-[11px] text-gray-600">
+                    <span className="block">{new Date(p.requestDate).toLocaleString("fr-FR")}</span>
+                    <span className="block font-bold uppercase mt-1">{p.method}</span>
+                    <span className="block text-[9px] text-gray-400 font-mono">{p.details}</span>
+                  </div>
+                  <div className="border-t border-gray-50 pt-2.5">{payoutStatusAction(p)}</div>
+                </div>
+              ))}
+            </div>
+            </>}
           </div>
         )}
 
         {/* TAB 6: LOGS TRANSACTIONS */}
         {activeSubTab === "transactions" && (
           <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
-            <h4 className="text-sm font-black text-gray-955 border-b border-gray-50 pb-4">
+            <h4 className="text-sm font-black text-gray-950 border-b border-gray-50 pb-4">
               Historique des Tentatives de Paiement
             </h4>
-            <div className="overflow-x-auto">
+            {transactions.length === 0 && (
+              <p className="text-center text-gray-400 font-semibold py-10 text-xs">Aucune transaction trouvée.</p>
+            )}
+
+            {transactions.length > 0 && <>
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b border-gray-100 text-gray-400 font-extrabold uppercase text-[9px] tracking-wider">
@@ -862,28 +999,48 @@ export default function AdminDashboard({ user, onLogout, onTokenRefresh }: Admin
                       <td className="py-2.5 font-mono text-[9px] text-slate-800 font-black">{tx.id}</td>
                       <td className="py-2.5 font-mono text-gray-500">{tx.buyerEmail}</td>
                       <td className="py-2.5 font-bold uppercase">{tx.method}</td>
-                      <td className="py-2.5 font-black text-orange-650">{Number(tx.amount).toLocaleString("fr-FR")} XOF</td>
+                      <td className="py-2.5 font-black text-orange-600">{Number(tx.amount).toLocaleString("fr-FR")} XOF</td>
                       <td className="py-2.5 text-[10px] text-gray-400">{new Date(tx.date).toLocaleString("fr-FR")}</td>
-                      <td className="py-2.5 text-center">
-                        {tx.status === "success" ? (
-                          <span className="text-emerald-500 font-bold text-[10px] uppercase">Succès</span>
-                        ) : tx.status === "failed" ? (
-                          <span className="text-red-500 font-bold text-[10px] uppercase">Échec</span>
-                        ) : (
-                          <span className="text-amber-500 font-bold text-[10px] uppercase">En Attente</span>
-                        )}
-                      </td>
+                      <td className="py-2.5 text-center">{transactionStatusBadge(tx.status)}</td>
                     </tr>
                   ))}
-                  {transactions.length === 0 && <tr><td colSpan={6} className="text-center py-6 text-gray-400">Aucune transaction trouvée.</td></tr>}
                 </tbody>
               </table>
             </div>
+
+            <div className="md:hidden space-y-3">
+              {transactions.map((tx: any) => (
+                <div key={tx.id} className="rounded-2xl border border-gray-100 p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-mono text-[9px] text-slate-800 font-black">{tx.id}</p>
+                      <p className="font-mono text-gray-500 text-[11px] truncate">{tx.buyerEmail}</p>
+                    </div>
+                    <span className="font-black text-orange-600 shrink-0">{Number(tx.amount).toLocaleString("fr-FR")} XOF</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="font-bold uppercase text-gray-600">{tx.method}</span>
+                    <span className="text-gray-400">{new Date(tx.date).toLocaleString("fr-FR")}</span>
+                  </div>
+                  <div className="border-t border-gray-50 pt-2">{transactionStatusBadge(tx.status)}</div>
+                </div>
+              ))}
+            </div>
+            </>}
           </div>
         )}
 
       </section>
       </main>
+
+      {commissionSheetEvent && stats && (
+        <CommissionSheet
+          event={commissionSheetEvent}
+          platformDefaultRate={stats.commissionRate}
+          onClose={() => setCommissionSheetEvent(null)}
+          onSave={(rate) => handleSaveCommission(commissionSheetEvent, rate)}
+        />
+      )}
     </div>
   );
 }

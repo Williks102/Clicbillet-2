@@ -391,12 +391,12 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
                 {selectedItems.map((item) => (
                   <div key={item.name} className="flex items-center justify-between">
                     <span className="text-gray-500 font-semibold uppercase font-mono">{item.name} × {item.qty}</span>
-                    <span className="font-extrabold text-orange-650">{(item.price * item.qty).toLocaleString("fr-FR")} XOF</span>
+                    <span className="font-extrabold text-orange-600">{(item.price * item.qty).toLocaleString("fr-FR")} XOF</span>
                   </div>
                 ))}
                 <div className="flex items-center justify-between pt-1.5 border-t border-orange-100/60">
                   <span className="text-gray-500 font-semibold uppercase font-mono">Total</span>
-                  <span className="text-sm font-extrabold text-orange-650">{totalPrice.toLocaleString("fr-FR")} XOF</span>
+                  <span className="text-sm font-extrabold text-orange-600">{totalPrice.toLocaleString("fr-FR")} XOF</span>
                 </div>
               </div>
 
@@ -502,7 +502,7 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
               )}
 
               {!isFreeOrder && (
-                <div className="p-3 bg-orange-50/20 border border-orange-150/20 rounded-2xl space-y-1">
+                <div className="p-3 bg-orange-50/20 border border-orange-100/20 rounded-2xl space-y-1">
                   <div className="flex items-center justify-between text-[10px] text-gray-500 font-semibold">
                     <span>Passerelle Actrice :</span>
                     <span className="text-orange-600 font-extrabold uppercase">Paystack</span>
@@ -551,7 +551,7 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
 
           {step === "success" && (
             <div className="py-10 flex flex-col items-center text-center space-y-5" id="checkout-success-view">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-green-50 text-green-500 border border-green-150 shadow-md">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-green-50 text-green-500 border border-green-100 shadow-md">
                 <Check className="h-7 w-7" strokeWidth={3} />
               </div>
               <div>
@@ -578,7 +578,7 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
               )}
 
               {!isFreeOrder && (
-                <div className="text-[10px] text-gray-450 font-medium tracking-wide">
+                <div className="text-[10px] text-gray-400 font-medium tracking-wide">
                   Passerelle : <strong className="text-gray-600">Paystack</strong>
                 </div>
               )}

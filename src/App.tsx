@@ -287,7 +287,7 @@ export default function App() {
             )}
 
             {activeTab === "admin-dashboard" && user && user.role === "admin" && (
-              <AdminDashboard user={user} onLogout={handleLogout} onTokenRefresh={handleTokenRefresh} />
+              <AdminDashboard user={user} onTokenRefresh={handleTokenRefresh} />
             )}
 
             {activeTab === "scanner" && user && user.role === "organizer" && (

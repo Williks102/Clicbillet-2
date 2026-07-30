@@ -102,7 +102,7 @@ export default function Navbar({ user, onLogout, activeTab, setActiveTab, onOpen
                     user.role === "admin"
                       ? "bg-purple-100 text-purple-800"
                       : user.role === "organizer"
-                      ? "bg-orange-100 text-orange-850"
+                      ? "bg-orange-100 text-orange-800"
                       : "bg-blue-100 text-blue-800"
                   }`}>
                     {user.role === "admin" ? "Admin" : user.role === "organizer" ? "Orga" : "Client"}
