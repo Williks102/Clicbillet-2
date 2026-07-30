@@ -499,7 +499,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     <div className="space-y-8 py-6" id="organizer-dashboard-wrapper">
       
       {/* Header and Toggle Navigation */}
-      <section className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-100 pb-5">
+      <section className="space-y-4 border-b border-gray-100 pb-5">
         <div className="min-w-0">
           <h2 className="flex items-start gap-1.5 text-lg font-black text-gray-900 sm:items-center sm:text-xl">
             <LayoutDashboard className="mt-0.5 h-5 w-5 shrink-0 text-orange-600 sm:mt-0" />
@@ -510,7 +510,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
           </p>
         </div>
 
-        {/* Dash selector pills (desktop / large screens uniquement) */}
+        {/* Dash selector pills (desktop / large écrans uniquement), sur leur propre ligne
+            pleine largeur pour ne pas se faire écraser par un nom d'organisateur long. */}
         <div className="hidden lg:flex flex-wrap gap-2">
           <button
             id="orga-dashboard-view-tab"
@@ -518,7 +519,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             className={`rounded-xl px-4 py-2.5 text-xs font-black transition-all active:scale-95 ${
               subTab === "dashboard"
                 ? "bg-slate-950 text-white shadow-md"
-                : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-150"
+                : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-100"
             }`}
           >
             Suivi des Ventes
@@ -529,7 +530,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             className={`flex items-center space-x-1 rounded-xl px-4 py-2.5 text-xs font-black transition-all active:scale-95 ${
               subTab === "create"
                 ? "bg-slate-950 text-white shadow-md"
-                : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-150"
+                : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-100"
             }`}
           >
             <Plus className="h-4 w-4" />
@@ -553,7 +554,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             className={`flex items-center space-x-1.5 rounded-xl px-4 py-2.5 text-xs font-black transition-all active:scale-95 ${
               subTab === "payouts"
                 ? "bg-slate-950 text-white shadow-md"
-                : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-150"
+                : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-100"
             }`}
           >
             <DollarSign className="h-4 w-4" />
@@ -616,7 +617,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
               <div>
                 <span className="text-[10px] font-black uppercase text-gray-400 font-sans tracking-wider block">Tickets Vendus</span>
                 <span className="text-xl font-extrabold text-gray-950 font-sans">
-                  {loadingStats ? "Chargement..." : `${stats?.ticketsSold || 0} tickets`}
+                  {loadingStats ? "Chargement..." : `${stats?.ticketsSold || 0} ticket${(stats?.ticketsSold || 0) > 1 ? "s" : ""}`}
                 </span>
               </div>
             </div>
@@ -710,7 +711,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                         <p className="text-[10px] text-gray-400 font-mono truncate">{sale.eventTitle}</p>
                       </div>
                       <div className="text-right shrink-0">
-                        <span className="text-xs font-extrabold text-orange-650 block">+{sale.amount.toLocaleString("fr-FR")} F</span>
+                        <span className="text-xs font-extrabold text-orange-600 block">+{sale.amount.toLocaleString("fr-FR")} F</span>
                         <span className="text-[9px] text-gray-400 uppercase font-mono font-semibold">
                           {sale.tier === "vip" ? "VIP" : "STD"}
                         </span>
@@ -814,7 +815,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         </div>
       ) : subTab === "create" ? (
         /* Create New Event Form Layout */
-        <form onSubmit={handleCreateEvent} className="min-w-0 rounded-2xl border border-gray-150/70 bg-white p-4 space-y-5 sm:p-6 sm:space-y-6" id="orga-create-form-view">
+        <form onSubmit={handleCreateEvent} className="min-w-0 rounded-2xl border border-gray-100/70 bg-white p-4 space-y-5 sm:p-6 sm:space-y-6" id="orga-create-form-view">
           <div className="border-b border-gray-50 pb-4">
             <h3 className="flex items-start gap-1.5 text-base font-black text-gray-900 sm:items-center">
               <Sparkles className="mt-0.5 h-4.5 w-4.5 shrink-0 text-orange-600 sm:mt-0" />
@@ -1107,7 +1108,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                             e.stopPropagation();
                             setCustomBannerUrl("");
                           }}
-                          className="absolute -top-1.5 -right-1.5 bg-red-650 hover:bg-red-700 text-red-500 hover:text-red-700 bg-white border border-gray-200 h-5 w-5 rounded-full flex items-center justify-center shadow-md font-bold text-[10px]"
+                          className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-gray-200 bg-white text-red-500 shadow-md font-bold text-[10px] transition-colors hover:border-red-600 hover:bg-red-600 hover:text-white"
                           title="Effacer la photo"
                         >
                           ✕
@@ -1132,7 +1133,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
 
                 <div className="relative flex py-2 items-center">
                   <div className="flex-grow border-t border-gray-100"></div>
-                  <span className="flex-shrink mx-3 text-[9px] text-gray-350 font-black uppercase">Ou par option alternative</span>
+                  <span className="flex-shrink mx-3 text-[9px] text-gray-400 font-black uppercase">Ou par option alternative</span>
                   <div className="flex-grow border-t border-gray-100"></div>
                 </div>
 
@@ -1159,7 +1160,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
           </div>
 
           {/* Form CTA active submissions */}
-          <div className="border-t border-gray-150 pt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end sm:space-x-3 sm:gap-0">
+          <div className="border-t border-gray-100 pt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end sm:space-x-3 sm:gap-0">
             <button
               type="button"
               onClick={() => setSubTab("dashboard")}
@@ -1177,7 +1178,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             </button>
           </div>
         </form>
-      ) : (
+      ) : subTab === "simulator" ? (
         /* Sandbox Simulator Layout */
         <div className="grid gap-6 lg:grid-cols-3 animate-fade-in" id="orga-simulator-panel">
           {/* Simulator Controller Column Left */}
@@ -1193,8 +1194,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             {simStatusMsg && (
               <div className={`p-3 rounded-xl text-xs font-semibold border ${
                 simStatusMsg.type === "success" 
-                  ? "bg-emerald-50 text-emerald-805 border-emerald-105" 
-                  : "bg-red-50 text-red-850 border-red-105"
+                  ? "bg-emerald-50 text-emerald-800 border-emerald-100" 
+                  : "bg-red-50 text-red-800 border-red-100"
               }`}>
                 {simStatusMsg.text}
               </div>
@@ -1215,7 +1216,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                   ))}
                 </select>
                 {myEvents.length === 0 && (
-                  <p className="text-[10px] text-red-505 font-bold mt-1">⚠️ Créez d'abord un événement pour tester l'injecteur.</p>
+                  <p className="text-[10px] text-red-500 font-bold mt-1">⚠️ Créez d'abord un événement pour tester l'injecteur.</p>
                 )}
               </div>
 
@@ -1301,7 +1302,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
           </div>
 
           {/* Sandbox Scans Columns Right */}
-          <div className="rounded-2xl border border-gray-150 bg-white p-5 lg:col-span-2 space-y-4">
+          <div className="rounded-2xl border border-gray-100 bg-white p-5 lg:col-span-2 space-y-4">
             <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between border-b border-gray-100 pb-3">
               <div>
                 <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider flex items-center space-x-1">
@@ -1311,7 +1312,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
               </div>
               <button 
                 onClick={fetchSimulatedTickets}
-                className="inline-flex items-center space-x-1.5 p-2 rounded-xl border border-gray-150 hover:bg-gray-50 text-[10px] font-bold text-gray-600 active:scale-95"
+                className="inline-flex items-center space-x-1.5 p-2 rounded-xl border border-gray-100 hover:bg-gray-50 text-[10px] font-bold text-gray-600 active:scale-95"
                 title="Actualiser la liste"
               >
                 <RefreshCw className="h-3 w-3" />
@@ -1375,7 +1376,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                             onClick={() => handleSimulateScan(tkt.qrCodeData)}
                             className={`rounded-xl px-2.5 py-1.5 text-[9px] font-extrabold transition-all active:scale-95 border ${
                               tkt.scanned
-                                ? "bg-gray-50 text-gray-400 border-gray-150 cursor-not-allowed hover:bg-gray-100"
+                                ? "bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed hover:bg-gray-100"
                                 : "bg-orange-50 text-orange-700 hover:bg-orange-100 border-orange-200"
                             }`}
                           >
@@ -1390,7 +1391,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             )}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* OVERLAY EDIT EVENT MODAL */}
       {editingEvent && (
@@ -1400,7 +1401,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         >
             <button
               onClick={() => setEditingEvent(null)}
-              className="absolute top-10 right-4 sm:top-4 h-8 w-8 rounded-full border border-gray-150 flex items-center justify-center text-gray-400 hover:text-gray-650 hover:bg-gray-50 transition"
+              className="absolute top-10 right-4 sm:top-4 h-8 w-8 rounded-full border border-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition"
               title="Fermer"
             >
               ✕
@@ -1415,7 +1416,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             </div>
 
             {editError && (
-              <div className="rounded-lg bg-red-50 p-3.5 text-xs font-semibold text-red-650 border border-red-100">
+              <div className="rounded-lg bg-red-50 p-3.5 text-xs font-semibold text-red-600 border border-red-100">
                 {editError}
               </div>
             )}
@@ -1628,7 +1629,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                 <button
                   type="button"
                   onClick={() => setEditingEvent(null)}
-                  className="rounded-xl px-4 py-2 text-xs font-bold text-gray-400 hover:text-gray-650"
+                  className="rounded-xl px-4 py-2 text-xs font-bold text-gray-400 hover:text-gray-600"
                 >
                   Annuler
                 </button>

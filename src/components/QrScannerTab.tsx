@@ -132,7 +132,7 @@ export default function QrScannerTab({ user, onTokenRefresh }: QrScannerTabProps
       <section className="grid gap-6 md:grid-cols-2" id="scanner-grid-panel">
         
         {/* Web camera viewfinder pane */}
-        <div className="rounded-3xl border border-gray-150 bg-white p-5 flex flex-col justify-between space-y-4">
+        <div className="rounded-3xl border border-gray-100 bg-white p-5 flex flex-col justify-between space-y-4">
           <h3 className="text-sm font-black text-gray-900 flex items-center space-x-1.5">
             <span className="h-2 w-2 rounded-full bg-green-500 animate-ping" />
             <span>Viseur Appareil Photo</span>
@@ -152,7 +152,7 @@ export default function QrScannerTab({ user, onTokenRefresh }: QrScannerTabProps
         <div className="space-y-6">
           
           {/* Active scan outcomes details state panel */}
-          <div className="rounded-3xl border border-gray-150 bg-white p-6 space-y-5 flex flex-col justify-center min-h-[250px]">
+          <div className="rounded-3xl border border-gray-100 bg-white p-6 space-y-5 flex flex-col justify-center min-h-[250px]">
             <h3 className="text-sm font-black text-gray-900 pb-3 border-b border-gray-50">
               Résultat du Scan
             </h3>
@@ -171,14 +171,14 @@ export default function QrScannerTab({ user, onTokenRefresh }: QrScannerTabProps
                   <div className="space-y-3 p-4 rounded-2xl bg-red-50 border border-red-100" id="scan-already-scanned">
                     <XCircle className="mx-auto h-12 w-12 text-red-500" />
                     <h4 className="text-sm font-black text-red-800">Billet DÉJÀ UTILISÉ &Egrave;XPR&Egrave;S</h4>
-                    <p className="text-[11px] text-red-650 max-w-sm mx-auto leading-relaxed">
+                    <p className="text-[11px] text-red-600 max-w-sm mx-auto leading-relaxed">
                       Ce ticket a déjà été validé à l'entrée de l'événement le {" "}
                       <strong>{new Date(scanResult.scannedAt).toLocaleString("fr-FR")}</strong>. Accès refusé !
                     </p>
                   </div>
                 ) : (
                   /* 2. Success green verification checklist */
-                  <div className="space-y-3 p-4 rounded-2xl bg-green-50 border border-green-150" id="scan-success-card">
+                  <div className="space-y-3 p-4 rounded-2xl bg-green-50 border border-green-100" id="scan-success-card">
                     <CheckCircle className="mx-auto h-12 w-12 text-green-600 animate-bounce" />
                     <h4 className="text-sm font-black text-green-800">ACCÈS AUTORISÉ (VALIDE)</h4>
                     <p className="text-xs text-green-700 font-bold leading-none">Profitez bien de l'événement !</p>
@@ -257,7 +257,7 @@ export default function QrScannerTab({ user, onTokenRefresh }: QrScannerTabProps
           </div>
 
           {/* Backup manual code verification layout */}
-          <div className="rounded-3xl border border-gray-150 bg-white p-5 space-y-4">
+          <div className="rounded-3xl border border-gray-100 bg-white p-5 space-y-4">
             <h4 className="text-xs font-black text-gray-900 flex items-center space-x-1.5">
               <Key className="h-4 w-4 text-orange-500" />
               <span>Saisie Manuelle (Option de secours)</span>
