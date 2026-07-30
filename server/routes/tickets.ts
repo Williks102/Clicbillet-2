@@ -608,8 +608,8 @@ router.post("/api/payment/verify", checkoutRateLimiter, async (req: express.Requ
 // Annule automatiquement les billets restés "PENDING-" (paiement jamais confirmé ni
 // explicitement échoué) au-delà de PENDING_TICKET_EXPIRY_MINUTES, et libère l'inventaire
 // qu'ils réservaient — sans cette expiration, un panier abandonné bloque des places pour
-// toujours puisque tickets_sold n'est jamais décrémenté ailleurs. Appelée par Vercel Cron
-// (cf. vercel.json), qui injecte automatiquement Authorization: Bearer <CRON_SECRET>.
+// toujours puisque tickets_sold n'est jamais décrémenté ailleurs. Appelée périodiquement par un
+// planificateur externe (pas Vercel Cron, cf. .env.example) avec Authorization: Bearer <CRON_SECRET>.
 router.get("/api/cron/expire-pending-tickets", async (req: express.Request, res: express.Response) => {
   if (CRON_SECRET && req.headers.authorization !== `Bearer ${CRON_SECRET}`) {
     return res.status(401).json({ error: "Non autorisé." });

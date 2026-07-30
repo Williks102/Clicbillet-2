@@ -1,11 +1,5 @@
 {
   "version": 2,
-  "crons": [
-    {
-      "path": "/api/cron/expire-pending-tickets",
-      "schedule": "*/10 * * * *"
-    }
-  ],
   "builds": [
     {
       "src": "server.ts",
