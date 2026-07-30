@@ -9,10 +9,36 @@ import { verifyPaystackSignature } from "../lib/security.js";
 import { checkoutRateLimiter } from "../lib/rateLimiters.js";
 import { getWaitingRoomEventConfig, advanceAndGetWaitingRoomStatus } from "../lib/waitingRoom.js";
 import { normalizeReferenceIdentifier, findTicketsByReference, confirmPaymentForTickets, notifyPaymentFailedForTickets } from "../lib/paymentConfirmation.js";
-import { PAYSTACK_SECRET_KEY } from "../lib/config.js";
+import { PAYSTACK_SECRET_KEY, PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL } from "../lib/config.js";
 
 const router = express.Router();
 const PAYSTACK_API_BASE = "https://api.paystack.co";
+
+// Relaie tel quel (corps brut + signature d'origine) un événement Paystack qui n'appartient
+// pas à ClicBillet vers l'application qui partage le même compte marchand — la signature
+// HMAC-SHA512 reste valide côté destinataire puisqu'elle porte sur ce même corps brut avec la
+// même clé secrète Paystack, donc son propre vérificateur de webhook fonctionne sans changement.
+async function relayForeignPaystackEvent(req: express.Request): Promise<boolean> {
+  if (!PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL) {
+    console.warn("[Paystack Webhook] Événement d'une autre application reçu mais PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL non configuré — ignoré.");
+    return false;
+  }
+  try {
+    const signature = req.headers["x-paystack-signature"];
+    const relayRes = await fetch(PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(signature ? { "x-paystack-signature": String(signature) } : {})
+      },
+      body: (req as any).rawBody ?? JSON.stringify(req.body || {})
+    });
+    return relayRes.ok;
+  } catch (err: any) {
+    console.error("[Paystack Webhook] Échec du relais vers l'autre application:", err.message);
+    return false;
+  }
+}
 
 // Fetch User Purchased Tickets Endpoint
 router.get("/api/my-tickets", requireAuth, async (req: express.Request, res: express.Response) => {
@@ -491,7 +517,18 @@ router.post("/api/webhooks/paystack", async (req: express.Request, res: express.
   }
 
   const { event, data } = req.body || {};
-  const reference = data?.reference ? normalizeReferenceIdentifier(data.reference) : null;
+  const rawReference = data?.reference ? String(data.reference) : null;
+
+  // Un seul webhook Paystack est configurable par compte marchand (limitation Paystack) : ce
+  // compte est partagé avec une autre application dont les références n'utilisent jamais notre
+  // préfixe "ORD-". On relaie donc tout événement qui n'est pas le nôtre plutôt que de le
+  // traiter ou de le perdre silencieusement.
+  if (rawReference && !rawReference.startsWith("ORD-")) {
+    const relayed = await relayForeignPaystackEvent(req);
+    return res.status(relayed ? 200 : 502).json({ status: relayed ? "success" : "error" });
+  }
+
+  const reference = rawReference ? normalizeReferenceIdentifier(rawReference) : null;
 
   if (!reference) {
     console.warn(`[Paystack Webhook] Événement "${event}" reçu sans référence exploitable.`);

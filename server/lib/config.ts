@@ -10,6 +10,11 @@ dotenv.config();
 export const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
 export const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
 export const PAYSTACK_SECRET_KEY = (process.env.PAYSTACK_SECRET_KEY || "").trim();
+// Paystack n'autorise qu'UNE SEULE URL de webhook par compte marchand (limitation Paystack,
+// pas la nôtre) — ce compte étant partagé avec une autre application, tout événement dont la
+// référence n'utilise pas notre préfixe "ORD-" est relayé tel quel vers cette URL plutôt que
+// traité ou perdu (cf. server/routes/tickets.ts, /api/webhooks/paystack).
+export const PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL = (process.env.PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL || "").trim();
 export const RESEND_API_KEY = (process.env.RESEND_API_KEY || "").trim();
 export const RESEND_FROM_EMAIL = (process.env.RESEND_FROM_EMAIL || "ClicBillet <no-reply@monticket.online>").trim();
 export const ADMIN_NOTIFICATION_EMAIL = (process.env.ADMIN_NOTIFICATION_EMAIL || "admin@monticket.online").trim();
