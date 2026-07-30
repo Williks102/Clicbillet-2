@@ -42,17 +42,89 @@ export async function sendEmail({ to, subject, html }: { to: string; subject: st
   }
 }
 
+// ==========================================
+// HELPERS DE FORMATAGE
+// ==========================================
+
+// Coalescence nulle (pas ||) : un montant de 0 (billet gratuit) est une valeur légitime,
+// contrairement à undefined/null — sinon "0 FCFA" s'affichait "undefined FCFA".
+export function formatXOF(amount: unknown): string {
+  const n = Number(amount ?? 0);
+  return `${Number.isFinite(n) ? n.toLocaleString("fr-FR") : "0"} FCFA`;
+}
+
+// "2026-06-21" -> "21 juin 2026". Repli sur la chaîne d'origine si le format est inattendu,
+// plutôt que d'afficher "Invalid Date".
+export function formatEventDateFr(dateStr: string): string {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+}
+
+// ==========================================
+// GABARIT COMMUN (bandeau de marque + carte + pied de page)
+// ==========================================
+// Tableaux HTML (pas de flexbox/grid) pour un rendu fiable sur les clients mail les plus
+// stricts (Outlook desktop notamment). Couleurs de fond explicites sur le bandeau et la
+// carte : Gmail ne réinterprète en mode sombre que les emails qui n'en définissent aucune.
 export function emailLayout(title: string, bodyHtml: string): string {
   return `
-    <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; color: #1f2937;">
-      <h1 style="color: #ea580c;">ClicBillet</h1>
-      <h2 style="font-size: 18px;">${title}</h2>
-      ${bodyHtml}
-      <p style="margin-top: 32px; font-size: 12px; color: #6b7280;">
-        Cet email a été envoyé automatiquement par ClicBillet, ne pas répondre directement.
-      </p>
-    </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5; padding:32px 16px; font-family:Arial,Helvetica,sans-serif;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px; background-color:#ffffff; border-radius:14px; border:1px solid #e5e7eb;">
+            <tr>
+              <td style="background-color:#ea580c; padding:20px 28px; border-radius:14px 14px 0 0;">
+                <span style="color:#ffffff; font-size:18px; font-weight:bold; letter-spacing:-0.01em;">ClicBillet</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:32px 28px 8px;">
+                <h2 style="margin:0 0 18px; font-size:19px; color:#0f172a;">${title}</h2>
+                ${bodyHtml}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:18px 28px 26px; border-top:1px solid #f1f1f2;">
+                <p style="margin:0; font-size:11.5px; color:#9ca3af; line-height:1.6;">
+                  Cet email a été envoyé automatiquement par ClicBillet, ne pas répondre directement.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
   `;
+}
+
+// Carte tintée pour une liste de paires libellé/valeur (détails d'événement, de vente...).
+// La dernière ligne peut être mise en avant (montant) via emphasizeLast.
+export function infoCard(rows: { label: string; value: string }[], emphasizeLastRow = false): string {
+  const rowsHtml = rows.map((r, i) => {
+    const isLast = emphasizeLastRow && i === rows.length - 1;
+    const borderTop = i > 0 ? "border-top:1px solid #fde3c8;" : "";
+    return `
+      <tr>
+        <td style="padding:7px 0; ${borderTop} font-size:11px; font-weight:bold; letter-spacing:0.04em; text-transform:uppercase; color:#9a3412;">${r.label}</td>
+        <td style="padding:7px 0; ${borderTop} font-size:${isLast ? "16px" : "13.5px"}; font-weight:${isLast ? "800" : "600"}; color:${isLast ? "#c2410c" : "#1c1917"}; text-align:right;">${r.value}</td>
+      </tr>
+    `;
+  }).join("");
+
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#fff7ed; border:1px solid #fed7aa; border-radius:12px; margin-bottom:20px;">
+      <tr>
+        <td style="padding:6px 20px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rowsHtml}</table>
+        </td>
+      </tr>
+    </table>
+  `;
+}
+
+function ctaButton(label: string, url: string): string {
+  return `<a href="${url}" style="display:inline-block; margin:4px 0 22px; padding:12px 22px; background-color:#ea580c; color:#ffffff; text-decoration:none; border-radius:9px; font-weight:bold; font-size:13.5px;">${label}</a>`;
 }
 
 export const ROLE_LABELS: Record<string, string> = {
@@ -65,9 +137,9 @@ export const ROLE_LABELS: Record<string, string> = {
 export function buildWelcomeEmailHtml(name: string, role: string): string {
   const roleLabel = ROLE_LABELS[role] || "Membre";
   return emailLayout("Bienvenue sur ClicBillet !", `
-    <p>Bonjour ${name},</p>
-    <p>Votre compte <strong>${roleLabel}</strong> a bien été créé sur ClicBillet, la plateforme de billetterie événementielle en Côte d'Ivoire.</p>
-    <p>Vous pouvez dès à présent vous connecter et profiter de la plateforme.</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonjour ${name},</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Votre compte <strong>${roleLabel}</strong> a bien été créé sur ClicBillet, la plateforme de billetterie événementielle en Côte d'Ivoire.</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0;">Vous pouvez dès à présent vous connecter et profiter de la plateforme.</p>
   `);
 }
 
@@ -82,10 +154,10 @@ export async function sendWelcomeEmail(user: { email: string; name: string; role
 // --- Réinitialisation de mot de passe ---
 export function buildPasswordResetHtml(name: string, resetUrl: string): string {
   return emailLayout("Réinitialisation de votre mot de passe", `
-    <p>Bonjour ${name},</p>
-    <p>Vous avez demandé à réinitialiser le mot de passe de votre compte ClicBillet. Cliquez sur le lien ci-dessous pour choisir un nouveau mot de passe :</p>
-    <p><a href="${resetUrl}" style="display: inline-block; margin: 12px 0; padding: 12px 20px; background-color: #ea580c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: bold;">Réinitialiser mon mot de passe</a></p>
-    <p style="font-size: 12px; color: #6b7280;">Ce lien expire dans 1 heure. Si vous n'êtes pas à l'origine de cette demande, ignorez simplement cet e-mail : votre mot de passe actuel reste inchangé.</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonjour ${name},</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Vous avez demandé à réinitialiser le mot de passe de votre compte ClicBillet. Cliquez sur le lien ci-dessous pour choisir un nouveau mot de passe :</p>
+    <p>${ctaButton("Réinitialiser mon mot de passe", resetUrl)}</p>
+    <p style="font-size:12px; color:#6b7280; margin:0;">Ce lien expire dans 1 heure. Si vous n'êtes pas à l'origine de cette demande, ignorez simplement cet e-mail : votre mot de passe actuel reste inchangé.</p>
   `);
 }
 
@@ -101,23 +173,39 @@ export async function sendPasswordResetEmail(user: { email: string; name: string
 // Une commande peut regrouper plusieurs billets (un QR code par billet, cf. /api/checkout) :
 // on envoie UN SEUL email par commande listant tous les QR codes, plutôt qu'un email par billet.
 export function buildTicketConfirmationHtml(order: { buyerName: string; eventTitle: string; eventDate: string; eventTime: string; eventVenue: string; tickets: { tier: string; qrCodeData: string }[] }): string {
-  const qrBlocks = order.tickets.map((t, i) => `
-    <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid #e5e7eb;">
-      <p style="margin: 0 0 8px; font-weight: bold;">Billet ${i + 1}/${order.tickets.length} — ${t.tier === "vip" ? "VIP" : "Standard"}</p>
-      <img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(t.qrCodeData)}" alt="QR Code billet ${i + 1}" width="220" height="220" />
-    </div>
-  `).join("");
+  const qrBlocks = order.tickets.map((t, i) => {
+    const tierLabel = t.tier === "vip" ? "VIP" : "Standard";
+    const pillBg = t.tier === "vip" ? "#fef3c7" : "#dbeafe";
+    const pillColor = t.tier === "vip" ? "#92400e" : "#1e40af";
+    return `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb; border-radius:12px; margin-bottom:16px;">
+        <tr>
+          <td style="padding:18px; text-align:center;">
+            <p style="margin:0 0 14px; font-size:12.5px;">
+              <span style="font-weight:bold; color:#6b7280;">Billet ${i + 1}/${order.tickets.length}</span>
+              &nbsp;&nbsp;
+              <span style="display:inline-block; font-size:10px; font-weight:bold; letter-spacing:0.04em; text-transform:uppercase; padding:3px 9px; border-radius:999px; background-color:${pillBg}; color:${pillColor};">${tierLabel}</span>
+            </p>
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(t.qrCodeData)}" alt="QR Code billet ${i + 1}" width="220" height="220" style="border-radius:8px;" />
+            <p style="margin:12px 0 0; font-size:11px; color:#9ca3af;">Valable une seule fois — présentez-le à l'entrée</p>
+          </td>
+        </tr>
+      </table>
+    `;
+  }).join("");
+
+  const details = infoCard([
+    { label: "Événement", value: order.eventTitle },
+    { label: "Date", value: `${formatEventDateFr(order.eventDate)} à ${order.eventTime}` },
+    { label: "Lieu", value: order.eventVenue },
+    { label: "Billets", value: String(order.tickets.length) }
+  ]);
 
   return emailLayout(order.tickets.length > 1 ? "Vos billets sont confirmés !" : "Votre billet est confirmé !", `
-    <p>Bonjour ${order.buyerName},</p>
-    <p>Merci pour votre achat. Voici les détails de votre commande :</p>
-    <ul>
-      <li><strong>Événement :</strong> ${order.eventTitle}</li>
-      <li><strong>Date :</strong> ${order.eventDate} à ${order.eventTime}</li>
-      <li><strong>Lieu :</strong> ${order.eventVenue}</li>
-      <li><strong>Nombre de billets :</strong> ${order.tickets.length}</li>
-    </ul>
-    <p>Présentez le QR code correspondant à chaque billet à l'entrée (1 QR code = 1 personne) :</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonjour ${order.buyerName},</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">Merci pour votre achat. Voici les détails de votre commande :</p>
+    ${details}
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">Présentez le QR code correspondant à chaque billet à l'entrée (1 QR code = 1 personne) :</p>
     ${qrBlocks}
   `);
 }
@@ -133,9 +221,9 @@ export async function sendTicketEmail(order: { buyerEmail: string; buyerName: st
 // --- Acheteur : échec de paiement ---
 export function buildPaymentFailedHtml(ticket: any): string {
   return emailLayout("Échec de votre paiement", `
-    <p>Bonjour ${ticket.buyerName || ticket.buyer_name},</p>
-    <p>Le paiement de votre commande pour l'événement <strong>${ticket.eventTitle || ticket.event_title}</strong> n'a pas pu être validé.</p>
-    <p>Aucun montant n'a été débité de façon définitive. Vous pouvez retenter votre achat depuis la plateforme.</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonjour ${ticket.buyerName || ticket.buyer_name},</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Le paiement de votre commande pour l'événement <strong>${ticket.eventTitle || ticket.event_title}</strong> n'a pas pu être validé.</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0;">Aucun montant n'a été débité de façon définitive. Vous pouvez retenter votre achat depuis la plateforme.</p>
   `);
 }
 
@@ -151,9 +239,9 @@ export async function sendPaymentFailedEmail(ticket: any): Promise<void> {
 // --- Acheteur : réservation expirée faute de paiement dans les temps ---
 export function buildReservationExpiredHtml(ticket: any): string {
   return emailLayout("Votre réservation a expiré", `
-    <p>Bonjour ${ticket.buyerName || ticket.buyer_name},</p>
-    <p>Votre réservation pour l'événement <strong>${ticket.eventTitle || ticket.event_title}</strong> a expiré car le paiement n'a pas été finalisé dans le délai imparti.</p>
-    <p>Aucun montant n'a été débité. Les places ont été remises en vente ; vous pouvez retenter votre achat depuis la plateforme si des billets sont encore disponibles.</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonjour ${ticket.buyerName || ticket.buyer_name},</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Votre réservation pour l'événement <strong>${ticket.eventTitle || ticket.event_title}</strong> a expiré car le paiement n'a pas été finalisé dans le délai imparti.</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0;">Aucun montant n'a été débité. Les places ont été remises en vente ; vous pouvez retenter votre achat depuis la plateforme si des billets sont encore disponibles.</p>
   `);
 }
 
@@ -168,14 +256,16 @@ export async function sendReservationExpiredEmail(ticket: any): Promise<void> {
 
 // --- Organisateur : nouvelle vente ---
 export function buildOrganizerSaleHtml(eventTitle: string, organizerName: string, ticket: any): string {
+  const details = infoCard([
+    { label: "Acheteur", value: ticket.buyerName || ticket.buyer_name },
+    { label: "Quantité", value: `${ticket.quantity} billet${Number(ticket.quantity) > 1 ? "s" : ""}` },
+    { label: "Montant", value: formatXOF(ticket.pricePaid ?? ticket.price_paid) }
+  ], true);
+
   return emailLayout("Nouvelle vente de billet !", `
-    <p>Bonjour ${organizerName},</p>
-    <p>Une nouvelle vente vient d'avoir lieu sur votre événement <strong>${eventTitle}</strong> :</p>
-    <ul>
-      <li><strong>Acheteur :</strong> ${ticket.buyerName || ticket.buyer_name}</li>
-      <li><strong>Quantité :</strong> ${ticket.quantity}</li>
-      <li><strong>Montant :</strong> ${ticket.pricePaid || ticket.price_paid} FCFA</li>
-    </ul>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonjour ${organizerName},</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">Une nouvelle vente vient d'avoir lieu sur votre événement <strong>${eventTitle}</strong> :</p>
+    ${details}
   `);
 }
 
@@ -192,8 +282,8 @@ export async function sendOrganizerSaleEmail(organizerEmail: string, organizerNa
 export function buildOrganizerEventStatusHtml(eventTitle: string, organizerName: string, status: string): string {
   const statusLabel = status === "approved" ? "approuvé" : "rejeté";
   return emailLayout(`Votre événement a été ${statusLabel}`, `
-    <p>Bonjour ${organizerName},</p>
-    <p>Votre événement <strong>${eventTitle}</strong> a été <strong>${statusLabel}</strong> par l'équipe de modération ClicBillet.</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonjour ${organizerName},</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0;">Votre événement <strong>${eventTitle}</strong> a été <strong>${statusLabel}</strong> par l'équipe de modération ClicBillet.</p>
   `);
 }
 
@@ -211,9 +301,13 @@ export async function sendOrganizerEventStatusEmail(organizerEmail: string, orga
 export function buildOrganizerPayoutStatusHtml(organizerName: string, payout: any): string {
   const statusLabels: Record<string, string> = { completed: "complété", rejected: "rejeté", pending: "en attente" };
   const statusLabel = statusLabels[payout.status] || payout.status;
+  const details = infoCard([
+    { label: "Méthode", value: payout.method },
+    { label: "Montant", value: formatXOF(payout.amount) }
+  ], true);
   return emailLayout(`Votre demande de retrait est ${statusLabel}`, `
-    <p>Bonjour ${organizerName},</p>
-    <p>Votre demande de retrait de <strong>${payout.amount} FCFA</strong> (méthode : ${payout.method}) est désormais <strong>${statusLabel}</strong>.</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">Bonjour ${organizerName}, votre demande de retrait est désormais <strong>${statusLabel}</strong> :</p>
+    ${details}
   `);
 }
 
@@ -228,12 +322,13 @@ export async function sendOrganizerPayoutStatusEmail(organizerEmail: string, org
 
 // --- Admin : nouvelle inscription organisateur ---
 export function buildAdminNewOrganizerHtml(user: { name: string; email: string }): string {
+  const details = infoCard([
+    { label: "Nom", value: user.name },
+    { label: "Email", value: user.email }
+  ]);
   return emailLayout("Nouvel organisateur inscrit", `
-    <p>Un nouvel organisateur vient de s'inscrire sur ClicBillet :</p>
-    <ul>
-      <li><strong>Nom :</strong> ${user.name}</li>
-      <li><strong>Email :</strong> ${user.email}</li>
-    </ul>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">Un nouvel organisateur vient de s'inscrire sur ClicBillet :</p>
+    ${details}
   `);
 }
 
@@ -247,13 +342,14 @@ export async function sendAdminNewOrganizerEmail(user: { name: string; email: st
 
 // --- Admin : nouvelle demande de retrait ---
 export function buildAdminPayoutRequestHtml(organizerName: string, payout: any): string {
+  const details = infoCard([
+    { label: "Méthode", value: payout.method },
+    { label: "Montant", value: formatXOF(payout.amount) }
+  ], true);
   return emailLayout("Nouvelle demande de retrait", `
-    <p>L'organisateur <strong>${organizerName}</strong> a soumis une nouvelle demande de retrait :</p>
-    <ul>
-      <li><strong>Montant :</strong> ${payout.amount} FCFA</li>
-      <li><strong>Méthode :</strong> ${payout.method}</li>
-    </ul>
-    <p>Rendez-vous sur le tableau de bord admin pour la traiter.</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">L'organisateur <strong>${organizerName}</strong> a soumis une nouvelle demande de retrait :</p>
+    ${details}
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0;">Rendez-vous sur le tableau de bord admin pour la traiter.</p>
   `);
 }
 
@@ -264,4 +360,3 @@ export async function sendAdminPayoutRequestEmail(organizerName: string, payout:
     html: buildAdminPayoutRequestHtml(organizerName, payout)
   });
 }
-
