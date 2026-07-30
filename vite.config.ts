@@ -41,8 +41,6 @@ export default defineConfig(() => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,svg,woff2}'],
-          // Don't cache payment SDK — always fresh
-          globIgnores: ['**/paiementpro*'],
           runtimeCaching: [
             {
               // Events list: network-first, fallback to cache (5 min TTL)

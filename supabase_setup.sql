@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS public.tickets (
 -- après la création initiale de "public.tickets".
 ALTER TABLE public.tickets ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1;
 
--- 5quater. Une commande (ORD-xxxxx, référence envoyée à PaiementPro) peut désormais
+-- 5quater. Une commande (ORD-xxxxx, référence envoyée à la passerelle de paiement) peut désormais
 -- contenir plusieurs types de billets (ex: 2 Standard + 1 VIP) : chaque type devient sa
 -- propre ligne "tickets" (son propre QR code, son propre transaction_ref unique), reliées
 -- entre elles par order_id. NULL pour les billets créés avant cette migration (compatibilité

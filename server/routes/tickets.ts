@@ -5,13 +5,14 @@ import { requireAuth, requireRole, optionalAuth } from "../lib/auth.js";
 import { validateCheckout, validateVerifyTicket } from "../lib/validators.js";
 import { runInBackground, isEventPast } from "../lib/utils.js";
 import { sendOrganizerSaleEmail, sendTicketEmail } from "../lib/email.js";
-import { buildWebhookNotificationUrl, corsAllowedOrigin, getWebhookSecretFromRequest, verifyPaymentSignature } from "../lib/security.js";
+import { verifyPaystackSignature } from "../lib/security.js";
 import { checkoutRateLimiter } from "../lib/rateLimiters.js";
 import { getWaitingRoomEventConfig, advanceAndGetWaitingRoomStatus } from "../lib/waitingRoom.js";
 import { normalizeReferenceIdentifier, findTicketsByReference, confirmPaymentForTickets, notifyPaymentFailedForTickets } from "../lib/paymentConfirmation.js";
-import { PAYMENT_WEBHOOK_SECRET, PAYMENT_PRO_CALLBACK_SECRET } from "../lib/config.js";
+import { PAYSTACK_SECRET_KEY } from "../lib/config.js";
 
 const router = express.Router();
+const PAYSTACK_API_BASE = "https://api.paystack.co";
 
 // Fetch User Purchased Tickets Endpoint
 router.get("/api/my-tickets", requireAuth, async (req: express.Request, res: express.Response) => {
@@ -164,8 +165,8 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
   }
 
   const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
-  // Référence de COMMANDE envoyée à PaiementPro et reçue dans le webhook — une commande
-  // (ORD-) peut regrouper plusieurs lignes "tickets" (TKT-), une par type de billet choisi.
+  // Référence de COMMANDE utilisée comme "reference" Paystack (webhook + vérification) — une
+  // commande (ORD-) peut regrouper plusieurs lignes "tickets" (TKT-), une par type de billet choisi.
   const orderId = `ORD-${Date.now()}`;
   const code = GATEWAY_SHORT_NAMES[paymentDetails.method] || "PAY";
 
@@ -278,7 +279,7 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
       } catch (e: any) { console.warn("Supabase tx log error:", e.message); }
 
       // Pour les billets gratuits, on confirme immédiatement (FREE- au lieu de PENDING-)
-      // afin d'éviter d'attendre un webhook PaiementPro qui ne viendra jamais.
+      // afin d'éviter d'attendre un webhook Paystack qui ne viendra jamais.
       if (totalPrice === 0) {
         ticketRows.forEach((t) => {
           t.transaction_ref = t.transaction_ref.replace("PENDING-", "FREE-");
@@ -360,9 +361,7 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
           ? "Inscription gratuite confirmée ! Votre billet vous a été envoyé par email."
           : "Achat de billets effectué avec succès !",
         orderId,
-        tickets: mappedTickets,
-        // notificationUrl inutile pour les billets gratuits (pas de webhook attendu)
-        ...(totalPrice > 0 && { notificationUrl: buildWebhookNotificationUrl(req) })
+        tickets: mappedTickets
       });
     } catch (err: any) {
       console.error("[Supabase Error] Checkout, falling back to local file DB:", err.message);
@@ -476,110 +475,97 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
       ? "Inscription gratuite confirmée ! Votre billet vous a été envoyé par email."
       : "Achat de billets effectué avec succès !",
     orderId,
-    tickets: newTickets,
-    ...(totalPrice > 0 && { notificationUrl: buildWebhookNotificationUrl(req) })
+    tickets: newTickets
   });
 });
 
-router.options("/api/payment/callback", (req: express.Request, res: express.Response) => {
-  const origin = corsAllowedOrigin(req);
-  if (origin) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-PaiementPro-Signature, X-Signature, X-Webhook-Signature");
-  return res.status(200).end();
-});
-
-router.post("/api/payment/callback", async (req: express.Request, res: express.Response) => {
-  const origin = corsAllowedOrigin(req);
-  if (origin) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-  res.setHeader("Access-Control-Allow-Methods", "POST");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-PaiementPro-Signature, X-Signature, X-Webhook-Signature");
-
-  const providedWebhookSecret = getWebhookSecretFromRequest(req);
-  if (!PAYMENT_WEBHOOK_SECRET) {
-    console.error("[PaiementPro Callback] PAYMENT_WEBHOOK_SECRET non configuré.");
-    return res.status(500).json({ status: "error", message: "Webhook secret manquant." });
-  }
-
-  if (providedWebhookSecret !== PAYMENT_WEBHOOK_SECRET) {
-    console.warn("[PaiementPro Callback] Tentative rejetée : token webhook absent ou invalide.", {
-      providedWebhookSecret,
-      ip: req.ip,
-      query: req.query
-    });
-    return res.status(401).json({ status: "error", message: "Non autorisé." });
-  }
-
-  console.log("=== CALLBACK PAIEMENT PRO REÇU ===");
-  console.log("Headers:", req.headers);
-  console.log("Body reçu:", req.body);
-  console.log("Query parameters:", req.query);
-
-  // ATTENTION : le support PaiementPro/XPAYE a confirmé qu'aucune signature HMAC n'est
-  // actuellement émise sur leurs callbacks (cf. WEBHOOK-SECURITY-PATCH.md). Tant que
-  // PAYMENT_PRO_CALLBACK_SECRET reste vide, ce bloc est un no-op : la vraie barrière contre
-  // les requêtes forgées est le secret `wh` ci-dessus, combiné au fait qu'un ticket reste
-  // PENDING- (donc non scannable, cf. /api/verify-ticket) tant qu'aucune confirmation
-  // n'arrive ici. Ne pas configurer PAYMENT_PRO_CALLBACK_SECRET en pensant que ça active une
-  // vérification réelle — ce code n'a d'effet que si PaiementPro ajoute un jour la signature.
-  if (PAYMENT_PRO_CALLBACK_SECRET && !verifyPaymentSignature(req)) {
-    console.error("[PaiementPro Callback] Signature invalide ou absente.");
+// Webhook Paystack : appelé serveur-à-serveur (pas de préflight CORS nécessaire), l'URL est
+// configurée une seule fois dans le Dashboard Paystack (Settings > API Keys & Webhooks), pas
+// par requête comme l'était notificationURL sous PaiementPro. La signature x-paystack-signature
+// (HMAC-SHA512 du corps brut avec la clé secrète) est une vraie barrière cryptographique —
+// contrairement à PaiementPro, Paystack signe réellement chaque événement.
+router.post("/api/webhooks/paystack", async (req: express.Request, res: express.Response) => {
+  if (!verifyPaystackSignature(req)) {
+    console.error("[Paystack Webhook] Signature invalide ou absente.");
     return res.status(401).json({ status: "error", message: "Signature invalide." });
   }
 
-  // Extraction des données classiques envoyées par Paiement Pro
-  const rawReferenceNumber = req.body.referenceNumber || req.query.referenceNumber || req.body.reference || req.query.reference || req.body.reference_number || req.query.reference_number || req.body.ref_command || req.query.ref_command || req.body.id || req.body.custom || req.query.custom || req.body.transaction_id || req.body.ticket_id || req.query.ticket_id;
-  const status = req.body.status || req.query.status || req.body.response_code || req.query.response_code || req.body.statut;
+  const { event, data } = req.body || {};
+  const reference = data?.reference ? normalizeReferenceIdentifier(data.reference) : null;
 
-  const referenceNumber = normalizeReferenceIdentifier(rawReferenceNumber);
-  const rawReferenceNumberDisplay = String(rawReferenceNumber ?? "").trim();
-
-  console.log(`[PaiementPro] Raw reference : ${rawReferenceNumberDisplay}`);
-  console.log(`[PaiementPro] Normalized referenceNumber : ${referenceNumber}`);
-
-  if (!referenceNumber) {
-    console.error("Erreur : Données de ciblage manquantes dans le body");
-    return res.status(400).json({ status: "error", message: "referenceNumber ou champ d'identifiant manquant" });
+  if (!reference) {
+    console.warn(`[Paystack Webhook] Événement "${event}" reçu sans référence exploitable.`);
+    return res.status(200).json({ status: "success" });
   }
 
-  console.log(`[PaiementPro] Traitement du paiement pour la référence : ${referenceNumber}, statut reçu : ${status}`);
+  console.log(`[Paystack Webhook] Événement "${event}" reçu pour la référence ${reference}.`);
 
-  const normalizedStatus = typeof status === "string" ? status.toLowerCase() : status;
-
-  // Try to read numeric response code sent by some providers (responsecode, response_code, responseCode)
-  const rawResponseCode = req.body.responsecode ?? req.query.responsecode ?? req.body.response_code ?? req.query.response_code ?? req.body.responseCode ?? req.query.responseCode;
-  const numericResponseCode = rawResponseCode !== undefined && rawResponseCode !== null && rawResponseCode !== "" ? Number(String(rawResponseCode).replace(/[^0-9\-]/g, "")) : null;
-
-  let isSuccess: boolean;
-  if (numericResponseCode !== null && !Number.isNaN(numericResponseCode)) {
-    isSuccess = numericResponseCode === 0;
-  } else {
-    isSuccess = normalizedStatus === "success" || normalizedStatus === "paid" || req.body.success === true;
+  const resolvedTickets = await findTicketsByReference([reference]);
+  if (resolvedTickets.length === 0) {
+    console.warn(`[Paystack Webhook] Aucun billet trouvé pour la référence : ${reference}`);
+    return res.status(200).json({ status: "success" });
   }
 
-  console.log(`[PaiementPro] Raw response code: ${rawResponseCode} -> numeric: ${numericResponseCode}, interpreted success: ${isSuccess}`);
+  if (event === "charge.success") {
+    const confirmedCount = await confirmPaymentForTickets(resolvedTickets);
+    console.log(`[Paystack Webhook] ${confirmedCount}/${resolvedTickets.length} billet(s) confirmé(s) pour la référence ${reference}.`);
+  } else if (event === "charge.failed") {
+    await notifyPaymentFailedForTickets(resolvedTickets);
+  }
 
-  // La référence reçue peut être un order_id (ORD-xxxxx, commande multi-types) ou, pour
-  // compatibilité avec les anciens billets, un id/transaction_ref individuel.
-  const resolvedTickets = await findTicketsByReference([referenceNumber, rawReferenceNumberDisplay]);
+  res.status(200).json({ status: "success" });
+});
 
-  if (resolvedTickets.length > 0) {
-    if (!isSuccess) {
-      console.log(`[PaiementPro Callback] Callback NON-succès pour la référence ${referenceNumber} (responsecode=${numericResponseCode}). Aucune mise à jour appliquée.`);
-      await notifyPaymentFailedForTickets(resolvedTickets);
-    } else {
-      const confirmedCount = await confirmPaymentForTickets(resolvedTickets);
-      console.log(`[PaiementPro Callback] ${confirmedCount}/${resolvedTickets.length} billet(s) confirmé(s) pour la référence ${referenceNumber}.`);
+// Vérification instantanée côté client : appelée juste après que le popup Paystack Inline
+// ait renvoyé sa callback (response.reference), pour confirmer le billet sans attendre la
+// latence du webhook. Ne fait confiance à rien venant du navigateur : re-interroge l'API
+// Paystack (Verify Transaction) avec la clé secrète, seule source de vérité fiable. Le webhook
+// ci-dessus reste la confirmation faisant autorité si l'utilisateur ferme l'onglet avant que
+// cet appel n'aboutisse — confirmPaymentForTickets est idempotent, donc les deux peuvent
+// s'exécuter sans double confirmation ni double email.
+router.post("/api/payment/verify", checkoutRateLimiter, async (req: express.Request, res: express.Response) => {
+  const { reference: rawReference } = req.body as { reference?: string };
+  const reference = normalizeReferenceIdentifier(rawReference);
+  if (!reference) {
+    return res.status(400).json({ error: "reference requise." });
+  }
+  if (!PAYSTACK_SECRET_KEY) {
+    console.error("[Paystack Verify] PAYSTACK_SECRET_KEY non configuré.");
+    return res.status(500).json({ error: "Vérification de paiement indisponible." });
+  }
+
+  let paystackStatus: string;
+  try {
+    const verifyRes = await fetch(`${PAYSTACK_API_BASE}/transaction/verify/${encodeURIComponent(reference)}`, {
+      headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` }
+    });
+    const body: any = await verifyRes.json();
+    if (!verifyRes.ok || !body?.status) {
+      console.error("[Paystack Verify] Réponse invalide de l'API Paystack:", body);
+      return res.status(502).json({ error: "Impossible de vérifier la transaction auprès de Paystack." });
     }
-    return res.status(200).json({ status: "success", message: "Notification traitée" });
+    paystackStatus = body.data?.status;
+  } catch (err: any) {
+    console.error("[Paystack Verify] Erreur réseau:", err.message);
+    return res.status(502).json({ error: "Erreur réseau lors de la vérification du paiement." });
   }
 
-  console.warn(`[PaiementPro Callback] Aucun billet trouvé pour la référence : ${referenceNumber}`);
-  res.status(200).json({ status: "success", message: "Notification traitée" });
+  const resolvedTickets = await findTicketsByReference([reference]);
+  if (resolvedTickets.length === 0) {
+    return res.status(404).json({ error: "Commande introuvable pour cette référence." });
+  }
+
+  if (paystackStatus === "success") {
+    const confirmedCount = await confirmPaymentForTickets(resolvedTickets);
+    console.log(`[Paystack Verify] ${confirmedCount}/${resolvedTickets.length} billet(s) confirmé(s) pour la référence ${reference}.`);
+    return res.json({ success: true, status: "success" });
+  }
+
+  if (paystackStatus === "failed") {
+    await notifyPaymentFailedForTickets(resolvedTickets);
+  }
+
+  res.json({ success: false, status: paystackStatus });
 });
 
 router.post("/api/dev/simulate-payment", async (req: express.Request, res: express.Response) => {
@@ -663,7 +649,7 @@ router.post("/api/verify-ticket", requireAuth, requireRole("organizer", "admin")
       }
 
       // Un billet créé via /api/checkout reste en "PENDING-" tant que le paiement n'a
-      // pas été confirmé (callback PaiementPro ou validation manuelle admin). On refuse
+      // pas été confirmé (webhook Paystack ou validation manuelle admin). On refuse
       // le scan tant que ce n'est pas le cas, quelle que soit la fiabilité du webhook.
       if (String(ticket.transaction_ref || "").startsWith("PENDING-")) {
         return res.status(409).json({
@@ -716,7 +702,7 @@ router.post("/api/verify-ticket", requireAuth, requireRole("organizer", "admin")
   }
 
   // Un billet créé via /api/checkout reste en "PENDING-" tant que le paiement n'a pas
-  // été confirmé (callback PaiementPro ou validation manuelle admin). On refuse le scan
+  // été confirmé (webhook Paystack ou validation manuelle admin). On refuse le scan
   // tant que ce n'est pas le cas, quelle que soit la fiabilité du webhook.
   if (String(ticket.transactionRef || "").startsWith("PENDING-")) {
     return res.status(409).json({

@@ -4,7 +4,7 @@ import { runInBackground } from "./utils.js";
 import { sendTicketEmail, sendPaymentFailedEmail } from "./email.js";
 import { releaseWaitingRoomSlot } from "./waitingRoom.js";
 
-// Callback / Webhook endpoint pour recevoir les notifications de Paiement Pro (CI)
+// Callback / Webhook endpoint pour recevoir les notifications de Paystack
 export function normalizeReferenceIdentifier(value: any): string | null {
   if (value === undefined || value === null) return null;
   const text = String(value).trim();
@@ -15,10 +15,10 @@ export function normalizeReferenceIdentifier(value: any): string | null {
 /**
  * RÉSOLUTION + CONFIRMATION DE PAIEMENT PAR RÉFÉRENCE
  *
- * Une commande (order_id, format ORD-xxxxx, c'est la référence envoyée à PaiementPro) peut
+ * Une commande (order_id, format ORD-xxxxx, c'est la référence Paystack) peut
  * regrouper plusieurs lignes "tickets" (un type de billet par ligne, ex: 2 Standard + 1 VIP).
  * Ces trois fonctions sont partagées par les trois points d'entrée qui confirment un
- * paiement : le webhook PaiementPro, la simulation dev, et la validation manuelle admin —
+ * paiement : le webhook Paystack, la simulation dev, et la validation manuelle admin —
  * avant cette factorisation chacun dupliquait sa propre logique de recherche/mise à jour,
  * ce qui aurait rendu très facile d'oublier l'un des trois lors du passage au multi-types.
  *
@@ -93,7 +93,7 @@ export function groupTicketsByOrder(shapedTickets: any[]): any[][] {
 // Confirme (PENDING- -> PAID-) tous les tickets résolus qui sont encore en attente.
 // Idempotent par construction : un ticket déjà confirmé (transaction_ref ne commence plus
 // par "PENDING-") est silencieusement ignoré, pour ne pas renvoyer l'email de billet à
-// chaque retry du webhook PaiementPro. Retourne le nombre de tickets effectivement confirmés.
+// chaque retry du webhook Paystack. Retourne le nombre de tickets effectivement confirmés.
 export async function confirmPaymentForTickets(resolvedTickets: ResolvedTicket[]): Promise<number> {
   let confirmedCount = 0;
   // findTicketsByReference() a sa propre copie en mémoire de db.json (un getDB() distinct) :
