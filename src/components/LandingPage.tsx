@@ -129,6 +129,8 @@ export default function LandingPage({ events, onBuyTicket, userRole }: LandingPa
                     <img
                       src={evt.banner}
                       alt={evt.title}
+                      loading="lazy"
+                      decoding="async"
                       className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                       referrerPolicy="no-referrer"
                     />
