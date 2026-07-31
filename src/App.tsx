@@ -11,6 +11,8 @@ import WaitingRoom from "./components/WaitingRoom";
 import GuestOrAuthModal, { GuestInfo } from "./components/GuestOrAuthModal";
 import ToastStack, { ToastItem } from "./components/ToastStack";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
+import TermsPage from "./components/legal/TermsPage";
+import PrivacyPage from "./components/legal/PrivacyPage";
 import { User, Event } from "./types";
 import { Calendar, Compass, ShieldAlert, Sparkles } from "lucide-react";
 import { supabaseClient } from "./lib/supabaseClient";
@@ -293,6 +295,10 @@ export default function App() {
             {activeTab === "scanner" && user && user.role === "organizer" && (
               <QrScannerTab user={user} onTokenRefresh={handleTokenRefresh} />
             )}
+
+            {activeTab === "terms" && <TermsPage onBack={() => setActiveTab("home")} />}
+
+            {activeTab === "privacy" && <PrivacyPage onBack={() => setActiveTab("home")} />}
           </>
         )}
       </main>
@@ -340,11 +346,15 @@ export default function App() {
       {/* Page Footer */}
       <footer className="mt-auto border-t border-gray-100 bg-white py-6 text-center text-xs text-gray-400 font-semibold uppercase tracking-wider print:hidden">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p>© 2026 clicbillet. Tous droits réservés.</p>
+          <p>© {new Date().getFullYear()} clicbillet. Tous droits réservés.</p>
           <div className="flex space-x-4">
-            <span className="hover:text-gray-600">Conditions d'Utilisation</span>
+            <button onClick={() => setActiveTab("terms")} className="hover:text-gray-600">
+              Conditions Générales de Vente
+            </button>
             <span>•</span>
-            <span className="hover:text-gray-600">Confidentialité 225</span>
+            <button onClick={() => setActiveTab("privacy")} className="hover:text-gray-600">
+              Confidentialité
+            </button>
           </div>
         </div>
       </footer>
