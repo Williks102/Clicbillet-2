@@ -13,10 +13,16 @@ import ToastStack, { ToastItem } from "./components/ToastStack";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
 import TermsPage from "./components/legal/TermsPage";
 import PrivacyPage from "./components/legal/PrivacyPage";
+import ProfilePage from "./components/ProfilePage";
+import BottomTabBar from "./components/native/BottomTabBar";
 import { User, Event } from "./types";
 import { Calendar, Compass, ShieldAlert, Sparkles } from "lucide-react";
 import { supabaseClient } from "./lib/supabaseClient";
 import { fetchPublicEvents } from "./lib/publicEvents";
+import { isNativeApp } from "./lib/platform";
+
+// Calculée une seule fois : Capacitor.isNativePlatform() ne change jamais pendant la vie de l'app.
+const nativeApp = isNativeApp();
 
 export default function App() {
   const [user, setUser] = useState<User | null>((() => {
@@ -218,19 +224,35 @@ export default function App() {
     }
   }
 
+  // Onglet "Recherche" de la barre native : reste sur l'accueil (où vit déjà la recherche
+  // événements) et donne le focus au champ, plutôt que de dupliquer un écran de recherche.
+  function handleFocusSearch() {
+    setActiveTab("home");
+    requestAnimationFrame(() => {
+      document.getElementById("event-search-input")?.focus();
+    });
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-900" id="main-application-frame">
-      {/* Universal header navigation */}
-      <Navbar
-        user={user}
-        onLogout={handleLogout}
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        onOpenAuth={() => {
-          setCheckoutEvent(null);
-          setAuthModalVisible(true);
-        }}
-      />
+    <div
+      className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-900"
+      id="main-application-frame"
+      style={nativeApp ? { paddingTop: "env(safe-area-inset-top)" } : undefined}
+    >
+      {/* Universal header navigation (web uniquement — remplacé par la barre d'onglets
+          native en bas quand l'app tourne dans Capacitor) */}
+      {!nativeApp && (
+        <Navbar
+          user={user}
+          onLogout={handleLogout}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onOpenAuth={() => {
+            setCheckoutEvent(null);
+            setAuthModalVisible(true);
+          }}
+        />
+      )}
 
       {/* Network or database connection alerts */}
       {systemAlert && (
@@ -243,7 +265,10 @@ export default function App() {
       )}
 
       {/* Primary viewport content context router */}
-      <main className="flex-1 mx-auto w-full max-w-7xl overflow-hidden px-3 py-6 sm:px-6 sm:py-8">
+      <main
+        className={`flex-1 mx-auto w-full max-w-7xl overflow-hidden px-3 py-6 sm:px-6 sm:py-8 ${nativeApp ? "pb-24" : ""}`}
+        style={nativeApp ? { paddingBottom: "calc(env(safe-area-inset-bottom) + 5rem)" } : undefined}
+      >
         {authModalVisible ? (
           <AuthPage
             onSuccess={handleLoginSuccess}
@@ -299,6 +324,10 @@ export default function App() {
             {activeTab === "terms" && <TermsPage onBack={() => setActiveTab("home")} />}
 
             {activeTab === "privacy" && <PrivacyPage onBack={() => setActiveTab("home")} />}
+
+            {activeTab === "profile" && user && (
+              <ProfilePage user={user} onLogout={handleLogout} setActiveTab={setActiveTab} />
+            )}
           </>
         )}
       </main>
@@ -343,21 +372,39 @@ export default function App() {
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
       <PwaInstallPrompt />
 
-      {/* Page Footer */}
-      <footer className="mt-auto border-t border-gray-100 bg-white py-6 text-center text-xs text-gray-400 font-semibold uppercase tracking-wider print:hidden">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p>© {new Date().getFullYear()} clicbillet. Tous droits réservés.</p>
-          <div className="flex space-x-4">
-            <button onClick={() => setActiveTab("terms")} className="hover:text-gray-600">
-              Conditions Générales de Vente
-            </button>
-            <span>•</span>
-            <button onClick={() => setActiveTab("privacy")} className="hover:text-gray-600">
-              Confidentialité
-            </button>
+      {/* Page Footer web (masqué en app native : CGV/Confidentialité/déconnexion vivent déjà
+          dans l'onglet Profil de la barre native, un footer "copyright" n'a pas sa place dans
+          une app installée). */}
+      {!nativeApp && (
+        <footer className="mt-auto border-t border-gray-100 bg-white py-6 text-center text-xs text-gray-400 font-semibold uppercase tracking-wider print:hidden">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p>© {new Date().getFullYear()} clicbillet. Tous droits réservés.</p>
+            <div className="flex space-x-4">
+              <button onClick={() => setActiveTab("terms")} className="hover:text-gray-600">
+                Conditions Générales de Vente
+              </button>
+              <span>•</span>
+              <button onClick={() => setActiveTab("privacy")} className="hover:text-gray-600">
+                Confidentialité
+              </button>
+            </div>
           </div>
-        </div>
-      </footer>
+        </footer>
+      )}
+
+      {/* Barre d'onglets native, fixe en bas — uniquement dans le conteneur Capacitor */}
+      {nativeApp && (
+        <BottomTabBar
+          user={user}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onFocusSearch={handleFocusSearch}
+          onOpenAuth={() => {
+            setCheckoutEvent(null);
+            setAuthModalVisible(true);
+          }}
+        />
+      )}
     </div>
   );
 }
