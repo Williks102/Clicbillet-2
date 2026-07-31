@@ -56,6 +56,20 @@ router.get("/api/events", async (req: express.Request, res: express.Response) =>
         tierSoldByEvent[t.event_id][t.tier] = (tierSoldByEvent[t.event_id][t.tier] || 0) + 1;
       }
 
+      // Alias public de chaque organisateur (si défini) : permet au frontend de rendre le
+      // nom de l'organisateur cliquable vers sa page /o/:alias, sans requête par événement.
+      const organizerAliasById: Record<string, string> = {};
+      const organizerIds = [...new Set((data || []).map((e: any) => e.organizer_id).filter(Boolean))];
+      if (organizerIds.length > 0) {
+        const { data: organizerUsers } = await supabase
+          .from("users")
+          .select("id, organizer_alias")
+          .in("id", organizerIds);
+        for (const u of organizerUsers || []) {
+          if (u.organizer_alias) organizerAliasById[u.id] = u.organizer_alias;
+        }
+      }
+
       // Map snake_case columns back to camelCase frontend expectations
       const mappedEvents = (data || []).map((e: any) => ({
         id: e.id,
@@ -72,6 +86,7 @@ router.get("/api/events", async (req: express.Request, res: express.Response) =>
         totalTickets: e.total_tickets,
         organizerId: e.organizer_id,
         organizerName: e.organizer_name,
+        organizerAlias: organizerAliasById[e.organizer_id] || null,
         status: e.status || "approved",
         waitingRoomEnabled: e.waiting_room_enabled,
         waitingRoomCapacity: e.waiting_room_capacity,
@@ -99,7 +114,116 @@ router.get("/api/events", async (req: express.Request, res: express.Response) =>
     const tierKey = String(t.tier || "standard").toLowerCase();
     tierSoldLocal[eid][tierKey] = (tierSoldLocal[eid][tierKey] || 0) + 1;
   }
-  res.json(events.map((e: any) => ({ ...e, ticketsSoldByTier: tierSoldLocal[e.id] || {} })));
+  res.json(events.map((e: any) => {
+    const organizerUser = (db.users || []).find((u: any) => u.id === e.organizerId) as any;
+    return {
+      ...e,
+      organizerAlias: organizerUser?.organizerAlias || null,
+      ticketsSoldByTier: tierSoldLocal[e.id] || {}
+    };
+  }));
+});
+
+// Page publique organisateur (/o/:alias côté frontend) : nom, alias, bio, et ses
+// événements approuvés. Public, aucune authentification requise — mêmes données que le
+// catalogue général, simplement filtrées à un organisateur.
+router.get("/api/organizers/:alias", async (req: express.Request, res: express.Response) => {
+  const alias = String(req.params.alias || "").trim().toLowerCase();
+  if (!alias) return res.status(404).json({ error: "Organisateur introuvable." });
+
+  res.set("Cache-Control", "public, max-age=20, stale-while-revalidate=60");
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { data: organizerUser, error: userError } = await supabase
+        .from("users")
+        .select("id, name, organizer_alias, organizer_bio")
+        .ilike("organizer_alias", alias)
+        .eq("role", "organizer")
+        .maybeSingle();
+      if (userError) throw userError;
+      if (!organizerUser) return res.status(404).json({ error: "Organisateur introuvable." });
+
+      const { data: events, error: eventsError } = await supabase
+        .from("events")
+        .select("*")
+        .eq("organizer_id", organizerUser.id)
+        .eq("status", "approved")
+        .order("created_at", { ascending: false });
+      if (eventsError) throw eventsError;
+
+      const eventIds = (events || []).map((e: any) => e.id);
+      const tierSoldByEvent: Record<string, Record<string, number>> = {};
+      if (eventIds.length > 0) {
+        const { data: tierTickets } = await supabase
+          .from("tickets")
+          .select("event_id, tier")
+          .in("event_id", eventIds)
+          .not("transaction_ref", "like", "PENDING-%")
+          .not("transaction_ref", "like", "FAILED-%");
+        for (const t of tierTickets || []) {
+          if (!tierSoldByEvent[t.event_id]) tierSoldByEvent[t.event_id] = {};
+          tierSoldByEvent[t.event_id][t.tier] = (tierSoldByEvent[t.event_id][t.tier] || 0) + 1;
+        }
+      }
+
+      return res.json({
+        organizer: {
+          id: organizerUser.id,
+          name: organizerUser.name,
+          alias: organizerUser.organizer_alias,
+          bio: organizerUser.organizer_bio || null,
+        },
+        events: (events || []).map((e: any) => ({
+          id: e.id,
+          title: e.title,
+          description: e.description,
+          date: e.date,
+          time: e.time,
+          price: Number(e.price),
+          ticketTypes: e.ticket_types,
+          venue: e.venue,
+          category: e.category,
+          banner: e.banner,
+          ticketsSold: e.tickets_sold ?? 0,
+          totalTickets: e.total_tickets,
+          organizerId: e.organizer_id,
+          organizerName: e.organizer_name,
+          status: e.status || "approved",
+          waitingRoomEnabled: e.waiting_room_enabled,
+          waitingRoomCapacity: e.waiting_room_capacity,
+          ticketsSoldByTier: tierSoldByEvent[e.id] || {},
+        })),
+      });
+    } catch (err: any) {
+      console.error("[Supabase Error] Fetching organizer profile, falling back to local file DB:", err.message);
+    }
+  }
+
+  const db = getDB();
+  const dbUser = (db.users || []).find((u: any) =>
+    u.role === "organizer" && String(u.organizerAlias || "").toLowerCase() === alias
+  ) as any;
+  if (!dbUser) return res.status(404).json({ error: "Organisateur introuvable." });
+
+  const events = (db.events || []).filter((e: any) =>
+    e.organizerId === dbUser.id && (e.status === "approved" || !e.status)
+  );
+  const allTickets: any[] = db.tickets || [];
+  const tierSoldLocal: Record<string, Record<string, number>> = {};
+  for (const t of allTickets) {
+    const ref = String(t.transactionRef || t.transaction_ref || "");
+    if (ref.startsWith("PENDING-") || ref.startsWith("FAILED-")) continue;
+    const eid = t.eventId || t.event_id;
+    if (!tierSoldLocal[eid]) tierSoldLocal[eid] = {};
+    const tierKey = String(t.tier || "standard").toLowerCase();
+    tierSoldLocal[eid][tierKey] = (tierSoldLocal[eid][tierKey] || 0) + 1;
+  }
+
+  res.json({
+    organizer: { id: dbUser.id, name: dbUser.name, alias: dbUser.organizerAlias, bio: dbUser.organizerBio || null },
+    events: events.map((e: any) => ({ ...e, ticketsSoldByTier: tierSoldLocal[e.id] || {} })),
+  });
 });
 
 // Create Event Endpoint for Organizers

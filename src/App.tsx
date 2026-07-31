@@ -14,6 +14,7 @@ import PwaInstallPrompt from "./components/PwaInstallPrompt";
 import TermsPage from "./components/legal/TermsPage";
 import PrivacyPage from "./components/legal/PrivacyPage";
 import ProfilePage from "./components/ProfilePage";
+import OrganizerProfilePage from "./components/OrganizerProfilePage";
 import BottomTabBar from "./components/native/BottomTabBar";
 import { User, Event } from "./types";
 import { Calendar, Compass, ShieldAlert, Sparkles } from "lucide-react";
@@ -23,6 +24,15 @@ import { isNativeApp } from "./lib/platform";
 
 // Calculée une seule fois : Capacitor.isNativePlatform() ne change jamais pendant la vie de l'app.
 const nativeApp = isNativeApp();
+
+// Page publique organisateur (/o/:alias) : cette app n'a pas de routing par URL (tout est
+// géré par activeTab), donc pour qu'un lien direct partageable fonctionne à froid (ouvert
+// depuis Instagram par ex., pas seulement en cliquant depuis l'accueil), on lit le pathname
+// une seule fois au montage — même principe que le token de reset de mot de passe plus bas.
+function extractOrganizerAliasFromPath(): string | null {
+  const match = /^\/o\/([a-z0-9-]+)\/?$/.exec(window.location.pathname);
+  return match ? match[1] : null;
+}
 
 export default function App() {
   const [user, setUser] = useState<User | null>((() => {
@@ -34,7 +44,8 @@ export default function App() {
     }
   })());
 
-  const [activeTab, setActiveTab] = useState<string>("home");
+  const [viewingOrganizerAlias, setViewingOrganizerAlias] = useState<string | null>(extractOrganizerAliasFromPath);
+  const [activeTab, setActiveTab] = useState<string>(() => extractOrganizerAliasFromPath() ? "organizer-profile" : "home");
   const [events, setEvents] = useState<Event[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [checkoutEvent, setCheckoutEvent] = useState<Event | null>(null);
@@ -93,8 +104,10 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    // Dynamic tab routing after refreshing user session
-    if (user) {
+    // Dynamic tab routing after refreshing user session — sauf si l'app vient d'être
+    // ouverte sur un lien direct /o/:alias (cf. extractOrganizerAliasFromPath), qu'on ne
+    // veut jamais écraser par le tableau de bord habituel du rôle connecté.
+    if (user && activeTab !== "organizer-profile") {
       if (user.role === "admin") {
         setActiveTab("admin-dashboard");
       } else if (user.role === "organizer") {
@@ -102,6 +115,46 @@ export default function App() {
       }
     }
   }, []);
+
+  // Navigation vers la page publique d'un organisateur (depuis une fiche événement, ou
+  // au chargement initial si l'URL est /o/:alias). Met à jour l'URL pour que le lien reste
+  // partageable même si on y arrive en cliquant depuis l'intérieur de l'app.
+  function handleViewOrganizer(alias: string) {
+    setViewingOrganizerAlias(alias);
+    setActiveTab("organizer-profile");
+    window.history.pushState({}, "", `/o/${alias}`);
+  }
+
+  function handleBackFromOrganizerProfile() {
+    setViewingOrganizerAlias(null);
+    setActiveTab("home");
+    window.history.pushState({}, "", "/");
+  }
+
+  // Synchronise l'onglet affiché avec les boutons précédent/suivant du navigateur.
+  useEffect(() => {
+    function handlePopState() {
+      const alias = extractOrganizerAliasFromPath();
+      if (alias) {
+        setViewingOrganizerAlias(alias);
+        setActiveTab("organizer-profile");
+      } else {
+        setViewingOrganizerAlias(null);
+        setActiveTab("home");
+      }
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  // Filet de sécurité : si on quitte la page organisateur par un autre chemin que
+  // handleBackFromOrganizerProfile (logo, barre d'onglets native, etc.), on remet quand
+  // même l'URL sur "/" pour qu'elle ne reste jamais désynchronisée de l'écran affiché.
+  useEffect(() => {
+    if (activeTab !== "organizer-profile" && window.location.pathname.startsWith("/o/")) {
+      window.history.replaceState({}, "", "/");
+    }
+  }, [activeTab]);
 
   // Confirmation de paiement instantanée : on s'abonne aux changements de SES PROPRES
   // tickets via Supabase Realtime (policy "tickets_select_own", scoped à buyer_id = auth.uid()).
@@ -294,9 +347,18 @@ export default function App() {
                     events={events}
                     onBuyTicket={handleBuyTicketTrigger}
                     userRole={user?.role}
+                    onViewOrganizer={handleViewOrganizer}
                   />
                 )}
               </>
+            )}
+
+            {activeTab === "organizer-profile" && viewingOrganizerAlias && (
+              <OrganizerProfilePage
+                alias={viewingOrganizerAlias}
+                onBack={handleBackFromOrganizerProfile}
+                onBuyTicket={handleBuyTicketTrigger}
+              />
             )}
 
             {activeTab === "client-dashboard" && user && (

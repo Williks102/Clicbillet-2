@@ -5,6 +5,7 @@ import { requireRole } from "../lib/auth.js";
 import { runInBackground } from "../lib/utils.js";
 import { sendAdminPayoutRequestEmail } from "../lib/email.js";
 import { getDefaultCommissionRate, computeCommissionBreakdown } from "../lib/commission.js";
+import { validateOrganizerAlias, MAX_ORGANIZER_BIO_LENGTH } from "../lib/organizerAlias.js";
 
 const router = express.Router();
 
@@ -267,6 +268,118 @@ router.get("/api/organizer/payouts", async (req: express.Request, res: express.R
   }
   const db = getDB();
   res.json((db.payouts || []).filter(p => p.organizerId === organizerId || (p as any).organizer_id === organizerId));
+});
+
+// --- Page publique organisateur (alias + bio) ---
+
+router.get("/api/organizer/profile", requireRole("organizer", "admin"), async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
+
+  const backendClient = supabaseAdmin || supabase;
+  if (backendClient) {
+    try {
+      const { data, error } = await backendClient
+        .from("users")
+        .select("organizer_alias, organizer_bio")
+        .eq("id", authUser.id)
+        .maybeSingle();
+      if (error) throw error;
+      return res.json({ alias: data?.organizer_alias || null, bio: data?.organizer_bio || null });
+    } catch (err: any) {
+      console.error("[Supabase Error] Reading organizer profile:", err.message);
+    }
+  }
+
+  const db = getDB();
+  const dbUser = db.users.find((u: any) => u.id === authUser.id) as any;
+  res.json({ alias: dbUser?.organizerAlias || null, bio: dbUser?.organizerBio || null });
+});
+
+router.get("/api/organizer/check-alias", requireRole("organizer", "admin"), async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
+  const result = validateOrganizerAlias(String(req.query.alias || ""));
+  if (!result.valid) {
+    return res.json({ available: false, error: result.error });
+  }
+
+  const backendClient = supabaseAdmin || supabase;
+  if (backendClient) {
+    try {
+      const { data, error } = await backendClient
+        .from("users")
+        .select("id")
+        .ilike("organizer_alias", result.alias)
+        .neq("id", authUser.id)
+        .maybeSingle();
+      if (error) throw error;
+      return res.json({ available: !data, alias: result.alias });
+    } catch (err: any) {
+      console.error("[Supabase Error] Checking organizer alias:", err.message);
+      return res.status(500).json({ error: "Vérification impossible pour le moment." });
+    }
+  }
+
+  const db = getDB();
+  const taken = db.users.some((u: any) =>
+    u.id !== authUser.id && String(u.organizerAlias || "").toLowerCase() === result.alias
+  );
+  res.json({ available: !taken, alias: result.alias });
+});
+
+router.patch("/api/organizer/profile", requireRole("organizer", "admin"), async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
+  const { alias, bio } = req.body;
+
+  const result = validateOrganizerAlias(String(alias || ""));
+  if (!result.valid) {
+    return res.status(400).json({ error: result.error });
+  }
+
+  const trimmedBio = String(bio || "").trim().slice(0, MAX_ORGANIZER_BIO_LENGTH);
+
+  const backendClient = supabaseAdmin || supabase;
+  if (backendClient) {
+    try {
+      const { data: existing, error: checkError } = await backendClient
+        .from("users")
+        .select("id")
+        .ilike("organizer_alias", result.alias)
+        .neq("id", authUser.id)
+        .maybeSingle();
+      if (checkError) throw checkError;
+      if (existing) {
+        return res.status(409).json({ error: "Cet alias est déjà pris." });
+      }
+
+      const { error: updateError } = await backendClient
+        .from("users")
+        .update({ organizer_alias: result.alias, organizer_bio: trimmedBio })
+        .eq("id", authUser.id);
+      if (updateError) throw updateError;
+
+      return res.json({ success: true, alias: result.alias, bio: trimmedBio });
+    } catch (err: any) {
+      console.error("[Supabase Error] Updating organizer profile:", err.message);
+      return res.status(500).json({ error: "Échec de la mise à jour du profil." });
+    }
+  }
+
+  const db = getDB();
+  const taken = db.users.some((u: any) =>
+    u.id !== authUser.id && String(u.organizerAlias || "").toLowerCase() === result.alias
+  );
+  if (taken) {
+    return res.status(409).json({ error: "Cet alias est déjà pris." });
+  }
+  const dbUser = db.users.find((u: any) => u.id === authUser.id) as any;
+  if (!dbUser) {
+    return res.status(404).json({ error: "Utilisateur introuvable." });
+  }
+  dbUser.organizerAlias = result.alias;
+  dbUser.organizerBio = trimmedBio;
+  saveDB(db);
+
+  res.json({ success: true, alias: result.alias, bio: trimmedBio });
 });
 
 export default router;

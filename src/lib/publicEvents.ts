@@ -15,7 +15,7 @@ interface CacheEntry {
 
 let cache: CacheEntry | null = null;
 
-function mapEvent(e: any, tierSoldByEvent: Record<string, Record<string, number>>): Event {
+function mapEvent(e: any, tierSoldByEvent: Record<string, Record<string, number>>, organizerAliasById: Record<string, string>): Event {
   return {
     id: e.id,
     title: e.title,
@@ -31,6 +31,7 @@ function mapEvent(e: any, tierSoldByEvent: Record<string, Record<string, number>
     totalTickets: e.total_tickets,
     organizerId: e.organizer_id,
     organizerName: e.organizer_name,
+    organizerAlias: organizerAliasById[e.organizer_id] || null,
     status: e.status || "approved",
     waitingRoomEnabled: e.waiting_room_enabled,
     waitingRoomCapacity: e.waiting_room_capacity,
@@ -61,7 +62,22 @@ async function fetchDirectFromSupabase(): Promise<Event[]> {
     console.warn("[publicEvents] get_public_events_tier_sold indisponible :", tierSoldResult.error.message);
   }
 
-  return (eventsResult.data || []).map((e: any) => mapEvent(e, tierSoldByEvent));
+  // Alias public de chaque organisateur (fonction SECURITY DEFINER, cf. section 13 du
+  // schéma SQL) : n'expose que (id, organizer_alias), jamais le reste de public.users.
+  const organizerIds = [...new Set((eventsResult.data || []).map((e: any) => e.organizer_id).filter(Boolean))];
+  const organizerAliasById: Record<string, string> = {};
+  if (organizerIds.length > 0) {
+    const aliasResult = await supabaseClient.rpc("get_organizer_aliases", { organizer_ids: organizerIds });
+    if (aliasResult.error) {
+      console.warn("[publicEvents] get_organizer_aliases indisponible :", aliasResult.error.message);
+    } else {
+      for (const row of aliasResult.data || []) {
+        if (row.organizer_alias) organizerAliasById[row.id] = row.organizer_alias;
+      }
+    }
+  }
+
+  return (eventsResult.data || []).map((e: any) => mapEvent(e, tierSoldByEvent, organizerAliasById));
 }
 
 export async function fetchPublicEvents(options: { ttlMs?: number; force?: boolean } = {}): Promise<Event[]> {

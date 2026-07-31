@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Plus, LayoutDashboard, Calendar, MapPin, Tag, TrendingUp, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X } from "lucide-react";
+import { Plus, LayoutDashboard, Calendar, MapPin, Tag, TrendingUp, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X, AtSign, CheckCircle2, AlertCircle } from "lucide-react";
 import { Event, User, SalesStatus } from "../types";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
@@ -125,6 +125,15 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [payoutDetails, setPayoutDetails] = useState("");
   const [submittingPayout, setSubmittingPayout] = useState(false);
 
+  // Page publique organisateur (alias + bio)
+  const [profileAlias, setProfileAlias] = useState("");
+  const [profileBio, setProfileBio] = useState("");
+  const [savedAlias, setSavedAlias] = useState<string | null>(null);
+  const [aliasCheck, setAliasCheck] = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");
+  const [aliasCheckMessage, setAliasCheckMessage] = useState<string | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileSaveMessage, setProfileSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
   // Auto pre-fill Simulator Selected Event state
   useEffect(() => {
     const myEvts = events.filter(e => e.organizerId === user.id);
@@ -132,6 +141,74 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       setSimSelectedEventId(myEvts[0].id);
     }
   }, [events, user.id]);
+
+  // Charge l'alias/bio actuels au montage (page publique organisateur)
+  useEffect(() => {
+    authFetch("/api/organizer/profile", { method: "GET" }, user, onTokenRefresh)
+      .then((res) => res.json())
+      .then((data) => {
+        setProfileAlias(data.alias || "");
+        setProfileBio(data.bio || "");
+        setSavedAlias(data.alias || null);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Vérifie la disponibilité de l'alias en direct pendant la saisie (debounce 400ms) — ne
+  // revérifie pas si l'alias tapé est celui déjà enregistré.
+  useEffect(() => {
+    const trimmed = profileAlias.trim().toLowerCase();
+    if (!trimmed || trimmed === savedAlias) {
+      setAliasCheck("idle");
+      setAliasCheckMessage(null);
+      return;
+    }
+    setAliasCheck("checking");
+    const timeout = setTimeout(() => {
+      authFetch(`/api/organizer/check-alias?alias=${encodeURIComponent(trimmed)}`, { method: "GET" }, user, onTokenRefresh)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.error) {
+            setAliasCheck("invalid");
+            setAliasCheckMessage(data.error);
+          } else if (data.available) {
+            setAliasCheck("available");
+            setAliasCheckMessage(null);
+          } else {
+            setAliasCheck("taken");
+            setAliasCheckMessage("Cet alias est déjà pris.");
+          }
+        })
+        .catch(() => {
+          setAliasCheck("idle");
+        });
+    }, 400);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileAlias, savedAlias]);
+
+  async function handleSaveProfile() {
+    setProfileSaving(true);
+    setProfileSaveMessage(null);
+    try {
+      const res = await authFetch("/api/organizer/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alias: profileAlias, bio: profileBio }),
+      }, user, onTokenRefresh);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Échec de la mise à jour.");
+      setSavedAlias(data.alias);
+      setProfileAlias(data.alias);
+      setProfileBio(data.bio);
+      setProfileSaveMessage({ type: "success", text: "Profil public mis à jour !" });
+    } catch (err: any) {
+      setProfileSaveMessage({ type: "error", text: err.message || "Échec de la mise à jour." });
+    } finally {
+      setProfileSaving(false);
+    }
+  }
 
   // Fetch simulated purchased tickets list for manual scan verification
   async function fetchSimulatedTickets() {
@@ -812,6 +889,78 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             ) : (
               <p className="text-xs text-gray-400 py-6 text-center font-semibold">Créez votre premier événement pour commencer à vendre des tickets !</p>
             )}
+          </div>
+
+          {/* Page publique organisateur : alias + bio */}
+          <div className="rounded-2xl border border-gray-100 bg-white p-5 space-y-4" id="orga-public-profile-card">
+            <div className="border-b border-gray-50 pb-3">
+              <h4 className="text-xs font-black text-gray-900 uppercase tracking-wide flex items-center space-x-1.5">
+                <AtSign className="h-4 w-4 text-orange-500" />
+                <span>Ma page publique</span>
+              </h4>
+              <p className="mt-1.5 text-xs text-gray-500">
+                Un alias vous donne une page regroupant tous vos événements, partageable sur vos réseaux
+                (clicbillet.ci/o/votre-alias). Le nom de votre organisation devient cliquable sur vos fiches
+                événement dès qu'un alias est défini.
+              </p>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-bold text-gray-700">Alias public</label>
+              <div className="flex items-center rounded-xl border border-gray-200 overflow-hidden">
+                <span className="shrink-0 bg-gray-50 px-3 py-2.5 text-xs font-bold text-gray-400 border-r border-gray-200">
+                  clicbillet.ci/o/
+                </span>
+                <input
+                  id="organizer-alias-input"
+                  type="text"
+                  value={profileAlias}
+                  onChange={(e) => setProfileAlias(e.target.value.toLowerCase())}
+                  placeholder="votre-nom-organisation"
+                  className="flex-1 px-3 py-2.5 text-xs outline-none min-w-0"
+                />
+              </div>
+              {aliasCheck === "checking" && (
+                <p className="mt-1.5 text-[11px] font-semibold text-gray-400">Vérification...</p>
+              )}
+              {aliasCheck === "available" && (
+                <p className="mt-1.5 flex items-center gap-1 text-[11px] font-bold text-green-600">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Alias disponible
+                </p>
+              )}
+              {(aliasCheck === "taken" || aliasCheck === "invalid") && (
+                <p className="mt-1.5 flex items-center gap-1 text-[11px] font-bold text-red-500">
+                  <AlertCircle className="h-3.5 w-3.5" /> {aliasCheckMessage}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-bold text-gray-700">Bio (visible sur votre page publique)</label>
+              <textarea
+                id="organizer-bio-input"
+                value={profileBio}
+                onChange={(e) => setProfileBio(e.target.value.slice(0, 280))}
+                rows={3}
+                placeholder="Présentez-vous en quelques mots..."
+                className="w-full rounded-xl border border-gray-200 p-3 text-xs outline-none resize-none focus:border-orange-400"
+              />
+              <p className="mt-1 text-right text-[10px] text-gray-400 font-semibold">{profileBio.length} / 280</p>
+            </div>
+
+            {profileSaveMessage && (
+              <p className={`text-xs font-bold ${profileSaveMessage.type === "success" ? "text-green-600" : "text-red-500"}`}>
+                {profileSaveMessage.text}
+              </p>
+            )}
+
+            <button
+              onClick={handleSaveProfile}
+              disabled={profileSaving || aliasCheck === "checking" || aliasCheck === "taken" || aliasCheck === "invalid" || !profileAlias.trim()}
+              className="rounded-xl bg-orange-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-orange-700 disabled:opacity-50"
+            >
+              {profileSaving ? "Enregistrement..." : "Enregistrer"}
+            </button>
           </div>
         </div>
       ) : subTab === "create" ? (

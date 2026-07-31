@@ -332,3 +332,31 @@ RETURNS TABLE(event_id TEXT, tier TEXT, sold BIGINT) AS $$
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 GRANT EXECUTE ON FUNCTION public.get_public_events_tier_sold() TO anon, authenticated;
+
+-- ==========================================
+-- 13. PAGES PUBLIQUES ORGANISATEUR (alias + bio)
+-- ==========================================
+-- Chaque organisateur peut choisir un alias public (ex: "kader-events") donnant accès à
+-- une page /o/<alias> regroupant ses événements. L'unicité est vérifiée côté application
+-- (GET /api/organizer/check-alias) et garantie ici en dernier recours par l'index unique
+-- ci-dessous (insensible à la casse, ignore les organisateurs sans alias défini).
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS organizer_alias TEXT;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS organizer_bio TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS users_organizer_alias_unique
+  ON public.users (LOWER(organizer_alias))
+  WHERE organizer_alias IS NOT NULL;
+
+-- public.users n'a aucune policy RLS publique (email/mot de passe/rôle ne doivent jamais
+-- être lisibles par la clé anon) : pour que la page d'accueil (lue en direct par le
+-- frontend, cf. section 12) puisse rendre le nom d'organisateur cliquable, on expose
+-- uniquement (id, organizer_alias) via une fonction SECURITY DEFINER, même principe que
+-- get_public_events_tier_sold ci-dessus.
+CREATE OR REPLACE FUNCTION public.get_organizer_aliases(organizer_ids TEXT[])
+RETURNS TABLE(id TEXT, organizer_alias TEXT) AS $$
+  SELECT u.id, u.organizer_alias
+  FROM public.users u
+  WHERE u.id = ANY(organizer_ids) AND u.organizer_alias IS NOT NULL;
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+GRANT EXECUTE ON FUNCTION public.get_organizer_aliases(TEXT[]) TO anon, authenticated;
