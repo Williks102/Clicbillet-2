@@ -214,10 +214,22 @@ CREATE POLICY "tickets_select_own"
 -- DEFAULT), seule la clé primaire est incluse dans le "old record".
 ALTER TABLE public.tickets REPLICA IDENTITY FULL;
 
--- Active la réplication realtime sur la table tickets. Si cette commande échoue avec
+-- Active la réplication realtime sur la table tickets. Ce script étant destiné à être
+-- recollé en entier à chaque nouvelle section (cf. les nombreux "IF NOT EXISTS" plus haut),
+-- ALTER PUBLICATION ... ADD TABLE n'a lui-même aucune clause idempotente : relancer le
+-- script une deuxième fois échouait sur "relation is already member of publication", ce qui
+-- empêchait aussi toute section ajoutée après celle-ci de s'exécuter. Si le bloc échoue avec
 -- "publication supabase_realtime does not exist", utilisez plutôt le Dashboard :
 -- Database > Replication > activez la table "tickets".
-ALTER PUBLICATION supabase_realtime ADD TABLE public.tickets;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'tickets'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.tickets;
+  END IF;
+END $$;
 
 -- ==========================================
 -- 9. WEBHOOK DE BIENVENUE (Supabase -> Resend)
