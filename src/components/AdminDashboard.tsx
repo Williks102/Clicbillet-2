@@ -2,7 +2,8 @@ import React, { useState, useEffect } from "react";
 import { User, Event, Ticket } from "../types";
 import {
   Building2, Users, Calendar, DollarSign, Trash2, ShieldCheck,
-  Search, ShieldAlert, Sparkles, Ticket as TicketIcon, TrendingUp, Filter, Percent
+  Search, ShieldAlert, Sparkles, Ticket as TicketIcon, TrendingUp, Filter, Percent,
+  Image as ImageIcon, RefreshCw
 } from "lucide-react";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 import { isEventPast } from "../lib/eventStatus";
@@ -61,6 +62,36 @@ export default function AdminDashboard({ user, onTokenRefresh }: AdminDashboardP
   const [userSearch, setUserSearch] = useState("");
   const [eventSearch, setEventSearch] = useState("");
   const [ticketSearch, setTicketSearch] = useState("");
+
+  // Maintenance ponctuelle : recompression des bannières déjà stockées en base64 brut
+  // (cf. server/routes/admin.ts, POST /api/admin/compress-banners).
+  const [bannerCompressLoading, setBannerCompressLoading] = useState(false);
+  const [bannerCompressResult, setBannerCompressResult] = useState<{
+    dryRun: boolean; processed: number; skipped: number; failed: number;
+    totalBeforeMB: number; totalAfterMB: number;
+    details: { id: string; title: string; beforeMB: number; afterMB: number }[];
+  } | null>(null);
+
+  async function handleCompressBanners(apply: boolean) {
+    if (apply && !window.confirm("Recompresser et remplacer les bannières existantes ? Cette action écrase les images actuelles (qualité réduite, mêmes dimensions visuelles).")) {
+      return;
+    }
+    setBannerCompressLoading(true);
+    try {
+      const res = await authFetch("/api/admin/compress-banners", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apply }),
+      }, user, onTokenRefresh);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Échec de l'opération.");
+      setBannerCompressResult(data);
+    } catch (err: any) {
+      setError(err.message || "Échec de la recompression des bannières.");
+    } finally {
+      setBannerCompressLoading(false);
+    }
+  }
 
   const handleValidatePayment = async (referenceNumber: string) => {
     if (!window.confirm("Valider manuellement ce paiement ? Le client recevra son ticket avec le QR code.")) {
@@ -588,6 +619,65 @@ export default function AdminDashboard({ user, onTokenRefresh }: AdminDashboardP
                   <p className="text-center text-xs text-gray-400 py-12 font-bold uppercase tracking-wider">Aucun flux financier détecté.</p>
                 )}
               </div>
+            </div>
+
+            {/* Maintenance ponctuelle : recompression des bannières déjà en base */}
+            <div className="rounded-2xl border border-gray-100 bg-white p-5 lg:col-span-3 space-y-4">
+              <div className="flex items-center justify-between border-b border-gray-50 pb-3">
+                <h4 className="text-xs font-black text-gray-900 uppercase tracking-wide flex items-center space-x-1.5">
+                  <ImageIcon className="h-4 w-4 text-orange-500" />
+                  <span>Maintenance : bannières d'événements</span>
+                </h4>
+              </div>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Recompresse les bannières d'événements déjà stockées en base64 brut (photos uploadées avant
+                l'optimisation automatique) — sans changement visuel, juste un fichier plus léger à charger
+                pour vos visiteurs.
+              </p>
+              <div className="flex flex-wrap gap-2.5">
+                <button
+                  onClick={() => handleCompressBanners(false)}
+                  disabled={bannerCompressLoading}
+                  className="flex items-center space-x-1.5 rounded-xl bg-gray-50 px-4 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${bannerCompressLoading ? "animate-spin" : ""}`} />
+                  <span>Aperçu (aucune écriture)</span>
+                </button>
+                <button
+                  onClick={() => handleCompressBanners(true)}
+                  disabled={bannerCompressLoading}
+                  className="flex items-center space-x-1.5 rounded-xl bg-orange-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-orange-700 disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${bannerCompressLoading ? "animate-spin" : ""}`} />
+                  <span>Appliquer</span>
+                </button>
+              </div>
+
+              {bannerCompressResult && (
+                <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 space-y-3">
+                  <p className="text-xs font-bold text-gray-900">
+                    {bannerCompressResult.dryRun ? "Aperçu" : "Appliqué"} — {bannerCompressResult.processed} événement(s) optimisé(s),{" "}
+                    {bannerCompressResult.skipped} ignoré(s) (déjà léger/optimal), {bannerCompressResult.failed} échec(s).
+                  </p>
+                  {bannerCompressResult.processed > 0 && (
+                    <p className="text-xs text-gray-600">
+                      Gain total : <strong className="text-orange-600">
+                        {(bannerCompressResult.totalBeforeMB - bannerCompressResult.totalAfterMB).toFixed(2)} Mo
+                      </strong> ({bannerCompressResult.totalBeforeMB} Mo → {bannerCompressResult.totalAfterMB} Mo)
+                    </p>
+                  )}
+                  {bannerCompressResult.details.length > 0 && (
+                    <div className="max-h-48 overflow-y-auto space-y-1.5">
+                      {bannerCompressResult.details.map((d) => (
+                        <div key={d.id} className="flex items-center justify-between text-[11px] text-gray-600">
+                          <span className="truncate pr-2">{d.title}</span>
+                          <span className="shrink-0 font-mono">{d.beforeMB} Mo → {d.afterMB} Mo</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}

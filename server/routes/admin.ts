@@ -1,4 +1,5 @@
 import express from "express";
+import sharp from "sharp";
 import { isSupabaseEnabled, supabase, supabaseAdmin } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { requireAuth, requireRole } from "../lib/auth.js";
@@ -229,6 +230,100 @@ router.get("/api/admin/transactions", async (req: express.Request, res: express.
   }
   const db = getDB();
   res.json(db.transactions || []);
+});
+
+// --- Maintenance ponctuelle : recompresse les bannières d'événements déjà stockées en
+// base64 brut (uploadées avant que le client ne les redimensionne lui-même côté navigateur,
+// cf. src/lib/imageCompress.ts). Une bannière de plusieurs Mo est renvoyée intégralement
+// dans /api/events à chaque visiteur — équivalent HTTP de scripts/compress-existing-banners.mjs,
+// pensé pour être déclenché depuis le dashboard admin sans accès terminal ni identifiants
+// Supabase à manipuler. Par défaut en aperçu (dryRun) ; { apply: true } pour appliquer.
+const BANNER_SKIP_THRESHOLD_BYTES = 300 * 1024;
+const BANNER_MAX_WIDTH = 1280;
+const BANNER_JPEG_QUALITY = 80;
+
+function parseBannerDataUrl(dataUrl: string): { buffer: Buffer } | null {
+  const match = /^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/.exec(dataUrl);
+  if (!match) return null;
+  return { buffer: Buffer.from(match[1], "base64") };
+}
+
+router.post("/api/admin/compress-banners", requireAuth, requireRole("admin"), async (req: express.Request, res: express.Response) => {
+  const adminClient = supabaseAdmin;
+  if (!adminClient) {
+    return res.status(400).json({ error: "Supabase non configuré." });
+  }
+
+  const apply = req.body?.apply === true;
+
+  const { data: events, error } = await adminClient
+    .from("events")
+    .select("id, title, banner")
+    .like("banner", "data:image%");
+
+  if (error) {
+    return res.status(500).json({ error: "Échec de la lecture des événements : " + error.message });
+  }
+
+  const details: { id: string; title: string; beforeMB: number; afterMB: number }[] = [];
+  let processed = 0, skipped = 0, failed = 0, totalBefore = 0, totalAfter = 0;
+
+  for (const evt of events || []) {
+    const originalSize = evt.banner.length;
+    if (originalSize <= BANNER_SKIP_THRESHOLD_BYTES) {
+      skipped++;
+      continue;
+    }
+
+    const parsed = parseBannerDataUrl(evt.banner);
+    if (!parsed) {
+      failed++;
+      continue;
+    }
+
+    try {
+      const resizedBuffer = await sharp(parsed.buffer)
+        .resize({ width: BANNER_MAX_WIDTH, withoutEnlargement: true })
+        .jpeg({ quality: BANNER_JPEG_QUALITY })
+        .toBuffer();
+      const newDataUrl = `data:image/jpeg;base64,${resizedBuffer.toString("base64")}`;
+
+      if (newDataUrl.length >= originalSize) {
+        skipped++;
+        continue;
+      }
+
+      totalBefore += originalSize;
+      totalAfter += newDataUrl.length;
+      processed++;
+      details.push({
+        id: evt.id,
+        title: evt.title,
+        beforeMB: Number((originalSize / 1024 / 1024).toFixed(2)),
+        afterMB: Number((newDataUrl.length / 1024 / 1024).toFixed(2)),
+      });
+
+      if (apply) {
+        const { error: updateError } = await adminClient.from("events").update({ banner: newDataUrl }).eq("id", evt.id);
+        if (updateError) {
+          failed++;
+          processed--;
+        }
+      }
+    } catch {
+      failed++;
+    }
+  }
+
+  res.json({
+    dryRun: !apply,
+    processed,
+    skipped,
+    failed,
+    totalBeforeMB: Number((totalBefore / 1024 / 1024).toFixed(2)),
+    totalAfterMB: Number((totalAfter / 1024 / 1024).toFixed(2)),
+    details,
+  });
 });
 
 export default router;
