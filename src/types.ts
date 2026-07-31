@@ -25,6 +25,7 @@ export interface Event {
   totalTickets: number;
   organizerId: string;
   organizerName: string;
+  organizerAlias?: string | null; // Alias public (page /o/:alias) — absent si l'organisateur n'en a pas défini
   status?: "pending" | "approved" | "rejected";
   waitingRoomEnabled?: boolean;
   waitingRoomCapacity?: number;
