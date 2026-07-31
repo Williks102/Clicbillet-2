@@ -11,6 +11,12 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
+        // Le script auto-injecté par défaut ('script') se contente d'un
+        // navigator.serviceWorker.register() one-shot, sans jamais revérifier ni recharger
+        // la page : une PWA installée restée ouverte plusieurs jours ne voit alors jamais
+        // les nouvelles versions déployées. On enregistre nous-mêmes via virtual:pwa-register
+        // (cf. src/lib/pwaUpdate.ts) pour un vrai contrôle périodique + rechargement auto.
+        injectRegister: false,
         includeAssets: ['icon.svg'],
         manifest: {
           name: 'ClicBillet – Billetterie Ivoirienne',
