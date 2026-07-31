@@ -4,6 +4,7 @@ import { Event, User, SalesStatus } from "../types";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
 import { isEventPast } from "../lib/eventStatus";
+import { compressImageToDataUrl } from "../lib/imageCompress";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 
 interface OrganizerDashboardProps {
@@ -326,14 +327,14 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       return;
     }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      if (typeof reader.result === "string") {
-        setCustomBannerUrl(reader.result);
+    // Redimensionne/recompresse avant de stocker : une photo de téléphone telle quelle
+    // (plusieurs Mo) alourdirait la réponse /api/events envoyée à chaque visiteur.
+    compressImageToDataUrl(file)
+      .then((dataUrl) => {
+        setCustomBannerUrl(dataUrl);
         setSelectedBanner("");
-      }
-    };
-    reader.readAsDataURL(file);
+      })
+      .catch(() => setFormError("Impossible de traiter cette image, réessayez avec un autre fichier."));
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
