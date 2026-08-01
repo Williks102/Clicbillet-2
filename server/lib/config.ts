@@ -16,8 +16,8 @@ export const PAYSTACK_SECRET_KEY = (process.env.PAYSTACK_SECRET_KEY || "").trim(
 // traité ou perdu (cf. server/routes/tickets.ts, /api/webhooks/paystack).
 export const PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL = (process.env.PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL || "").trim();
 export const RESEND_API_KEY = (process.env.RESEND_API_KEY || "").trim();
-export const RESEND_FROM_EMAIL = (process.env.RESEND_FROM_EMAIL || "ClicBillet <no-reply@monticket.online>").trim();
-export const ADMIN_NOTIFICATION_EMAIL = (process.env.ADMIN_NOTIFICATION_EMAIL || "admin@monticket.online").trim();
+export const RESEND_FROM_EMAIL = (process.env.RESEND_FROM_EMAIL || "ClicBillet <no-reply@clicbillet.com>").trim();
+export const ADMIN_NOTIFICATION_EMAIL = (process.env.ADMIN_NOTIFICATION_EMAIL || "admin@clicbillet.com").trim();
 export const SUPABASE_WEBHOOK_SECRET = (process.env.SUPABASE_WEBHOOK_SECRET || "").trim();
 
 // Secret injecté automatiquement par Vercel Cron dans le header Authorization ("Bearer <secret>")
@@ -69,10 +69,12 @@ export const HMR_PORT = Number(process.env.HMR_PORT || process.env.WS_PORT) || 2
 
 // Domaines Paystack : js.paystack.co sert le SDK Inline, api.paystack.co reçoit les appels
 // XHR du popup, checkout.paystack.com/standard.paystack.co hébergent l'iframe affichée pour
-// la saisie carte/OTP/3-D Secure pendant la transaction.
+// la saisie carte/OTP/3-D Secure pendant la transaction. Le domaine de production
+// (apex + www) est inclus en plus de 'self' pour couvrir les cas où l'un redirige vers
+// l'autre (ex: liens absolus dans un email, retour de redirection Paystack).
 export const PAYMENT_GATEWAY_ORIGINS = [
-  "https://monticket.online",
-  "https://www.monticket.online",
+  "https://clicbillet.com",
+  "https://www.clicbillet.com",
   "https://js.paystack.co",
   "https://api.paystack.co",
   "https://checkout.paystack.com",
