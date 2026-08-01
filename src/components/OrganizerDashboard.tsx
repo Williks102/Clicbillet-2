@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Plus, LayoutDashboard, Calendar, MapPin, Tag, TrendingUp, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X, AtSign, CheckCircle2, AlertCircle } from "lucide-react";
+import { Plus, LayoutDashboard, Calendar, MapPin, Tag, TrendingUp, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X, AtSign, CheckCircle2, AlertCircle, Receipt, Download } from "lucide-react";
 import { Event, User, SalesStatus } from "../types";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
 import { isEventPast } from "../lib/eventStatus";
 import { compressImageToDataUrl } from "../lib/imageCompress";
+import { printHtmlDocument } from "../lib/printDocument";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 
 interface OrganizerDashboardProps {
@@ -15,20 +16,22 @@ interface OrganizerDashboardProps {
   onTokenRefresh: TokenRefreshHandler;
 }
 
-type OrganizerSubTab = "dashboard" | "create" | "simulator" | "payouts";
+type OrganizerSubTab = "dashboard" | "create" | "simulator" | "payouts" | "invoices";
 
 const ORGANIZER_SUB_TAB_LABELS: Record<OrganizerSubTab, string> = {
   dashboard: "Suivi des Ventes",
   create: "Créer un Événement",
   simulator: "🧪 Simulateur Sandbox",
-  payouts: "Retraits & Soldes"
+  payouts: "Retraits & Soldes",
+  invoices: "Mes Factures"
 };
 
 const ORGANIZER_SUB_TAB_ICONS: Record<OrganizerSubTab, React.ReactNode> = {
   dashboard: <LayoutDashboard className="h-4 w-4" />,
   create: <Plus className="h-4 w-4" />,
   simulator: <Hammer className="h-4 w-4" />,
-  payouts: <DollarSign className="h-4 w-4" />
+  payouts: <DollarSign className="h-4 w-4" />,
+  invoices: <ListCollapse className="h-4 w-4" />
 };
 
 const CATEGORIES = ["Concert", "Festivals", "Théâtre & Humour", "Sport"];
@@ -61,6 +64,84 @@ const BANNER_TEMPLATES = [
     category: "Professionnel"
   }
 ];
+
+interface MonthlyStatement {
+  key: string; // "2026-08"
+  label: string; // "Août 2026"
+  tickets: SalesStatus["tickets"];
+  grossAmount: number;
+  commissionAmount: number;
+  netAmount: number;
+}
+
+// Regroupe les ventes confirmées par mois calendaire pour produire un relevé de commission
+// automatique, sans aucune saisie manuelle. Le taux appliqué est le taux effectif déjà
+// calculé par le serveur (peut mélanger plusieurs événements à taux différents) : une
+// approximation raisonnable, cohérente avec les autres indicateurs déjà affichés au-dessus.
+function groupMonthlyStatements(tickets: SalesStatus["tickets"], commissionRate: number): MonthlyStatement[] {
+  const groups = new Map<string, SalesStatus["tickets"]>();
+  for (const t of tickets) {
+    const ref = t.transactionRef || "";
+    if (!ref.startsWith("PAID-") && !ref.startsWith("FREE-")) continue;
+    const d = new Date(t.purchaseDate);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(t);
+  }
+  return Array.from(groups.entries())
+    .map(([key, tkts]) => {
+      const gross = tkts.reduce((sum, t) => sum + t.pricePaid, 0);
+      const commission = Math.floor(gross * commissionRate);
+      const [y, m] = key.split("-").map(Number);
+      const rawLabel = new Date(y, m - 1, 1).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+      return {
+        key,
+        label: rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1),
+        tickets: tkts,
+        grossAmount: gross,
+        commissionAmount: commission,
+        netAmount: gross - commission,
+      };
+    })
+    .sort((a, b) => b.key.localeCompare(a.key));
+}
+
+function buildOrganizerInvoiceHtml(statement: MonthlyStatement, organizerName: string, commissionRatePercent: number): string {
+  const rows = statement.tickets
+    .map(
+      (t) => `
+      <tr>
+        <td>${new Date(t.purchaseDate).toLocaleDateString("fr-FR")}</td>
+        <td>${t.eventTitle}</td>
+        <td>${t.buyerName}</td>
+        <td class="right">${t.pricePaid.toLocaleString("fr-FR")} FCFA</td>
+      </tr>`
+    )
+    .join("");
+
+  return `
+    <div class="header">
+      <div>
+        <div class="brand">clic<span>billet</span></div>
+        <p class="muted" style="margin:4px 0 0;">Relevé de commission</p>
+      </div>
+      <div class="right">
+        <p style="margin:0; font-weight:700;">${statement.label}</p>
+        <p class="muted" style="margin:4px 0 0;">${organizerName}</p>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Date</th><th>Événement</th><th>Acheteur</th><th class="right">Montant</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="totals">
+      <div class="totals-row"><span>Ventes brutes</span><span>${statement.grossAmount.toLocaleString("fr-FR")} FCFA</span></div>
+      <div class="totals-row"><span>Commission ClicBillet (${commissionRatePercent}%)</span><span>-${statement.commissionAmount.toLocaleString("fr-FR")} FCFA</span></div>
+      <div class="totals-row grand"><span>Net reversé</span><span>${statement.netAmount.toLocaleString("fr-FR")} FCFA</span></div>
+    </div>
+    <div class="footer">Relevé généré automatiquement à partir de vos ventes confirmées sur ClicBillet.</div>
+  `;
+}
 
 export default function OrganizerDashboard({ user, events, onEventCreated, setActiveTab, onTokenRefresh }: OrganizerDashboardProps) {
   const [subTab, setSubTab] = useState<OrganizerSubTab>("dashboard");
@@ -637,6 +718,18 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
           >
             <DollarSign className="h-4 w-4" />
             <span>Retraits & Soldes</span>
+          </button>
+          <button
+            id="orga-invoices-view-tab"
+            onClick={() => setSubTab("invoices")}
+            className={`flex items-center space-x-1.5 rounded-xl px-4 py-2.5 text-xs font-black transition-all active:scale-95 ${
+              subTab === "invoices"
+                ? "bg-slate-950 text-white shadow-md"
+                : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-100"
+            }`}
+          >
+            <Receipt className="h-4 w-4" />
+            <span>Mes Factures</span>
           </button>
         </div>
 
@@ -1882,6 +1975,53 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {subTab === "invoices" && (
+        <div className="space-y-4" id="orga-invoices-view">
+          <p className="text-xs text-gray-500">
+            Un relevé est généré automatiquement chaque mois où vous avez des ventes confirmées — aucune saisie
+            manuelle. Téléchargez-le en PDF pour votre comptabilité.
+          </p>
+          {(() => {
+            const statements = groupMonthlyStatements(stats?.tickets || [], stats?.commissionRate ?? 0.1);
+            const commissionRatePercent = Math.round((stats?.commissionRate ?? 0.1) * 100);
+            return statements.length > 0 ? (
+              <div className="space-y-3">
+                {statements.map((s) => (
+                  <div
+                    key={s.key}
+                    id={`invoice-row-${s.key}`}
+                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-gray-100 bg-white p-4"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-bold text-gray-900">{s.label}</p>
+                      <p className="mt-0.5 text-xs text-gray-400">
+                        {s.tickets.length} vente{s.tickets.length > 1 ? "s" : ""} · Brut {s.grossAmount.toLocaleString("fr-FR")} FCFA
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-4 shrink-0">
+                      <span className="font-black text-orange-600">{s.netAmount.toLocaleString("fr-FR")} FCFA net</span>
+                      <button
+                        onClick={() => printHtmlDocument(`Relevé ${s.label}`, buildOrganizerInvoiceHtml(s, user.name, commissionRatePercent))}
+                        className="flex items-center space-x-1.5 rounded-xl border border-gray-200 px-3 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span>PDF</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-2xl border-2 border-dashed border-gray-100 py-16 text-center">
+                <Receipt className="mx-auto h-12 w-12 text-gray-300" />
+                <h4 className="mt-4 text-base font-bold text-gray-900">Aucun relevé pour le moment</h4>
+                <p className="mt-2 text-xs text-gray-500">Un relevé apparaîtra dès votre premier mois avec des ventes confirmées.</p>
+              </div>
+            );
+          })()}
         </div>
       )}
 
