@@ -142,126 +142,98 @@ export default function ClientDashboard({ user, onTokenRefresh }: ClientDashboar
   }, [tickets, selectedTicket, user.id]);
 
   function handlePrintTicket() {
-    // Create an isolated iframe for sandboxed iframe compatibility and cross-browser reliability
-    const printFrame = document.createElement("iframe");
-    printFrame.style.position = "fixed";
-    printFrame.style.right = "0";
-    printFrame.style.bottom = "0";
-    printFrame.style.width = "0";
-    printFrame.style.height = "0";
-    printFrame.style.border = "0";
-    document.body.appendChild(printFrame);
-
     const ticketHtml = document.getElementById("printable-ticket-content")?.innerHTML || "";
 
-    const printDocument = printFrame.contentWindow?.document || printFrame.contentDocument;
-    if (printDocument) {
-      printDocument.open();
-      printDocument.write(`
-        <html>
-          <head>
-            <title>Pass ClicBillet - ${selectedTicket?.eventTitle || "Billet"}</title>
-            <style>
-              body {
-                font-family: 'Inter', system-ui, -apple-system, sans-serif;
-                color: #111827;
-                padding: 16px;
-                margin: 0;
-                background: white;
-              }
-              .text-center { text-align: center; }
-              .space-y-2 > * + * { margin-top: 8px; }
-              .space-y-6 > * + * { margin-top: 24px; }
-              
-              /* Theme Colors & Layout styling matching original ticket aesthetics */
-              .bg-gray-50\\/70 {
-                background-color: #f9fafb;
-                border: 1px solid #f3f4f6;
-                border-radius: 16px;
-                padding: 16px;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-              }
-              .relative { position: relative; }
-              .h-44 { height: 176px; }
-              .w-44 { width: 176px; }
-              .rounded-xl { border-radius: 12px; }
-              .bg-white { background-color: #ffffff; }
-              .p-2 { padding: 8px; }
-              .border { border: 1px solid #e5e7eb; }
-              .shadow-md { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-              .flex { display: flex; }
-              .flex-col { flex-direction: column; }
-              .items-center { align-items: center; }
-              .justify-center { justify-content: center; }
-              .text-xs { font-size: 11px; }
-              .text-sm { font-size: 13px; }
-              .text-[10px] { font-size: 9px; }
-              .text-[9px] { font-size: 8px; }
-              .text-lg { font-size: 16px; }
-              .font-black { font-weight: 900; }
-              .font-bold { font-weight: 700; }
-              .font-extrabold { font-weight: 800; }
-              .tracking-widest { letter-spacing: 0.1em; }
-              .uppercase { text-transform: uppercase; }
-              .font-mono { font-family: monospace; }
-              .grid { display: grid; }
-              .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-              .gap-4 { gap: 12px; }
-              .border-t { border-top: 1px solid #e5e7eb; }
-              .border-dashed { border-style: dashed; }
-              .pt-5 { padding-top: 16px; }
-              .col-span-2 { grid-column: span 2 / span 2; }
-              .text-orange-600 { color: #ea580c; }
-              .text-amber-900 { color: #78350f; }
-              .bg-amber-100 { background-color: #fef3c7; }
-              .bg-blue-100 { background-color: #dbeafe; }
-              .text-blue-900 { color: #1e3a8a; }
-              .truncate {
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-              }
-              img { max-width: 100%; display: block; margin: 0 auto; }
-              
-              @media print {
-                body { padding: 0; }
-                .print\\:hidden { display: none !important; }
-              }
-            </style>
-          </head>
-          <body>
-            <div style="max-width: 360px; margin: 10px auto; border: 1px dashed #ea580c; padding: 20px; border-radius: 16px; background-color: #ffffff;">
-              <div style="text-align: center; margin-bottom: 20px;">
-                <span style="font-family: sans-serif; font-size: 18px; font-weight: 900; color: #111827;">
-                  CLIC<span style="color: #ea580c;">BILLET</span> COUPOUN
-                </span>
-                <span style="display: block; font-size: 8px; font-weight: 700; letter-spacing: 0.15em; color: #9ca3af; margin-top: 2px; text-transform: uppercase;">
-                  Pass de Réservation Sécurisé
-                </span>
-              </div>
-              
-              ${ticketHtml}
-              
-              <div style="text-align: center; font-size: 8px; color: #9ca3af; margin-top: 24px; border-top: 1px solid #f3f4f6; padding-top: 10px;">
-                © 2026 ClicBillet CI. Réseau national de billetterie mobile décentralisé.
-              </div>
-            </div>
-            <script>
-              window.onload = function() {
-                window.focus();
-                window.print();
-                setTimeout(function() {
-                  window.parent.document.body.removeChild(window.frameElement);
-                }, 1000);
-              };
-            </script>
-          </body>
-        </html>
-      `);
-      printDocument.close();
-    }
+    const bodyHtml = `
+      <div style="max-width: 360px; margin: 10px auto; border: 1px dashed #ea580c; padding: 20px; border-radius: 16px; background-color: #ffffff;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <span style="font-family: sans-serif; font-size: 18px; font-weight: 900; color: #111827;">
+            CLIC<span style="color: #ea580c;">BILLET</span> COUPOUN
+          </span>
+          <span style="display: block; font-size: 8px; font-weight: 700; letter-spacing: 0.15em; color: #9ca3af; margin-top: 2px; text-transform: uppercase;">
+            Pass de Réservation Sécurisé
+          </span>
+        </div>
+
+        ${ticketHtml}
+
+        <div style="text-align: center; font-size: 8px; color: #9ca3af; margin-top: 24px; border-top: 1px solid #f3f4f6; padding-top: 10px;">
+          © 2026 ClicBillet CI. Réseau national de billetterie mobile décentralisé.
+        </div>
+      </div>
+    `;
+
+    const ticketStyles = `
+      body {
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        color: #111827;
+        padding: 16px;
+        margin: 0;
+        background: white;
+      }
+      .text-center { text-align: center; }
+      .space-y-2 > * + * { margin-top: 8px; }
+      .space-y-6 > * + * { margin-top: 24px; }
+
+      /* Theme Colors & Layout styling matching original ticket aesthetics */
+      .bg-gray-50\\/70 {
+        background-color: #f9fafb;
+        border: 1px solid #f3f4f6;
+        border-radius: 16px;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .relative { position: relative; }
+      .h-44 { height: 176px; }
+      .w-44 { width: 176px; }
+      .rounded-xl { border-radius: 12px; }
+      .bg-white { background-color: #ffffff; }
+      .p-2 { padding: 8px; }
+      .border { border: 1px solid #e5e7eb; }
+      .shadow-md { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+      .flex { display: flex; }
+      .flex-col { flex-direction: column; }
+      .items-center { align-items: center; }
+      .justify-center { justify-content: center; }
+      .text-xs { font-size: 11px; }
+      .text-sm { font-size: 13px; }
+      .text-[10px] { font-size: 9px; }
+      .text-[9px] { font-size: 8px; }
+      .text-lg { font-size: 16px; }
+      .font-black { font-weight: 900; }
+      .font-bold { font-weight: 700; }
+      .font-extrabold { font-weight: 800; }
+      .tracking-widest { letter-spacing: 0.1em; }
+      .uppercase { text-transform: uppercase; }
+      .font-mono { font-family: monospace; }
+      .grid { display: grid; }
+      .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .gap-4 { gap: 12px; }
+      .border-t { border-top: 1px solid #e5e7eb; }
+      .border-dashed { border-style: dashed; }
+      .pt-5 { padding-top: 16px; }
+      .col-span-2 { grid-column: span 2 / span 2; }
+      .text-orange-600 { color: #ea580c; }
+      .text-amber-900 { color: #78350f; }
+      .bg-amber-100 { background-color: #fef3c7; }
+      .bg-blue-100 { background-color: #dbeafe; }
+      .text-blue-900 { color: #1e3a8a; }
+      .truncate {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      img { max-width: 100%; display: block; margin: 0 auto; }
+
+      @media print {
+        body { padding: 0; }
+        .print\\:hidden { display: none !important; }
+      }
+    `;
+
+    printHtmlDocument(`Pass ClicBillet - ${selectedTicket?.eventTitle || "Billet"}`, bodyHtml, ticketStyles);
   }
 
   return (
