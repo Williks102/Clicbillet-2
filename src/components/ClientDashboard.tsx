@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { Ticket as TicketIcon, Calendar, MapPin, Download, CheckCircle2, AlertTriangle, ExternalLink, Printer, Sparkles } from "lucide-react";
+import { Ticket as TicketIcon, Calendar, MapPin, Download, CheckCircle2, AlertTriangle, ExternalLink, Printer, Sparkles, Receipt } from "lucide-react";
 import { Ticket, User } from "../types";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
+import { printHtmlDocument } from "../lib/printDocument";
 import ResponsiveSheet from "./ResponsiveSheet";
 
 interface ClientDashboardProps {
@@ -9,11 +10,79 @@ interface ClientDashboardProps {
   onTokenRefresh: TokenRefreshHandler;
 }
 
+interface BuyerOrder {
+  transactionRef: string;
+  purchaseDate: string;
+  eventTitles: string[];
+  tickets: Ticket[];
+  totalAmount: number;
+}
+
+// Regroupe les billets payés par commande (transaction_ref partagé entre tous les billets
+// d'un même achat) pour n'afficher/facturer qu'une fois par commande, pas par billet.
+function groupPaidOrders(tickets: Ticket[]): BuyerOrder[] {
+  const groups = new Map<string, Ticket[]>();
+  for (const t of tickets) {
+    const ref = t.transactionRef || "";
+    if (!ref.startsWith("PAID-") && !ref.startsWith("FREE-")) continue;
+    if (!groups.has(ref)) groups.set(ref, []);
+    groups.get(ref)!.push(t);
+  }
+  return Array.from(groups.entries())
+    .map(([transactionRef, tkts]) => ({
+      transactionRef,
+      purchaseDate: tkts[0].purchaseDate,
+      eventTitles: [...new Set(tkts.map((t) => t.eventTitle))],
+      tickets: tkts,
+      totalAmount: tkts.reduce((sum, t) => sum + t.pricePaid, 0),
+    }))
+    .sort((a, b) => new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime());
+}
+
+function buildInvoiceHtml(order: BuyerOrder, buyer: User): string {
+  const rows = order.tickets
+    .map(
+      (t) => `
+      <tr>
+        <td>${t.eventTitle}</td>
+        <td>${t.tier === "vip" ? "VIP" : "Standard"}</td>
+        <td class="right">${t.pricePaid.toLocaleString("fr-FR")} FCFA</td>
+      </tr>`
+    )
+    .join("");
+
+  return `
+    <div class="header">
+      <div>
+        <div class="brand">clic<span>billet</span></div>
+        <p class="muted" style="margin: 4px 0 0;">Reçu d'achat de billets</p>
+      </div>
+      <div class="right">
+        <p style="margin:0; font-weight:700;">Réf. ${order.transactionRef}</p>
+        <p class="muted" style="margin:4px 0 0;">${new Date(order.purchaseDate).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}</p>
+      </div>
+    </div>
+    <p style="margin:0 0 4px;"><strong>Acheteur :</strong> ${buyer.name}</p>
+    <p class="muted" style="margin:0 0 24px;">${buyer.email}</p>
+    <table>
+      <thead>
+        <tr><th>Événement</th><th>Catégorie</th><th class="right">Montant</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="totals">
+      <div class="totals-row grand"><span>Total payé</span><span>${order.totalAmount.toLocaleString("fr-FR")} FCFA</span></div>
+    </div>
+    <div class="footer">Ce reçu a été généré automatiquement par ClicBillet et confirme le paiement de cette commande.</div>
+  `;
+}
+
 export default function ClientDashboard({ user, onTokenRefresh }: ClientDashboardProps) {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dashTab, setDashTab] = useState<"tickets" | "invoices">("tickets");
 
   // Fetch tickets for this user from backend
   async function fetchTickets() {
@@ -212,6 +281,71 @@ export default function ClientDashboard({ user, onTokenRefresh }: ClientDashboar
         </div>
       </section>
 
+      {/* Sub-tabs: Billets / Factures */}
+      <div className="flex space-x-2 rounded-xl bg-gray-50 p-1.5 w-fit" id="client-dashboard-subtabs">
+        <button
+          onClick={() => setDashTab("tickets")}
+          className={`flex items-center space-x-1.5 rounded-lg px-4 py-2 text-xs font-bold transition-all ${
+            dashTab === "tickets" ? "bg-white text-orange-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <TicketIcon className="h-3.5 w-3.5" />
+          <span>Mes Billets</span>
+        </button>
+        <button
+          onClick={() => setDashTab("invoices")}
+          className={`flex items-center space-x-1.5 rounded-lg px-4 py-2 text-xs font-bold transition-all ${
+            dashTab === "invoices" ? "bg-white text-orange-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <Receipt className="h-3.5 w-3.5" />
+          <span>Mes Factures</span>
+        </button>
+      </div>
+
+      {dashTab === "invoices" ? (
+        <section className="space-y-4" id="client-invoices-section">
+          {(() => {
+            const orders = groupPaidOrders(tickets);
+            return orders.length > 0 ? (
+              <div className="space-y-3">
+                {orders.map((order) => (
+                  <div
+                    key={order.transactionRef}
+                    id={`invoice-row-${order.transactionRef}`}
+                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-gray-100 bg-white p-4"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-bold text-gray-900 truncate">{order.eventTitles.join(", ")}</p>
+                      <p className="mt-0.5 text-xs text-gray-400 font-mono">
+                        {new Date(order.purchaseDate).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
+                        {" · "}Réf. {order.transactionRef}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-4 shrink-0">
+                      <span className="font-black text-orange-600">{order.totalAmount.toLocaleString("fr-FR")} FCFA</span>
+                      <button
+                        onClick={() => printHtmlDocument(`Facture ${order.transactionRef}`, buildInvoiceHtml(order, user))}
+                        className="flex items-center space-x-1.5 rounded-xl border border-gray-200 px-3 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span>PDF</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-2xl border-2 border-dashed border-gray-100 py-16 text-center">
+                <Receipt className="mx-auto h-12 w-12 text-gray-300" />
+                <h4 className="mt-4 text-base font-bold text-gray-900">Aucune facture pour le moment</h4>
+                <p className="mt-2 text-xs text-gray-500">Vos reçus d'achat apparaîtront ici dès votre premier paiement confirmé.</p>
+              </div>
+            );
+          })()}
+        </section>
+      ) : (
+      <>
       {/* Ticket List Section */}
       <section className="space-y-4">
         <h3 className="text-lg font-extrabold text-gray-900 flex items-center space-x-2">
@@ -296,6 +430,8 @@ export default function ClientDashboard({ user, onTokenRefresh }: ClientDashboar
           </div>
         )}
       </section>
+      </>
+      )}
 
       {/* Ticket Details & QR Code Drawer Modal */}
       {selectedTicket && (
