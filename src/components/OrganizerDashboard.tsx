@@ -5,7 +5,7 @@ import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
 import { isEventPast } from "../lib/eventStatus";
 import { compressImageToDataUrl } from "../lib/imageCompress";
-import { printHtmlDocument } from "../lib/printDocument";
+import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 
 interface OrganizerDashboardProps {
@@ -112,8 +112,8 @@ function buildOrganizerInvoiceHtml(statement: MonthlyStatement, organizerName: s
       (t) => `
       <tr>
         <td>${new Date(t.purchaseDate).toLocaleDateString("fr-FR")}</td>
-        <td>${t.eventTitle}</td>
-        <td>${t.buyerName}</td>
+        <td>${escapeHtml(t.eventTitle)}</td>
+        <td>${escapeHtml(t.buyerName)}</td>
         <td class="right">${t.pricePaid.toLocaleString("fr-FR")} FCFA</td>
       </tr>`
     )
@@ -126,8 +126,8 @@ function buildOrganizerInvoiceHtml(statement: MonthlyStatement, organizerName: s
         <p class="muted" style="margin:4px 0 0;">Relevé de commission</p>
       </div>
       <div class="right">
-        <p style="margin:0; font-weight:700;">${statement.label}</p>
-        <p class="muted" style="margin:4px 0 0;">${organizerName}</p>
+        <p style="margin:0; font-weight:700;">${escapeHtml(statement.label)}</p>
+        <p class="muted" style="margin:4px 0 0;">${escapeHtml(organizerName)}</p>
       </div>
     </div>
     <table>

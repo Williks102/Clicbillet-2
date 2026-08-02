@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Ticket as TicketIcon, Calendar, MapPin, Download, CheckCircle2, AlertTriangle, ExternalLink, Printer, Sparkles, Receipt } from "lucide-react";
 import { Ticket, User } from "../types";
 import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
-import { printHtmlDocument } from "../lib/printDocument";
+import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import ResponsiveSheet from "./ResponsiveSheet";
 
 interface ClientDashboardProps {
@@ -44,7 +44,7 @@ function buildInvoiceHtml(order: BuyerOrder, buyer: User): string {
     .map(
       (t) => `
       <tr>
-        <td>${t.eventTitle}</td>
+        <td>${escapeHtml(t.eventTitle)}</td>
         <td>${t.tier === "vip" ? "VIP" : "Standard"}</td>
         <td class="right">${t.pricePaid.toLocaleString("fr-FR")} FCFA</td>
       </tr>`
@@ -58,12 +58,12 @@ function buildInvoiceHtml(order: BuyerOrder, buyer: User): string {
         <p class="muted" style="margin: 4px 0 0;">Reçu d'achat de billets</p>
       </div>
       <div class="right">
-        <p style="margin:0; font-weight:700;">Réf. ${order.transactionRef}</p>
+        <p style="margin:0; font-weight:700;">Réf. ${escapeHtml(order.transactionRef)}</p>
         <p class="muted" style="margin:4px 0 0;">${new Date(order.purchaseDate).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}</p>
       </div>
     </div>
-    <p style="margin:0 0 4px;"><strong>Acheteur :</strong> ${buyer.name}</p>
-    <p class="muted" style="margin:0 0 24px;">${buyer.email}</p>
+    <p style="margin:0 0 4px;"><strong>Acheteur :</strong> ${escapeHtml(buyer.name)}</p>
+    <p class="muted" style="margin:0 0 24px;">${escapeHtml(buyer.email)}</p>
     <table>
       <thead>
         <tr><th>Événement</th><th>Catégorie</th><th class="right">Montant</th></tr>
