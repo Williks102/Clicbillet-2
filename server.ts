@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import helmet from "helmet";
+import cookieParser from "cookie-parser";
 
 import { PORT, HMR_PORT, PAYMENT_GATEWAY_ORIGINS, SUPABASE_REALTIME_ORIGINS, isProduction } from "./server/lib/config.js";
 import { apiGeneralRateLimiter } from "./server/lib/rateLimiters.js";
@@ -55,7 +56,27 @@ app.use(express.json({
   }
 }));
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 app.use("/api", apiGeneralRateLimiter);
+
+// Défense CSRF en profondeur : la session vit désormais dans un cookie httpOnly, envoyé
+// automatiquement par le navigateur avec TOUTE requête vers ce domaine — y compris une requête
+// déclenchée par une page tierce malveillante (CSRF classique). SameSite=Lax sur le cookie
+// lui-même (cf. server/lib/auth.ts) bloque déjà son envoi sur la plupart des requêtes
+// cross-site non-GET, mais on ajoute une seconde barrière : exiger un en-tête personnalisé
+// qu'un <form>/<img>/<script> posté depuis un autre site ne peut pas fixer (et qu'une requête
+// fetch/XHR cross-origin ne peut pas fixer sans déclencher un preflight CORS, qui échoue ici
+// puisqu'aucune politique CORS n'autorise d'origine tierce). Les webhooks (Paystack, Supabase)
+// sont exemptés : ce sont des appels serveur-à-serveur authentifiés par signature, jamais par
+// cookie de session.
+app.use("/api", (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return next();
+  if (req.originalUrl.startsWith("/api/webhooks/")) return next();
+  if (req.headers["x-requested-with"] !== "ClicBillet") {
+    return res.status(403).json({ error: "Requête refusée (en-tête de sécurité manquant)." });
+  }
+  next();
+});
 
 // Middleware d'assainissement automatique global (XSS, Injection)
 app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {

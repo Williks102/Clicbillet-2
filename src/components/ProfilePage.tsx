@@ -23,7 +23,7 @@ export default function ProfilePage({ user, onLogout, setActiveTab }: ProfilePag
     try {
       await fetch("/api/auth/forgot-password", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Requested-With": "ClicBillet" },
         body: JSON.stringify({ email: user.email }),
       });
       setResetSent(true);

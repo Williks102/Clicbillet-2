@@ -1,12 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Clock, X, ShieldCheck } from "lucide-react";
-import { Event, User, WaitingRoomStatus } from "../types";
-import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
+import { Event, WaitingRoomStatus } from "../types";
+import { authFetch } from "../lib/apiClient";
 
 interface WaitingRoomProps {
   event: Event;
-  user: User;
-  onTokenRefresh: TokenRefreshHandler;
   onGranted: () => void;
   onCancel: () => void;
 }
@@ -19,7 +17,7 @@ function formatCountdown(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-export default function WaitingRoom({ event, user, onTokenRefresh, onGranted, onCancel }: WaitingRoomProps) {
+export default function WaitingRoom({ event, onGranted, onCancel }: WaitingRoomProps) {
   const [position, setPosition] = useState<number | null>(null);
   const [estimatedActiveAt, setEstimatedActiveAt] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
@@ -46,7 +44,7 @@ export default function WaitingRoom({ event, user, onTokenRefresh, onGranted, on
     let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
     async function poll(path: string, options: RequestInit) {
-      const response = await authFetch(path, options, user, onTokenRefresh);
+      const response = await authFetch(path, options);
       const data: WaitingRoomStatus & { error?: string } = await response.json();
       if (!response.ok) {
         throw new Error(data.error || "Erreur de la salle d'attente.");

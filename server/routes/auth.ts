@@ -8,6 +8,7 @@ import { sendWelcomeEmail, sendAdminNewOrganizerEmail, sendPasswordResetEmail } 
 import { buildAppOrigin } from "../lib/security.js";
 import { loginRateLimiter, forgotPasswordRateLimiter } from "../lib/rateLimiters.js";
 import { validateRegister, validateLogin, validateForgotPassword, validateResetPassword } from "../lib/validators.js";
+import { requireAuth, setSessionCookies, clearSessionCookies, SESSION_ACCESS_COOKIE, SESSION_REFRESH_COOKIE } from "../lib/auth.js";
 
 const router = express.Router();
 
@@ -91,13 +92,12 @@ router.post("/api/auth/register", loginRateLimiter, validateRegister, async (req
         });
       }
 
+      setSessionCookies(res, { token: clientData.session.access_token, refreshToken: clientData.session.refresh_token });
       return res.status(201).json({
         id: data.id,
         email: data.email,
         name: data.name,
-        role: data.role,
-        token: clientData.session.access_token,
-        refreshToken: clientData.session.refresh_token
+        role: data.role
       });
     } catch (err: any) {
       console.error("[Supabase Error] User registration, falling back to local file DB:", err.message);
@@ -129,12 +129,11 @@ router.post("/api/auth/register", loginRateLimiter, validateRegister, async (req
     runInBackground(sendAdminNewOrganizerEmail({ name: newUser.name, email: newUser.email }));
   }
 
-  // Return user without password and include a local development token.
+  // Return user without password; le token de dev "local-<id>" est posé en cookie httpOnly,
+  // jamais renvoyé dans le corps JSON (cf. server/lib/auth.ts).
   const { password: _, ...userWithoutPassword } = newUser;
-  res.status(201).json({
-    ...userWithoutPassword,
-    token: `local-${newUser.id}`
-  });
+  setSessionCookies(res, { token: `local-${newUser.id}` });
+  res.status(201).json(userWithoutPassword);
 });
 
 router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: express.Request, res: express.Response) => {
@@ -227,14 +226,14 @@ router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: expr
         }
       }
 
+      setSessionCookies(res, { token: authData?.session?.access_token, refreshToken: authData?.session?.refresh_token });
+
       if (profile) {
         return res.json({
           id: profile.id,
           email: profile.email,
           name: profile.name,
-          role: profile.role,
-          token: authData?.session?.access_token,
-          refreshToken: authData?.session?.refresh_token
+          role: profile.role
         });
       }
 
@@ -276,10 +275,8 @@ router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: expr
   }
 
   const { password: _, ...userWithoutPassword } = user;
-  res.json({
-    ...userWithoutPassword,
-    token: `local-${user.id}`
-  });
+  setSessionCookies(res, { token: `local-${user.id}` });
+  res.json(userWithoutPassword);
 });
 
 // Demande de réinitialisation de mot de passe : génère un jeton à usage unique (valable 1h)
@@ -398,13 +395,12 @@ router.post("/api/auth/reset-password", loginRateLimiter, validateResetPassword,
         console.warn("[Supabase Warning] Impossible d'ouvrir une session juste après la réinitialisation :", signInErr.message);
       }
 
+      setSessionCookies(res, { token: sessionToken, refreshToken: sessionRefreshToken });
       return res.json({
         id: profile?.id || resetEntry.user_id,
         email: profile?.email || resetEntry.email,
         name: profile?.name || resetEntry.email.split("@")[0],
-        role: profile?.role || "client",
-        token: sessionToken,
-        refreshToken: sessionRefreshToken
+        role: profile?.role || "client"
       });
     } catch (err: any) {
       console.error("[Supabase Error] Reset password:", err.message);
@@ -433,39 +429,103 @@ router.post("/api/auth/reset-password", loginRateLimiter, validateResetPassword,
   saveDB(db);
 
   const { password: _, ...userWithoutPassword } = user;
-  res.json({
-    ...userWithoutPassword,
-    token: `local-${user.id}`
-  });
+  setSessionCookies(res, { token: `local-${user.id}` });
+  res.json(userWithoutPassword);
 });
 
 // Rafraîchissement de session : les access_token Supabase expirent (par défaut au bout
 // d'1h). Le frontend appelle cette route avec le refresh_token stocké pour obtenir un
-// nouveau access_token sans forcer l'utilisateur à se reconnecter manuellement.
+// nouveau access_token sans forcer l'utilisateur à se reconnecter manuellement. Le refresh
+// token n'est plus lu depuis le corps de la requête : il vit dans un cookie httpOnly, envoyé
+// automatiquement par le navigateur (cf. server/lib/auth.ts), jamais accessible en JS.
 router.post("/api/auth/refresh", async (req: express.Request, res: express.Response) => {
-  const { refreshToken } = req.body;
-
-  if (!refreshToken) {
-    return res.status(400).json({ error: "refreshToken manquant." });
-  }
+  const refreshToken = req.cookies?.[SESSION_REFRESH_COOKIE];
 
   if (!isSupabaseEnabled) {
     return res.status(400).json({ error: "Rafraîchissement de session non disponible." });
   }
 
+  if (!refreshToken) {
+    return res.status(401).json({ error: "Session expirée, veuillez vous reconnecter." });
+  }
+
   try {
     const { data, error } = await createEphemeralAuthClient().auth.refreshSession({ refresh_token: refreshToken });
     if (error || !data.session) {
+      clearSessionCookies(res);
       return res.status(401).json({ error: "Session expirée, veuillez vous reconnecter." });
     }
-    return res.json({
-      token: data.session.access_token,
-      refreshToken: data.session.refresh_token
-    });
+    setSessionCookies(res, { token: data.session.access_token, refreshToken: data.session.refresh_token });
+    return res.json({ success: true });
   } catch (err: any) {
     console.error("[Supabase Error] Refresh session:", err.message);
+    clearSessionCookies(res);
     return res.status(401).json({ error: "Session expirée, veuillez vous reconnecter." });
   }
+});
+
+// Déconnexion : révoque la session côté Supabase (best-effort) puis efface les cookies.
+// Auparavant purement client (localStorage.removeItem), ce qui laissait le refresh token
+// valide côté Supabase même après une "déconnexion" — un jeton volé avant la déconnexion
+// restait utilisable indéfiniment jusqu'à expiration naturelle.
+router.post("/api/auth/logout", async (req: express.Request, res: express.Response) => {
+  const accessToken = req.cookies?.[SESSION_ACCESS_COOKIE];
+  if (isSupabaseEnabled && supabaseAdmin && accessToken && !accessToken.startsWith("local-")) {
+    try {
+      await supabaseAdmin.auth.admin.signOut(accessToken, "global");
+    } catch (err: any) {
+      console.warn("[Supabase Warning] Échec de la révocation de session au logout :", err.message);
+    }
+  }
+  clearSessionCookies(res);
+  res.json({ success: true });
+});
+
+// Bootstrap de session au chargement de l'app : le frontend ne conserve plus aucune donnée de
+// session en localStorage (le jeton vit uniquement dans le cookie httpOnly), donc il interroge
+// cette route au montage pour savoir "qui suis-je d'après mon cookie ?" plutôt que de faire
+// confiance à un état mis en cache côté client.
+router.get("/api/auth/me", requireAuth, async (req: express.Request, res: express.Response) => {
+  const authUser = req.user!;
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { data: profile } = await supabase
+        .from("users")
+        .select("id, email, name, role")
+        .eq("id", authUser.id)
+        .maybeSingle();
+      if (profile) {
+        return res.json(profile);
+      }
+    } catch (err: any) {
+      console.warn("[Supabase Warning] /api/auth/me :", err.message);
+    }
+  }
+
+  const db = getDB();
+  const dbUser = db.users.find((u: any) => u.id === authUser.id) as any;
+  if (dbUser) {
+    const { password: _, ...rest } = dbUser;
+    return res.json(rest);
+  }
+
+  res.json({ id: authUser.id, email: authUser.email, role: authUser.role, name: authUser.email.split("@")[0] });
+});
+
+// Jeton d'accès à usage unique pour l'abonnement Realtime Supabase côté navigateur (statut de
+// ses propres billets) : c'est la SEULE utilisation légitime du JWT brut côté client. Jamais
+// persisté (ni localStorage ni sessionStorage) — récupéré à la demande et gardé en mémoire le
+// temps de la page seulement, contrairement à l'ancien stockage permanent dans localStorage.
+router.get("/api/auth/realtime-token", requireAuth, (req: express.Request, res: express.Response) => {
+  if (!isSupabaseEnabled) {
+    return res.status(404).json({ error: "Non disponible (Supabase non configuré)." });
+  }
+  const token = req.cookies?.[SESSION_ACCESS_COOKIE];
+  if (!token) {
+    return res.status(401).json({ error: "Session introuvable." });
+  }
+  res.json({ token });
 });
 
 export default router;

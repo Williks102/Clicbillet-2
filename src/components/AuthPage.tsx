@@ -49,7 +49,8 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken }: Aut
     try {
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Requested-With": "ClicBillet" },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
 

@@ -104,10 +104,10 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
     }
 
     setStep("processing");
-    const devSimulateHeaders = {
-      "Content-Type": "application/json",
-      ...(user?.token ? { Authorization: `Bearer ${user.token}` } : {})
-    };
+    // La session (si connecté) vit dans un cookie httpOnly envoyé automatiquement par le
+    // navigateur — plus besoin de lire/transmettre un token manuellement. X-Requested-With est
+    // exigé par le serveur en défense CSRF sur toute requête d'état (cf. server.ts).
+    const apiHeaders = { "Content-Type": "application/json", "X-Requested-With": "ClicBillet" };
 
     const buyerName = user?.name ?? (guestInfo?.email.split("@")[0] ?? "Invité");
     const buyerPhone = isGuest ? (guestInfo?.phone ?? phoneNumber) : phoneNumber;
@@ -139,7 +139,8 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
 
       const response = await fetch("/api/checkout", {
         method: "POST",
-        headers: devSimulateHeaders,
+        headers: apiHeaders,
+        credentials: "include",
         body: JSON.stringify(payload),
       });
 
@@ -163,7 +164,7 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
         try {
           const verifyRes = await fetch("/api/payment/verify", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: apiHeaders,
             body: JSON.stringify({ reference })
           });
           const verifyBody = await verifyRes.json();
@@ -232,7 +233,8 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
       try {
         const simRes = await fetch("/api/dev/simulate-payment", {
           method: "POST",
-          headers: devSimulateHeaders,
+          headers: apiHeaders,
+          credentials: "include",
           body: JSON.stringify({ referenceNumber: data.orderId })
         });
 
