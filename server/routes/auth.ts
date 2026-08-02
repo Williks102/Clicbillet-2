@@ -144,7 +144,7 @@ router.post("/api/auth/register", loginRateLimiter, validateRegister, async (req
   }
 
   const newUser = {
-    id: `usr-${Date.now()}`,
+    id: `usr-${crypto.randomUUID()}`,
     email: email.toLowerCase(),
     password: bcrypt.hashSync(password, 10),
     name,
