@@ -1,12 +1,12 @@
 export type UserRole = 'client' | 'organizer' | 'admin';
 
+// Le jeton de session vit dans un cookie httpOnly côté serveur (cf. server/lib/auth.ts),
+// jamais dans cet objet : aucun champ token/refreshToken ici, contrairement à avant.
 export interface User {
   id: string;
   email: string;
   name: string;
   role: UserRole;
-  token?: string;
-  refreshToken?: string;
 }
 
 export interface Event {

@@ -8,8 +8,14 @@ import { sendWelcomeEmail, sendAdminNewOrganizerEmail, sendPasswordResetEmail } 
 import { buildAppOrigin } from "../lib/security.js";
 import { loginRateLimiter, forgotPasswordRateLimiter } from "../lib/rateLimiters.js";
 import { validateRegister, validateLogin, validateForgotPassword, validateResetPassword } from "../lib/validators.js";
+import { requireAuth, setSessionCookies, clearSessionCookies, SESSION_ACCESS_COOKIE, SESSION_REFRESH_COOKIE } from "../lib/auth.js";
 
 const router = express.Router();
+
+// Verrouillage par compte (voir /api/auth/login) : au-delà de ce nombre d'échecs consécutifs,
+// le compte reste bloqué pendant ACCOUNT_LOCKOUT_DURATION_MS, indépendamment de l'IP d'origine.
+const ACCOUNT_LOCKOUT_THRESHOLD = 5;
+const ACCOUNT_LOCKOUT_DURATION_MS = 15 * 60 * 1000;
 
 // Authentication Endpoints
 router.post("/api/auth/register", loginRateLimiter, validateRegister, async (req: express.Request, res: express.Response) => {
@@ -34,57 +40,24 @@ router.post("/api/auth/register", loginRateLimiter, validateRegister, async (req
         return res.status(400).json({ error: "Un utilisateur avec cet e-mail existe déjà." });
       }
 
-      // 2. Register inside Supabase Auth.
-      // We first try using the Admin Auth API (available if service_role key is used)
-      // to create an auto-confirmed account and avoid email verification in rapid prototypes.
-      let authUser: any = null;
-      let isSignUpFallbackNeeded = false;
-
-      try {
-        const adminAuthClient = supabaseAdmin;
-        if (!adminAuthClient) {
-          isSignUpFallbackNeeded = true;
-        } else {
-          const { data: adminData, error: adminError } = await adminAuthClient.auth.admin.createUser({
-            email: normalizedEmail,
-            password: password,
-            email_confirm: true,
-            user_metadata: { name, role }
-          });
-
-          if (adminError) {
-            // If the error says it's not authorized, this means we only have the anon API key, not service_role.
-            // In that case we will fallback to the normal signUp.
-            if (adminError.status === 401 || adminError.status === 403 || adminError.message.includes("authorized")) {
-              isSignUpFallbackNeeded = true;
-            } else {
-              throw adminError;
-            }
-          } else {
-            authUser = adminData?.user;
-          }
+      // 2. Register inside Supabase Auth via le flux signUp() standard : c'est le seul chemin
+      // qui déclenche l'email de confirmation natif de Supabase Auth. L'API Admin
+      // (auth.admin.createUser avec email_confirm: true) créait auparavant des comptes déjà
+      // confirmés sans jamais vérifier que l'email appartient réellement à la personne qui
+      // s'inscrit — n'importe qui pouvait créer un compte organisateur avec l'email de
+      // quelqu'un d'autre et recevoir des billets/paiements en son nom.
+      const { data: clientData, error: clientError } = await createEphemeralAuthClient().auth.signUp({
+        email: normalizedEmail,
+        password: password,
+        options: {
+          data: { name, role }
         }
-      } catch (adminException) {
-        isSignUpFallbackNeeded = true;
-      }
+      });
 
-      if (isSignUpFallbackNeeded) {
-        // Fallback to client-side signUp if the service role key is not active on this environment.
-        // Utilise un client jetable pour ne pas faire perdre à `supabase`/`supabaseAdmin` son
-        // accès service_role sur les requêtes de table suivantes (cf. createEphemeralAuthClient).
-        const { data: clientData, error: clientError } = await createEphemeralAuthClient().auth.signUp({
-          email: normalizedEmail,
-          password: password,
-          options: {
-            data: { name, role }
-          }
-        });
-
-        if (clientError) {
-          return res.status(400).json({ error: clientError.message });
-        }
-        authUser = clientData?.user;
+      if (clientError) {
+        return res.status(400).json({ error: clientError.message });
       }
+      const authUser = clientData?.user;
 
       if (!authUser) {
         return res.status(500).json({ error: "Échec de l'enregistrement de l'utilisateur sur l'authentification Supabase." });
@@ -107,29 +80,24 @@ router.post("/api/auth/register", loginRateLimiter, validateRegister, async (req
         throw profileError;
       }
 
-      // L'admin.createUser ci-dessus ne crée pas de session : on en ouvre une explicitement
-      // pour que le frontend reparte immédiatement avec un token valide (sinon tout appel
-      // requireAuth échoue en 401 jusqu'à ce que l'utilisateur se reconnecte manuellement).
-      let sessionToken: string | undefined;
-      let sessionRefreshToken: string | undefined;
-      try {
-        const { data: signInData } = await createEphemeralAuthClient().auth.signInWithPassword({
-          email: normalizedEmail,
-          password
+      // Tant que l'email n'est pas confirmé, signInWithPassword échoue (comportement Supabase
+      // Auth par défaut) — on ne tente donc plus d'ouvrir une session immédiatement après
+      // l'inscription. Le frontend doit inviter l'utilisateur à confirmer son adresse avant de
+      // se connecter normalement via /api/auth/login.
+      if (!clientData?.session) {
+        return res.status(201).json({
+          requiresEmailConfirmation: true,
+          email: data.email,
+          message: "Un e-mail de confirmation vient de vous être envoyé. Cliquez sur le lien qu'il contient avant de vous connecter."
         });
-        sessionToken = signInData?.session?.access_token;
-        sessionRefreshToken = signInData?.session?.refresh_token;
-      } catch (signInErr: any) {
-        console.warn("[Supabase Warning] Impossible d'ouvrir une session juste après l'inscription :", signInErr.message);
       }
 
+      setSessionCookies(res, { token: clientData.session.access_token, refreshToken: clientData.session.refresh_token });
       return res.status(201).json({
         id: data.id,
         email: data.email,
         name: data.name,
-        role: data.role,
-        token: sessionToken,
-        refreshToken: sessionRefreshToken
+        role: data.role
       });
     } catch (err: any) {
       console.error("[Supabase Error] User registration, falling back to local file DB:", err.message);
@@ -161,12 +129,11 @@ router.post("/api/auth/register", loginRateLimiter, validateRegister, async (req
     runInBackground(sendAdminNewOrganizerEmail({ name: newUser.name, email: newUser.email }));
   }
 
-  // Return user without password and include a local development token.
+  // Return user without password; le token de dev "local-<id>" est posé en cookie httpOnly,
+  // jamais renvoyé dans le corps JSON (cf. server/lib/auth.ts).
   const { password: _, ...userWithoutPassword } = newUser;
-  res.status(201).json({
-    ...userWithoutPassword,
-    token: `local-${newUser.id}`
-  });
+  setSessionCookies(res, { token: `local-${newUser.id}` });
+  res.status(201).json(userWithoutPassword);
 });
 
 router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: express.Request, res: express.Response) => {
@@ -180,6 +147,20 @@ router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: expr
 
   if (isSupabaseEnabled && supabase) {
     try {
+      // 0. Verrouillage par compte (complémentaire au rate limit par IP de loginRateLimiter,
+      // contournable avec plusieurs IP) : un compte ayant dépassé ACCOUNT_LOCKOUT_THRESHOLD
+      // échecs consécutifs reste bloqué jusqu'à l'expiration de locked_until, quelle que soit
+      // l'IP d'origine des tentatives suivantes.
+      const { data: lockRow } = await supabase
+        .from("users")
+        .select("id, failed_login_count, locked_until")
+        .eq("email", normalizedEmail)
+        .maybeSingle();
+
+      if (lockRow?.locked_until && new Date(lockRow.locked_until) > new Date()) {
+        return res.status(429).json({ error: "Trop de tentatives échouées pour ce compte. Réessayez plus tard ou réinitialisez votre mot de passe." });
+      }
+
       // 1. Authenticate using Supabase Auth (Native cryptographic match).
       // Utilise un client jetable pour ne pas faire perdre à `supabase`/`supabaseAdmin` son
       // accès service_role sur les requêtes de table suivantes (cf. createEphemeralAuthClient).
@@ -189,12 +170,29 @@ router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: expr
       });
 
       if (authError) {
+        if (lockRow) {
+          const newCount = (lockRow.failed_login_count || 0) + 1;
+          const update: Record<string, any> = { failed_login_count: newCount };
+          if (newCount >= ACCOUNT_LOCKOUT_THRESHOLD) {
+            update.locked_until = new Date(Date.now() + ACCOUNT_LOCKOUT_DURATION_MS).toISOString();
+          }
+          await supabase.from("users").update(update).eq("id", lockRow.id);
+        }
+
+        if (authError.code === "email_not_confirmed" || /confirm/i.test(authError.message)) {
+          return res.status(401).json({ error: "Veuillez confirmer votre adresse e-mail avant de vous connecter (vérifiez votre boîte de réception)." });
+        }
         return res.status(401).json({ error: "Identifiant ou mot de passe incorrect. " + authError.message });
       }
 
       const authUser = authData?.user;
       if (!authUser) {
         return res.status(401).json({ error: "Identifiants de connexion invalides." });
+      }
+
+      // Connexion réussie : réinitialise le compteur d'échecs de ce compte.
+      if (lockRow && (lockRow.failed_login_count || lockRow.locked_until)) {
+        await supabase.from("users").update({ failed_login_count: 0, locked_until: null }).eq("id", lockRow.id);
       }
 
       // 2. Fetch profile from our public user table matching the authenticating user UUID
@@ -228,14 +226,14 @@ router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: expr
         }
       }
 
+      setSessionCookies(res, { token: authData?.session?.access_token, refreshToken: authData?.session?.refresh_token });
+
       if (profile) {
         return res.json({
           id: profile.id,
           email: profile.email,
           name: profile.name,
-          role: profile.role,
-          token: authData?.session?.access_token,
-          refreshToken: authData?.session?.refresh_token
+          role: profile.role
         });
       }
 
@@ -253,17 +251,32 @@ router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: expr
 
   // Fallback database lookup
   const db = getDB();
-  const user = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
+  const user = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase()) as any;
+
+  if (user?.lockedUntil && new Date(user.lockedUntil) > new Date()) {
+    return res.status(429).json({ error: "Trop de tentatives échouées pour ce compte. Réessayez plus tard ou réinitialisez votre mot de passe." });
+  }
 
   if (!user || !bcrypt.compareSync(password, user.password)) {
+    if (user) {
+      user.failedLoginCount = (user.failedLoginCount || 0) + 1;
+      if (user.failedLoginCount >= ACCOUNT_LOCKOUT_THRESHOLD) {
+        user.lockedUntil = new Date(Date.now() + ACCOUNT_LOCKOUT_DURATION_MS).toISOString();
+      }
+      saveDB(db);
+    }
     return res.status(401).json({ error: "Identifiants de connexion invalides." });
   }
 
+  if (user.failedLoginCount || user.lockedUntil) {
+    user.failedLoginCount = 0;
+    user.lockedUntil = null;
+    saveDB(db);
+  }
+
   const { password: _, ...userWithoutPassword } = user;
-  res.json({
-    ...userWithoutPassword,
-    token: `local-${user.id}`
-  });
+  setSessionCookies(res, { token: `local-${user.id}` });
+  res.json(userWithoutPassword);
 });
 
 // Demande de réinitialisation de mot de passe : génère un jeton à usage unique (valable 1h)
@@ -382,13 +395,12 @@ router.post("/api/auth/reset-password", loginRateLimiter, validateResetPassword,
         console.warn("[Supabase Warning] Impossible d'ouvrir une session juste après la réinitialisation :", signInErr.message);
       }
 
+      setSessionCookies(res, { token: sessionToken, refreshToken: sessionRefreshToken });
       return res.json({
         id: profile?.id || resetEntry.user_id,
         email: profile?.email || resetEntry.email,
         name: profile?.name || resetEntry.email.split("@")[0],
-        role: profile?.role || "client",
-        token: sessionToken,
-        refreshToken: sessionRefreshToken
+        role: profile?.role || "client"
       });
     } catch (err: any) {
       console.error("[Supabase Error] Reset password:", err.message);
@@ -417,39 +429,103 @@ router.post("/api/auth/reset-password", loginRateLimiter, validateResetPassword,
   saveDB(db);
 
   const { password: _, ...userWithoutPassword } = user;
-  res.json({
-    ...userWithoutPassword,
-    token: `local-${user.id}`
-  });
+  setSessionCookies(res, { token: `local-${user.id}` });
+  res.json(userWithoutPassword);
 });
 
 // Rafraîchissement de session : les access_token Supabase expirent (par défaut au bout
 // d'1h). Le frontend appelle cette route avec le refresh_token stocké pour obtenir un
-// nouveau access_token sans forcer l'utilisateur à se reconnecter manuellement.
+// nouveau access_token sans forcer l'utilisateur à se reconnecter manuellement. Le refresh
+// token n'est plus lu depuis le corps de la requête : il vit dans un cookie httpOnly, envoyé
+// automatiquement par le navigateur (cf. server/lib/auth.ts), jamais accessible en JS.
 router.post("/api/auth/refresh", async (req: express.Request, res: express.Response) => {
-  const { refreshToken } = req.body;
-
-  if (!refreshToken) {
-    return res.status(400).json({ error: "refreshToken manquant." });
-  }
+  const refreshToken = req.cookies?.[SESSION_REFRESH_COOKIE];
 
   if (!isSupabaseEnabled) {
     return res.status(400).json({ error: "Rafraîchissement de session non disponible." });
   }
 
+  if (!refreshToken) {
+    return res.status(401).json({ error: "Session expirée, veuillez vous reconnecter." });
+  }
+
   try {
     const { data, error } = await createEphemeralAuthClient().auth.refreshSession({ refresh_token: refreshToken });
     if (error || !data.session) {
+      clearSessionCookies(res);
       return res.status(401).json({ error: "Session expirée, veuillez vous reconnecter." });
     }
-    return res.json({
-      token: data.session.access_token,
-      refreshToken: data.session.refresh_token
-    });
+    setSessionCookies(res, { token: data.session.access_token, refreshToken: data.session.refresh_token });
+    return res.json({ success: true });
   } catch (err: any) {
     console.error("[Supabase Error] Refresh session:", err.message);
+    clearSessionCookies(res);
     return res.status(401).json({ error: "Session expirée, veuillez vous reconnecter." });
   }
+});
+
+// Déconnexion : révoque la session côté Supabase (best-effort) puis efface les cookies.
+// Auparavant purement client (localStorage.removeItem), ce qui laissait le refresh token
+// valide côté Supabase même après une "déconnexion" — un jeton volé avant la déconnexion
+// restait utilisable indéfiniment jusqu'à expiration naturelle.
+router.post("/api/auth/logout", async (req: express.Request, res: express.Response) => {
+  const accessToken = req.cookies?.[SESSION_ACCESS_COOKIE];
+  if (isSupabaseEnabled && supabaseAdmin && accessToken && !accessToken.startsWith("local-")) {
+    try {
+      await supabaseAdmin.auth.admin.signOut(accessToken, "global");
+    } catch (err: any) {
+      console.warn("[Supabase Warning] Échec de la révocation de session au logout :", err.message);
+    }
+  }
+  clearSessionCookies(res);
+  res.json({ success: true });
+});
+
+// Bootstrap de session au chargement de l'app : le frontend ne conserve plus aucune donnée de
+// session en localStorage (le jeton vit uniquement dans le cookie httpOnly), donc il interroge
+// cette route au montage pour savoir "qui suis-je d'après mon cookie ?" plutôt que de faire
+// confiance à un état mis en cache côté client.
+router.get("/api/auth/me", requireAuth, async (req: express.Request, res: express.Response) => {
+  const authUser = req.user!;
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { data: profile } = await supabase
+        .from("users")
+        .select("id, email, name, role")
+        .eq("id", authUser.id)
+        .maybeSingle();
+      if (profile) {
+        return res.json(profile);
+      }
+    } catch (err: any) {
+      console.warn("[Supabase Warning] /api/auth/me :", err.message);
+    }
+  }
+
+  const db = getDB();
+  const dbUser = db.users.find((u: any) => u.id === authUser.id) as any;
+  if (dbUser) {
+    const { password: _, ...rest } = dbUser;
+    return res.json(rest);
+  }
+
+  res.json({ id: authUser.id, email: authUser.email, role: authUser.role, name: authUser.email.split("@")[0] });
+});
+
+// Jeton d'accès à usage unique pour l'abonnement Realtime Supabase côté navigateur (statut de
+// ses propres billets) : c'est la SEULE utilisation légitime du JWT brut côté client. Jamais
+// persisté (ni localStorage ni sessionStorage) — récupéré à la demande et gardé en mémoire le
+// temps de la page seulement, contrairement à l'ancien stockage permanent dans localStorage.
+router.get("/api/auth/realtime-token", requireAuth, (req: express.Request, res: express.Response) => {
+  if (!isSupabaseEnabled) {
+    return res.status(404).json({ error: "Non disponible (Supabase non configuré)." });
+  }
+  const token = req.cookies?.[SESSION_ACCESS_COOKIE];
+  if (!token) {
+    return res.status(401).json({ error: "Session introuvable." });
+  }
+  res.json({ token });
 });
 
 export default router;

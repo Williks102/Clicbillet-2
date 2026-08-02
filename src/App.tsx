@@ -21,6 +21,7 @@ import { Calendar, Compass, ShieldAlert, Sparkles } from "lucide-react";
 import { supabaseClient } from "./lib/supabaseClient";
 import { fetchPublicEvents } from "./lib/publicEvents";
 import { isNativeApp } from "./lib/platform";
+import { authFetch } from "./lib/apiClient";
 
 // Calculée une seule fois : Capacitor.isNativePlatform() ne change jamais pendant la vie de l'app.
 const nativeApp = isNativeApp();
@@ -35,14 +36,13 @@ function extractOrganizerAliasFromPath(): string | null {
 }
 
 export default function App() {
-  const [user, setUser] = useState<User | null>((() => {
-    try {
-      const stored = localStorage.getItem("clicbillet-user");
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
-  })());
+  // La session vit désormais dans un cookie httpOnly (jamais lisible par du JS, cf.
+  // server/lib/auth.ts) : on ne peut plus lire un utilisateur "déjà connecté" de façon
+  // synchrone depuis localStorage au montage. À la place, on demande au serveur "qui suis-je
+  // d'après mon cookie ?" via /api/auth/me, et on affiche un court chargement le temps de la
+  // réponse plutôt que de faire confiance à un état mis en cache côté client.
+  const [user, setUser] = useState<User | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
 
   const [viewingOrganizerAlias, setViewingOrganizerAlias] = useState<string | null>(extractOrganizerAliasFromPath);
   const [activeTab, setActiveTab] = useState<string>(() => extractOrganizerAliasFromPath() ? "organizer-profile" : "home");
@@ -103,17 +103,34 @@ export default function App() {
 
   }, [user]);
 
+  // Bootstrap de session au montage : interroge /api/auth/me (protégé par le cookie httpOnly)
+  // pour savoir si une session valide existe déjà, plutôt que de faire confiance à un état mis
+  // en cache côté client. authFetch gère elle-même le rafraîchissement en cas d'access token
+  // expiré (401 -> /api/auth/refresh -> nouvel essai), donc un simple GET suffit ici.
   useEffect(() => {
-    // Dynamic tab routing after refreshing user session — sauf si l'app vient d'être
-    // ouverte sur un lien direct /o/:alias (cf. extractOrganizerAliasFromPath), qu'on ne
-    // veut jamais écraser par le tableau de bord habituel du rôle connecté.
-    if (user && activeTab !== "organizer-profile") {
-      if (user.role === "admin") {
-        setActiveTab("admin-dashboard");
-      } else if (user.role === "organizer") {
-        setActiveTab("organizer-dashboard");
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authFetch("/api/auth/me", { method: "GET" });
+        if (cancelled) return;
+        if (res.ok) {
+          const profile: User = await res.json();
+          setUser(profile);
+          // Dynamic tab routing après restauration de session — sauf si l'app vient d'être
+          // ouverte sur un lien direct /o/:alias (cf. extractOrganizerAliasFromPath), qu'on ne
+          // veut jamais écraser par le tableau de bord habituel du rôle connecté.
+          if (activeTab !== "organizer-profile") {
+            if (profile.role === "admin") setActiveTab("admin-dashboard");
+            else if (profile.role === "organizer") setActiveTab("organizer-dashboard");
+          }
+        }
+      } catch {
+        // Pas de session valide (ou serveur injoignable) : l'utilisateur reste déconnecté.
+      } finally {
+        if (!cancelled) setSessionLoading(false);
       }
-    }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   // Navigation vers la page publique d'un organisateur (depuis une fiche événement, ou
@@ -160,36 +177,55 @@ export default function App() {
   // tickets via Supabase Realtime (policy "tickets_select_own", scoped à buyer_id = auth.uid()).
   // Dès qu'un ticket passe de PENDING- à PAID- (confirmé par le webhook Paystack côté
   // serveur), on affiche un toast et on rafraîchit la liste de billets affichée.
+  //
+  // Le JWT Supabase brut n'est plus lisible côté client (il vit dans un cookie httpOnly) —
+  // Realtime a besoin d'un JWT pour authentifier le canal, donc on en récupère un exprès via
+  // /api/auth/realtime-token (seule utilisation légitime restante d'un jeton en clair côté
+  // navigateur) : jamais persisté en storage, gardé en mémoire le temps de cet effet seulement,
+  // recalculé à chaque changement d'utilisateur.
   useEffect(() => {
-    if (!supabaseClient || !user?.id || !user?.token) return;
+    if (!supabaseClient || !user?.id) return;
+    let cancelled = false;
+    let channel: ReturnType<typeof supabaseClient.channel> | null = null;
 
-    supabaseClient.realtime.setAuth(user.token);
+    (async () => {
+      try {
+        const res = await authFetch("/api/auth/realtime-token", { method: "GET" });
+        if (cancelled || !res.ok) return;
+        const { token } = await res.json();
+        if (cancelled || !token) return;
 
-    const channel = supabaseClient
-      .channel(`tickets-buyer-${user.id}`)
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "tickets", filter: `buyer_id=eq.${user.id}` },
-        (payload) => {
-          const oldRef = String((payload.old as any)?.transaction_ref || "");
-          const newRef = String((payload.new as any)?.transaction_ref || "");
-          if (oldRef.startsWith("PENDING-") && newRef.startsWith("PAID-")) {
-            const eventTitle = (payload.new as any)?.event_title || "votre événement";
-            pushToast(`Paiement confirmé ! Votre billet pour "${eventTitle}" est prêt.`);
-            window.dispatchEvent(new CustomEvent("refresh_tickets"));
-          }
-        }
-      )
-      .subscribe();
+        supabaseClient!.realtime.setAuth(token);
+        channel = supabaseClient!
+          .channel(`tickets-buyer-${user.id}`)
+          .on(
+            "postgres_changes",
+            { event: "UPDATE", schema: "public", table: "tickets", filter: `buyer_id=eq.${user.id}` },
+            (payload) => {
+              const oldRef = String((payload.old as any)?.transaction_ref || "");
+              const newRef = String((payload.new as any)?.transaction_ref || "");
+              if (oldRef.startsWith("PENDING-") && newRef.startsWith("PAID-")) {
+                const eventTitle = (payload.new as any)?.event_title || "votre événement";
+                pushToast(`Paiement confirmé ! Votre billet pour "${eventTitle}" est prêt.`);
+                window.dispatchEvent(new CustomEvent("refresh_tickets"));
+              }
+            }
+          )
+          .subscribe();
+      } catch {
+        // Pas de session Supabase (repli db.json, ou requête échouée) : pas de temps réel,
+        // le rafraîchissement manuel (bouton, pull-to-refresh) reste disponible.
+      }
+    })();
 
     return () => {
-      supabaseClient.removeChannel(channel);
+      cancelled = true;
+      if (channel) supabaseClient!.removeChannel(channel);
     };
-  }, [user?.id, user?.token]);
+  }, [user?.id]);
 
   function handleLoginSuccess(loggedInUser: User) {
     setUser(loggedInUser);
-    localStorage.setItem("clicbillet-user", JSON.stringify(loggedInUser));
     setAuthModalVisible(false);
 
     // Dynamic redirect based on user role
@@ -210,18 +246,21 @@ export default function App() {
     }
   }
 
-  function handleTokenRefresh(token: string, refreshToken?: string) {
-    setUser(prev => {
-      if (!prev) return prev;
-      const updated = { ...prev, token, ...(refreshToken ? { refreshToken } : {}) };
-      localStorage.setItem("clicbillet-user", JSON.stringify(updated));
-      return updated;
-    });
-  }
-
-  function handleLogout() {
+  // Révoque la session côté serveur (efface les cookies httpOnly + invalide le refresh token
+  // Supabase) avant de réinitialiser l'état local — auparavant purement client
+  // (localStorage.removeItem), ce qui laissait un jeton volé valide jusqu'à son expiration
+  // naturelle même après une "déconnexion".
+  async function handleLogout() {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { "X-Requested-With": "ClicBillet" },
+        credentials: "include"
+      });
+    } catch {
+      // Best-effort : on nettoie l'état local même si l'appel réseau échoue.
+    }
     setUser(null);
-    localStorage.removeItem("clicbillet-user");
     setCheckoutEvent(null);
     setWaitingRoomEvent(null);
     setPendingEvent(null);
@@ -284,6 +323,16 @@ export default function App() {
     requestAnimationFrame(() => {
       document.getElementById("event-search-input")?.focus();
     });
+  }
+
+  // Le temps du bootstrap de session (/api/auth/me), on évite d'afficher un état "déconnecté"
+  // qui flasherait avant de basculer vers le tableau de bord si une session valide existe.
+  if (sessionLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50" id="session-bootstrap-loader">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-orange-200 border-t-orange-600" />
+      </div>
+    );
   }
 
   return (
@@ -362,7 +411,7 @@ export default function App() {
             )}
 
             {activeTab === "client-dashboard" && user && (
-              <ClientDashboard user={user} onTokenRefresh={handleTokenRefresh} />
+              <ClientDashboard user={user} />
             )}
 
             {activeTab === "organizer-dashboard" && user && user.role === "organizer" && (
@@ -371,16 +420,15 @@ export default function App() {
                 events={events}
                 onEventCreated={() => fetchEvents(true)}
                 setActiveTab={setActiveTab}
-                onTokenRefresh={handleTokenRefresh}
               />
             )}
 
             {activeTab === "admin-dashboard" && user && user.role === "admin" && (
-              <AdminDashboard user={user} onTokenRefresh={handleTokenRefresh} />
+              <AdminDashboard user={user} />
             )}
 
             {activeTab === "scanner" && user && user.role === "organizer" && (
-              <QrScannerTab user={user} onTokenRefresh={handleTokenRefresh} />
+              <QrScannerTab user={user} />
             )}
 
             {activeTab === "terms" && <TermsPage onBack={() => setActiveTab("home")} />}
@@ -398,8 +446,6 @@ export default function App() {
       {waitingRoomEvent && user && (
         <WaitingRoom
           event={waitingRoomEvent}
-          user={user}
-          onTokenRefresh={handleTokenRefresh}
           onGranted={() => {
             setCheckoutEvent(waitingRoomEvent);
             setWaitingRoomEvent(null);

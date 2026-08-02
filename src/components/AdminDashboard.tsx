@@ -5,14 +5,13 @@ import {
   Search, ShieldAlert, Sparkles, Ticket as TicketIcon, TrendingUp, Filter, Percent,
   Image as ImageIcon, RefreshCw
 } from "lucide-react";
-import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
+import { authFetch } from "../lib/apiClient";
 import { isEventPast } from "../lib/eventStatus";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 import CommissionSheet from "./CommissionSheet";
 
 interface AdminDashboardProps {
   user: User;
-  onTokenRefresh: TokenRefreshHandler;
 }
 
 interface AdminStats {
@@ -50,7 +49,7 @@ const ADMIN_SUB_TAB_ICONS: Record<AdminSubTab, React.ReactNode> = {
   transactions: <TrendingUp className="h-4 w-4" />
 };
 
-export default function AdminDashboard({ user, onTokenRefresh }: AdminDashboardProps) {
+export default function AdminDashboard({ user }: AdminDashboardProps) {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [payouts, setPayouts] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -82,7 +81,7 @@ export default function AdminDashboard({ user, onTokenRefresh }: AdminDashboardP
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apply }),
-      }, user, onTokenRefresh);
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Échec de l'opération.");
       setBannerCompressResult(data);
@@ -103,7 +102,7 @@ export default function AdminDashboard({ user, onTokenRefresh }: AdminDashboardP
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ referenceNumber })
-      }, user, onTokenRefresh);
+      });
       const data = await resp.json();
       if (!resp.ok) {
         throw new Error(data.error || "Erreur de validation manuelle");
@@ -122,9 +121,9 @@ export default function AdminDashboard({ user, onTokenRefresh }: AdminDashboardP
     setError(null);
     try {
       const [response, respPayouts, respTx] = await Promise.all([
-        authFetch("/api/admin/stats", {}, user, onTokenRefresh),
-        authFetch("/api/admin/payouts", {}, user, onTokenRefresh),
-        authFetch("/api/admin/transactions", {}, user, onTokenRefresh)
+        authFetch("/api/admin/stats", {}),
+        authFetch("/api/admin/payouts", {}),
+        authFetch("/api/admin/transactions", {})
       ]);
       if (!response.ok) {
         throw new Error("Impossible de communiquer avec l'interface d'administration.");
@@ -153,7 +152,7 @@ export default function AdminDashboard({ user, onTokenRefresh }: AdminDashboardP
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status })
-      }, user, onTokenRefresh);
+      });
       if (!response.ok) throw new Error("Erreur de mise à jour.");
       fetchAdminData();
     } catch (err: any) { alert(err.message); }
@@ -166,7 +165,7 @@ export default function AdminDashboard({ user, onTokenRefresh }: AdminDashboardP
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status })
-      }, user, onTokenRefresh);
+      });
       if (!response.ok) throw new Error("Erreur de mise à jour.");
       fetchAdminData();
     } catch (err: any) { alert(err.message); }
@@ -175,7 +174,7 @@ export default function AdminDashboard({ user, onTokenRefresh }: AdminDashboardP
   async function handleDeleteEvent(id: string) {
     if (!confirm("Êtes-vous sûr de vouloir supprimer cet événement de la plateforme ? Cette action est irréversible.")) return;
     try {
-      const response = await authFetch(`/api/admin/events/${id}`, { method: "DELETE" }, user, onTokenRefresh);
+      const response = await authFetch(`/api/admin/events/${id}`, { method: "DELETE" });
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || "Erreur de suppression.");
@@ -191,7 +190,7 @@ export default function AdminDashboard({ user, onTokenRefresh }: AdminDashboardP
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ commissionRate })
-    }, user, onTokenRefresh);
+    });
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || "Erreur de mise à jour de la commission.");
@@ -203,7 +202,7 @@ export default function AdminDashboard({ user, onTokenRefresh }: AdminDashboardP
   async function handleDeleteUser(id: string) {
     if (!confirm("Êtes-vous sûr de vouloir révoquer ce compte utilisateur de ClicBillet ? Cette action est irréversible.")) return;
     try {
-      const response = await authFetch(`/api/admin/users/${id}`, { method: "DELETE" }, user, onTokenRefresh);
+      const response = await authFetch(`/api/admin/users/${id}`, { method: "DELETE" });
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || "Erreur de révocation.");

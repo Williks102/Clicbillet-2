@@ -21,6 +21,7 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken }: Aut
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [forgotPasswordSent, setForgotPasswordSent] = useState(false);
+  const [confirmationEmailSentTo, setConfirmationEmailSentTo] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -48,7 +49,8 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken }: Aut
     try {
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Requested-With": "ClicBillet" },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
 
@@ -59,6 +61,14 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken }: Aut
 
       if (mode === "forgot") {
         setForgotPasswordSent(true);
+        return;
+      }
+
+      // Inscription : tant que l'e-mail n'est pas confirmé, le serveur ne renvoie pas de
+      // session (cf. server/routes/auth.ts) — on invite l'utilisateur à consulter sa boîte
+      // de réception au lieu de le connecter automatiquement.
+      if (mode === "register" && data.requiresEmailConfirmation) {
+        setConfirmationEmailSentTo(data.email || email);
         return;
       }
 
@@ -75,6 +85,7 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken }: Aut
     setMode(next);
     setError(null);
     setForgotPasswordSent(false);
+    setConfirmationEmailSentTo(null);
     setPassword("");
     setConfirmPassword("");
   }
@@ -112,7 +123,27 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken }: Aut
           </div>
         )}
 
-        {mode === "forgot" && forgotPasswordSent ? (
+        {mode === "register" && confirmationEmailSentTo ? (
+          <div className="space-y-5 text-center" id="registration-confirmation-sent-view">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+              <CheckCircle2 className="h-6 w-6" />
+            </div>
+            <p className="text-sm font-semibold text-gray-700">
+              Un e-mail de confirmation vient d'être envoyé à <span className="text-orange-600">{confirmationEmailSentTo}</span>.
+            </p>
+            <p className="text-xs text-gray-400">
+              Cliquez sur le lien qu'il contient avant de vous connecter (vérifiez aussi vos spams).
+            </p>
+            <button
+              id="back-to-login-btn"
+              onClick={() => switchMode("login")}
+              className="inline-flex items-center space-x-1 text-xs font-bold text-orange-600 hover:underline"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>Retour à la connexion</span>
+            </button>
+          </div>
+        ) : mode === "forgot" && forgotPasswordSent ? (
           <div className="space-y-5 text-center" id="forgot-password-sent-view">
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
               <CheckCircle2 className="h-6 w-6" />

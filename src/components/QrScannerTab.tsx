@@ -2,14 +2,13 @@ import React, { useState, useEffect, useRef } from "react";
 import { Camera, CheckCircle, XCircle, AlertTriangle, RefreshCw, Smartphone, Key, Ticket as TicketIcon } from "lucide-react";
 import { Html5QrcodeScanner } from "html5-qrcode";
 import { User } from "../types";
-import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
+import { authFetch } from "../lib/apiClient";
 
 interface QrScannerTabProps {
   user: User;
-  onTokenRefresh: TokenRefreshHandler;
 }
 
-export default function QrScannerTab({ user, onTokenRefresh }: QrScannerTabProps) {
+export default function QrScannerTab({ user }: QrScannerTabProps) {
   const organizerId = user.id;
   const [scanResult, setScanResult] = useState<any | null>(null);
   const [errorResult, setErrorResult] = useState<string | null>(null);
@@ -83,7 +82,7 @@ export default function QrScannerTab({ user, onTokenRefresh }: QrScannerTabProps
           qrCodeData: token,
           organizerId
         })
-      }, user, onTokenRefresh);
+      });
 
       const data = await response.json();
       if (!response.ok) {

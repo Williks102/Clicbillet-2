@@ -1,5 +1,5 @@
 import express from "express";
-import { isSupabaseEnabled, supabase } from "./config.js";
+import { isSupabaseEnabled, supabase, isProduction } from "./config.js";
 import { getDB } from "./db.js";
 
 export interface AuthUser {
@@ -24,8 +24,47 @@ export function extractBearerToken(req: express.Request): string | null {
   return parts[1];
 }
 
+// Session utilisateur : vit dans des cookies httpOnly (jamais lisibles par du JS, donc
+// invulnérables au vol par XSS — contrairement à un stockage localStorage) plutôt que dans le
+// header Authorization. extractBearerToken() ci-dessus reste utilisée telle quelle par
+// server/routes/webhooks.ts pour un usage sans rapport (secret partagé statique, pas une
+// session utilisateur) : ne pas fusionner les deux mécanismes.
+export const SESSION_ACCESS_COOKIE = "cb_access_token";
+export const SESSION_REFRESH_COOKIE = "cb_refresh_token";
+
+const COOKIE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 jours (durée de vie du cookie, pas du JWT lui-même)
+
+function baseCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: COOKIE_MAX_AGE_MS
+  };
+}
+
+export function setSessionCookies(res: express.Response, session: { token?: string; refreshToken?: string }) {
+  if (session.token) {
+    res.cookie(SESSION_ACCESS_COOKIE, session.token, baseCookieOptions());
+  }
+  if (session.refreshToken) {
+    res.cookie(SESSION_REFRESH_COOKIE, session.refreshToken, baseCookieOptions());
+  }
+}
+
+export function clearSessionCookies(res: express.Response) {
+  res.clearCookie(SESSION_ACCESS_COOKIE, { path: "/" });
+  res.clearCookie(SESSION_REFRESH_COOKIE, { path: "/" });
+}
+
+function getSessionTokenFromCookie(req: express.Request): string | null {
+  const token = (req as any).cookies?.[SESSION_ACCESS_COOKIE];
+  return typeof token === "string" && token ? token : null;
+}
+
 export async function getAuthenticatedUser(req: express.Request): Promise<AuthUser | null> {
-  const token = extractBearerToken(req);
+  const token = getSessionTokenFromCookie(req);
   if (!token) return null;
 
   // Les tokens "local-<id>" sont émis par le repli db.json (signup/login) quand Supabase
