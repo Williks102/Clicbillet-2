@@ -1,5 +1,6 @@
+import crypto from "crypto";
 import express from "express";
-import { isSupabaseEnabled, supabase } from "../lib/config.js";
+import { isSupabaseEnabled, supabase, isProduction } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { requireAuth, requireRole, optionalAuth } from "../lib/auth.js";
 import { validateCheckout, validateVerifyTicket } from "../lib/validators.js";
@@ -183,7 +184,7 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
   };
   // Pour un utilisateur connecté, l'identité vient du token (non falsifiable).
   // Pour un invité (pas de token), on utilise les données du body après validation.
-  const buyerId: string = authUser?.id ?? `guest-${Date.now()}`;
+  const buyerId: string = authUser?.id ?? `guest-${crypto.randomUUID()}`;
   const buyerEmail: string = authUser?.email ?? bodyEmail;
 
   if (!eventId || !buyerId || !buyerName || !buyerEmail || !items || !paymentDetails) {
@@ -193,7 +194,7 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
   const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
   // Référence de COMMANDE utilisée comme "reference" Paystack (webhook + vérification) — une
   // commande (ORD-) peut regrouper plusieurs lignes "tickets" (TKT-), une par type de billet choisi.
-  const orderId = `ORD-${Date.now()}`;
+  const orderId = `ORD-${crypto.randomUUID()}`;
   const code = GATEWAY_SHORT_NAMES[paymentDetails.method] || "PAY";
 
   if (isSupabaseEnabled && supabase) {
@@ -233,24 +234,55 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
       const ticketsSold = Number(event.tickets_sold || 0);
       const totalTickets = Number(event.total_tickets || 0);
 
-      if (ticketsSold + totalQuantity > totalTickets) {
-        return res.status(400).json({ error: "Désolé, il n'y a plus assez de places disponibles." });
+      // Réservation atomique de la capacité globale : le UPDATE ne s'applique que si la
+      // capacité est encore suffisante AU MOMENT de l'écriture (condition dans le WHERE,
+      // évaluée par Postgres sur la même ligne que l'incrément). Deux requêtes concurrentes
+      // sur le même événement ne peuvent plus toutes les deux passer un contrôle basé sur une
+      // lecture initiale devenue périmée — contrairement à un simple update({tickets_sold: x})
+      // après un select séparé, qui perdrait silencieusement l'une des deux incrémentations.
+      const { data: reservedEvent, error: reserveError } = await supabase
+        .from("events")
+        .update({ tickets_sold: ticketsSold + totalQuantity })
+        .eq("id", eventId)
+        .lte("tickets_sold", totalTickets - totalQuantity)
+        .select("tickets_sold")
+        .maybeSingle();
+
+      if (reserveError) throw reserveError;
+      if (!reservedEvent) {
+        return res.status(409).json({ error: "Désolé, il n'y a plus assez de places disponibles." });
       }
 
       const ticketTypes = event.ticket_types || [];
 
-      // Per-tier capacity check (only when tiers define a total)
+      // Contrôle par palier (tier) : une seule requête groupée au lieu d'une requête par
+      // palier commandé (évite le N+1). Reste du "best effort" (pas atomique comme la
+      // réservation globale ci-dessus, faute d'un compteur par palier en base) : en cas de
+      // dépassement détecté ici, on annule la réservation globale déjà posée juste au-dessus.
+      const tierDefsByName: Record<string, any> = {};
       for (const item of items) {
         const tierDef = ticketTypes.find((t: any) => typeof t.name === "string" && t.name.toLowerCase() === item.tier);
-        if (tierDef && Number(tierDef.total) > 0) {
-          const { count: tierSoldCount } = await supabase
-            .from("tickets")
-            .select("id", { count: "exact", head: true })
-            .eq("event_id", eventId)
-            .eq("tier", item.tier)
-            .not("transaction_ref", "like", "PENDING-%")
-            .not("transaction_ref", "like", "FAILED-%");
-          if ((tierSoldCount || 0) + item.quantity > Number(tierDef.total)) {
+        if (tierDef && Number(tierDef.total) > 0) tierDefsByName[item.tier] = tierDef;
+      }
+      if (Object.keys(tierDefsByName).length > 0) {
+        const { data: tierRows } = await supabase
+          .from("tickets")
+          .select("tier")
+          .eq("event_id", eventId)
+          .in("tier", Object.keys(tierDefsByName))
+          .not("transaction_ref", "like", "PENDING-%")
+          .not("transaction_ref", "like", "FAILED-%");
+
+        const soldByTier: Record<string, number> = {};
+        for (const row of tierRows || []) {
+          soldByTier[row.tier] = (soldByTier[row.tier] || 0) + 1;
+        }
+
+        for (const item of items) {
+          const tierDef = tierDefsByName[item.tier];
+          if (tierDef && (soldByTier[item.tier] || 0) + item.quantity > Number(tierDef.total)) {
+            // Rembourse la réservation globale posée plus haut avant de rejeter la commande.
+            await supabase.from("events").update({ tickets_sold: ticketsSold }).eq("id", eventId);
             return res.status(400).json({ error: `Il n'y a plus assez de places disponibles pour la catégorie "${tierDef.name}".` });
           }
         }
@@ -266,7 +298,7 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
         const unitPrice = selectedTier ? Number(selectedTier.price) : Number(event.price);
         totalPrice += unitPrice * item.quantity;
         for (let u = 0; u < item.quantity; u++) {
-          const ticketId = `tkt-${Date.now()}-${unitIdx}`;
+          const ticketId = `tkt-${crypto.randomUUID()}`;
           ticketRows.push({
             id: ticketId,
             order_id: orderId,
@@ -312,22 +344,17 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
         });
       }
 
-      // 2. Insert Tickets (une ligne par billet unitaire)
+      // 2. Insert Tickets (une ligne par billet unitaire). La réservation d'inventaire
+      // (tickets_sold) a déjà été posée atomiquement plus haut, avant ce point — si
+      // l'insertion échoue, on la rembourse pour ne pas bloquer des places pour rien.
       const { data: newTkts, error: tktError } = await supabase
         .from("tickets")
         .insert(ticketRows)
         .select();
 
-      if (tktError) throw tktError;
-
-      // 3. Update inventory
-      const { error: updateError } = await supabase
-        .from("events")
-        .update({ tickets_sold: ticketsSold + totalQuantity })
-        .eq("id", eventId);
-
-      if (updateError) {
-        console.error("Failed to update tickets_sold inventory, continuing...", updateError);
+      if (tktError) {
+        await supabase.from("events").update({ tickets_sold: ticketsSold }).eq("id", eventId);
+        throw tktError;
       }
 
       const mappedTickets = (newTkts || []).map((newTkt: any) => ({
@@ -390,7 +417,13 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
         tickets: mappedTickets
       });
     } catch (err: any) {
-      console.error("[Supabase Error] Checkout, falling back to local file DB:", err.message);
+      console.error(`[Supabase Error] Checkout (orderId=${orderId}, eventId=${eventId}):`, err.message);
+      if (isProduction) {
+        // Ne jamais retomber sur db.json (fichier local éphémère, non répliqué) en
+        // production : un paiement "confirmé" au client qui ne serait écrit que là
+        // disparaîtrait au prochain redémarrage/redéploiement, sans aucune trace.
+        return res.status(503).json({ error: "Service de paiement temporairement indisponible. Veuillez réessayer." });
+      }
     }
   }
 
@@ -420,7 +453,7 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
     const unitPrice = selectedTier ? Number(selectedTier.price) : Number(event.price);
     totalPrice += unitPrice * item.quantity;
     for (let u = 0; u < item.quantity; u++) {
-      const ticketId = `tkt-${Date.now()}-${unitIdx}`;
+      const ticketId = `tkt-${crypto.randomUUID()}`;
       newTickets.push({
         id: ticketId,
         orderId,
@@ -692,7 +725,17 @@ router.get("/api/cron/expire-pending-tickets", async (req: express.Request, res:
 });
 
 router.post("/api/dev/simulate-payment", async (req: express.Request, res: express.Response) => {
-  if (process.env.NODE_ENV === "production") {
+  // Garde redondante : NODE_ENV n'est jamais défini explicitement en développement local
+  // (`npm run dev` ne fait que `tsx server.ts`, sans variable d'environnement), donc un
+  // blocklist strict sur NODE_ENV === "development" casserait le développement local. Sur
+  // Vercel en revanche, VERCEL_ENV est injecté automatiquement par la plateforme elle-même
+  // ("production" / "preview" / "development") — jamais absent, jamais mal orthographié par
+  // erreur humaine, contrairement à NODE_ENV. On ferme donc la route dès que VERCEL_ENV existe
+  // et n'est pas "development", quelle que soit la valeur (ou l'absence) de NODE_ENV — ce qui
+  // couvre le cas d'une preview/production Vercel où NODE_ENV n'aurait pas été positionné à
+  // "production" comme attendu.
+  const isNonDevVercelDeployment = Boolean(process.env.VERCEL_ENV) && process.env.VERCEL_ENV !== "development";
+  if (isNonDevVercelDeployment || process.env.NODE_ENV === "production") {
     return res.status(404).json({ error: "Route disponible uniquement en développement." });
   }
 
@@ -717,7 +760,8 @@ router.post("/api/dev/simulate-payment", async (req: express.Request, res: expre
 
 // Ticket Verification Endpoint (QR Scanning Verification)
 router.post("/api/verify-ticket", requireAuth, requireRole("organizer", "admin"), validateVerifyTicket, async (req: express.Request, res: express.Response) => {
-  const { qrCodeData, organizerId } = req.body;
+  const authUser = (req as any).user;
+  const { qrCodeData } = req.body;
 
   if (!qrCodeData) {
     return res.status(400).json({ error: "Code QR invalide ou manquant." });
@@ -740,6 +784,20 @@ router.post("/api/verify-ticket", requireAuth, requireRole("organizer", "admin")
 
       if (error || !ticket) {
         return res.status(404).json({ error: "Billet introuvable dans notre système de sécurité." });
+      }
+
+      // Un organisateur ne doit pouvoir scanner que les billets de SES PROPRES événements —
+      // sans ce contrôle, n'importe quel compte organisateur pouvait scanner/consommer les
+      // billets d'un événement appartenant à un autre organisateur.
+      if (authUser.role !== "admin") {
+        const { data: ticketEvent } = await supabase
+          .from("events")
+          .select("organizer_id")
+          .eq("id", ticket.event_id)
+          .maybeSingle();
+        if (!ticketEvent || ticketEvent.organizer_id !== authUser.id) {
+          return res.status(403).json({ error: "Ce billet n'appartient pas à l'un de vos événements." });
+        }
       }
 
       const mappedTicket = {
@@ -814,7 +872,14 @@ router.post("/api/verify-ticket", requireAuth, requireRole("organizer", "admin")
     return res.status(404).json({ error: "Billet introuvable dans notre système de sécurité." });
   }
 
-  // Cross-verify: Wait, is the organizer allowed to scan this? Yes, any registered organizer can inspect tickets!
+  // Un organisateur ne doit pouvoir scanner que les billets de SES PROPRES événements.
+  if (authUser.role !== "admin") {
+    const ticketEvent = db.events.find((e: any) => e.id === ticket.eventId);
+    if (!ticketEvent || ticketEvent.organizerId !== authUser.id) {
+      return res.status(403).json({ error: "Ce billet n'appartient pas à l'un de vos événements." });
+    }
+  }
+
   if (ticket.scanned) {
     return res.status(200).json({
       success: false,
