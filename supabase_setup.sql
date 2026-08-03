@@ -324,7 +324,9 @@ ALTER TABLE public.events ADD COLUMN IF NOT EXISTS commission_rate NUMERIC;
 -- La liste publique d'événements (page d'accueil) passait jusqu'ici par /api/events
 -- (fonction serverless Vercel), sujette au cold start. La RLS section 8 autorise déjà la
 -- lecture publique de public.events (status = 'approved') : le frontend peut donc lire
--- cette table directement via le client Supabase (clé anon), sans passer par server.ts.
+-- ces données directement via le client Supabase (clé anon), sans passer par server.ts.
+-- (Depuis la section 15, cette lecture directe se fait via la vue events_public plutôt que
+-- sur la table events elle-même, dont le SELECT direct par anon/authenticated est révoqué.)
 --
 -- Seule la disponibilité par palier (ticketsSoldByTier, cf. /api/events) nécessite encore
 -- une fonction dédiée : elle est calculée à partir de public.tickets, dont la RLS
@@ -383,3 +385,38 @@ GRANT EXECUTE ON FUNCTION public.get_organizer_aliases(TEXT[]) TO anon, authenti
 -- échecs consécutifs, indépendamment de l'origine des requêtes.
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS failed_login_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;
+
+-- ==========================================
+-- 15. VUE PUBLIQUE SANS COLONNES SENSIBLES (events_public)
+-- ==========================================
+-- La policy RLS "Public read access to approved events" (section 8) filtre les LIGNES
+-- (status = 'approved'), pas les COLONNES : un SELECT * direct via la clé anon (cf.
+-- src/lib/publicEvents.ts) expose donc aussi commission_rate — le taux de commission négocié
+-- individuellement avec chaque organisateur, une donnée commerciale sensible qui ne doit pas
+-- être extractible par un visiteur interrogeant directement Supabase. Cette vue n'expose que
+-- les colonnes réellement publiques ; security_invoker=true fait que la RLS de la table
+-- sous-jacente (donc le filtre status='approved') continue de s'appliquer normalement pour
+-- le rôle appelant (anon/authenticated), plutôt que de la contourner comme le ferait une vue
+-- SECURITY DEFINER classique.
+CREATE OR REPLACE VIEW public.events_public
+WITH (security_invoker = true) AS
+SELECT
+  id, title, description, date, time, price, ticket_types, venue, category, banner,
+  tickets_sold, total_tickets, organizer_id, organizer_name, status, created_at,
+  waiting_room_enabled, waiting_room_capacity
+FROM public.events;
+
+GRANT SELECT ON public.events_public TO anon, authenticated;
+
+-- La vue seule ne suffit pas : Supabase accorde par défaut SELECT sur toutes les tables du
+-- schéma public à anon/authenticated (la policy RLS ci-dessus ne fait que filtrer les lignes
+-- de ce SELECT déjà accordé). Sans cette révocation, un appel direct à l'API REST du type
+-- GET /rest/v1/events?select=id,commission_rate avec la clé anon continuerait de fonctionner
+-- et de contourner entièrement la vue events_public.
+REVOKE SELECT ON public.events FROM anon, authenticated;
+
+-- Le frontend (src/lib/publicEvents.ts) doit désormais interroger events_public au lieu de
+-- events directement. La table events elle-même reste pleinement lisible/inscriptible par
+-- service_role (server.ts, qui contourne RLS et les grants de rôle par conception) ; seule
+-- la lecture directe par anon/authenticated est désormais bornée à events_public (colonnes
+-- non sensibles uniquement).
