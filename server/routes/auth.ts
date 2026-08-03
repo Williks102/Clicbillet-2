@@ -1,14 +1,17 @@
 import express from "express";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
-import { isSupabaseEnabled, supabase, supabaseAdmin, createEphemeralAuthClient } from "../lib/config.js";
+import { isSupabaseEnabled, supabase, supabaseAdmin, createEphemeralAuthClient, APP_ORIGIN } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { runInBackground } from "../lib/utils.js";
 import { sendWelcomeEmail, sendAdminNewOrganizerEmail, sendPasswordResetEmail } from "../lib/email.js";
-import { buildAppOrigin } from "../lib/security.js";
-import { loginRateLimiter, forgotPasswordRateLimiter } from "../lib/rateLimiters.js";
+import { registerRateLimiter, loginRateLimiter, resetPasswordRateLimiter, mfaVerifyRateLimiter, forgotPasswordRateLimiter } from "../lib/rateLimiters.js";
 import { validateRegister, validateLogin, validateForgotPassword, validateResetPassword } from "../lib/validators.js";
-import { requireAuth, setSessionCookies, clearSessionCookies, SESSION_ACCESS_COOKIE, SESSION_REFRESH_COOKIE } from "../lib/auth.js";
+import {
+  requireAuth, requireRole,
+  setSessionCookies, clearSessionCookies, SESSION_ACCESS_COOKIE, SESSION_REFRESH_COOKIE,
+  setMfaPendingCookies, clearMfaPendingCookies, MFA_PENDING_ACCESS_COOKIE, MFA_PENDING_REFRESH_COOKIE
+} from "../lib/auth.js";
 
 const router = express.Router();
 
@@ -18,7 +21,7 @@ const ACCOUNT_LOCKOUT_THRESHOLD = 5;
 const ACCOUNT_LOCKOUT_DURATION_MS = 15 * 60 * 1000;
 
 // Authentication Endpoints
-router.post("/api/auth/register", loginRateLimiter, validateRegister, async (req: express.Request, res: express.Response) => {
+router.post("/api/auth/register", registerRateLimiter, validateRegister, async (req: express.Request, res: express.Response) => {
   const { email, password, name, role } = req.body;
 
   if (!email || !password || !name || !role) {
@@ -164,7 +167,10 @@ router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: expr
       // 1. Authenticate using Supabase Auth (Native cryptographic match).
       // Utilise un client jetable pour ne pas faire perdre à `supabase`/`supabaseAdmin` son
       // accès service_role sur les requêtes de table suivantes (cf. createEphemeralAuthClient).
-      const { data: authData, error: authError } = await createEphemeralAuthClient().auth.signInWithPassword({
+      // Ce même client est réutilisé juste après pour vérifier le niveau d'authentification
+      // (AAL) : il porte la session tout juste ouverte, nécessaire à mfa.getAuthenticatorAssuranceLevel().
+      const authClient = createEphemeralAuthClient();
+      const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
         email: normalizedEmail,
         password: password,
       });
@@ -193,6 +199,21 @@ router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: expr
       // Connexion réussie : réinitialise le compteur d'échecs de ce compte.
       if (lockRow && (lockRow.failed_login_count || lockRow.locked_until)) {
         await supabase.from("users").update({ failed_login_count: 0, locked_until: null }).eq("id", lockRow.id);
+      }
+
+      // Double authentification (TOTP) : signInWithPassword réussit toujours au premier
+      // facteur (AAL1), même si ce compte a enregistré un second facteur — c'est à
+      // l'application de refuser l'accès complet tant que l'AAL2 n'est pas atteint. On pose
+      // une session temporaire (5 min, cookie distinct de la session réelle) le temps que
+      // l'utilisateur saisisse son code, sans jamais accorder l'accès aux routes protégées
+      // avec ce jeton AAL1 seul.
+      const { data: aalData } = await authClient.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (aalData && aalData.nextLevel === "aal2" && aalData.currentLevel !== "aal2") {
+        setMfaPendingCookies(res, {
+          token: authData!.session!.access_token,
+          refreshToken: authData!.session!.refresh_token
+        });
+        return res.json({ mfaRequired: true });
       }
 
       // 2. Fetch profile from our public user table matching the authenticating user UUID
@@ -291,7 +312,7 @@ router.post("/api/auth/forgot-password", forgotPasswordRateLimiter, validateForg
   const rawToken = crypto.randomBytes(32).toString("hex");
   const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1h
-  const resetUrl = `${buildAppOrigin(req)}/?reset_token=${rawToken}`;
+  const resetUrl = `${APP_ORIGIN}/?reset_token=${rawToken}`;
 
   if (isSupabaseEnabled && supabase) {
     try {
@@ -345,7 +366,7 @@ router.post("/api/auth/forgot-password", forgotPasswordRateLimiter, validateForg
 // Finalisation de la réinitialisation : vérifie le jeton (à usage unique, 1h de validité),
 // met à jour le mot de passe puis ouvre directement une session, pour éviter à l'utilisateur
 // de devoir se reconnecter manuellement juste après avoir choisi son nouveau mot de passe.
-router.post("/api/auth/reset-password", loginRateLimiter, validateResetPassword, async (req: express.Request, res: express.Response) => {
+router.post("/api/auth/reset-password", resetPasswordRateLimiter, validateResetPassword, async (req: express.Request, res: express.Response) => {
   const { token, newPassword } = req.body;
   const tokenHash = crypto.createHash("sha256").update(String(token)).digest("hex");
 
@@ -370,6 +391,11 @@ router.post("/api/auth/reset-password", loginRateLimiter, validateResetPassword,
 
       const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(resetEntry.user_id, { password: newPassword });
       if (updateError) throw updateError;
+
+      // Lève le verrouillage éventuel du compte (cf. /api/auth/login) : sans ça, un
+      // utilisateur qui suit le conseil du message de verrouillage ("réinitialisez votre mot
+      // de passe") resterait bloqué jusqu'à 15 minutes de plus malgré une réinitialisation réussie.
+      await supabase.from("users").update({ failed_login_count: 0, locked_until: null }).eq("id", resetEntry.user_id);
 
       // Jeton à usage unique : on le supprime immédiatement après consommation.
       await supabase.from("password_resets").delete().eq("token_hash", tokenHash);
@@ -425,6 +451,8 @@ router.post("/api/auth/reset-password", loginRateLimiter, validateResetPassword,
   }
 
   user.password = bcrypt.hashSync(newPassword, 10);
+  user.failedLoginCount = 0;
+  user.lockedUntil = null;
   db.passwordResets = db.passwordResets.filter((r: any) => r.tokenHash !== tokenHash);
   saveDB(db);
 
@@ -526,6 +554,217 @@ router.get("/api/auth/realtime-token", requireAuth, (req: express.Request, res: 
     return res.status(401).json({ error: "Session introuvable." });
   }
   res.json({ token });
+});
+
+// --- Double authentification (MFA/TOTP), organisateurs et administrateurs ---
+// Ces routes délèguent entièrement à l'API MFA native de Supabase Auth (TOTP). Le backend
+// étant sans état entre deux requêtes (pas de client Supabase persistant par utilisateur),
+// chaque route hydrate un client jetable avec la session de l'appelant via auth.setSession()
+// avant d'appeler les méthodes mfa.* — celles-ci opèrent sur la session ainsi attachée, peu
+// importe la clé API utilisée pour construire le client (même principe déjà en place pour
+// /api/auth/refresh et la réouverture de session après réinitialisation de mot de passe).
+
+router.post("/api/auth/mfa/enroll", requireAuth, requireRole("organizer", "admin"), async (req: express.Request, res: express.Response) => {
+  if (!isSupabaseEnabled) {
+    return res.status(400).json({ error: "La double authentification nécessite Supabase (non configuré en développement local)." });
+  }
+  const accessToken = req.cookies?.[SESSION_ACCESS_COOKIE];
+  const refreshToken = req.cookies?.[SESSION_REFRESH_COOKIE];
+  if (!accessToken || !refreshToken) {
+    return res.status(401).json({ error: "Session invalide." });
+  }
+
+  try {
+    const client = createEphemeralAuthClient();
+    const { error: setErr } = await client.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+    if (setErr) {
+      return res.status(401).json({ error: "Session invalide." });
+    }
+
+    const { data, error } = await client.auth.mfa.enroll({ factorType: "totp", friendlyName: "ClicBillet" });
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.json({ factorId: data.id, qrCode: data.totp.qr_code, secret: data.totp.secret });
+  } catch (err: any) {
+    console.error("[Supabase Error] MFA enroll:", err.message);
+    res.status(500).json({ error: "Impossible d'initialiser la double authentification pour le moment." });
+  }
+});
+
+router.post("/api/auth/mfa/enroll/verify", requireAuth, requireRole("organizer", "admin"), async (req: express.Request, res: express.Response) => {
+  const { factorId, code } = req.body;
+  if (!factorId || !code) {
+    return res.status(400).json({ error: "factorId et code requis." });
+  }
+  if (!isSupabaseEnabled) {
+    return res.status(400).json({ error: "La double authentification nécessite Supabase (non configuré en développement local)." });
+  }
+  const accessToken = req.cookies?.[SESSION_ACCESS_COOKIE];
+  const refreshToken = req.cookies?.[SESSION_REFRESH_COOKIE];
+  if (!accessToken || !refreshToken) {
+    return res.status(401).json({ error: "Session invalide." });
+  }
+
+  try {
+    const client = createEphemeralAuthClient();
+    const { error: setErr } = await client.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+    if (setErr) {
+      return res.status(401).json({ error: "Session invalide." });
+    }
+
+    const { data: challenge, error: challengeErr } = await client.auth.mfa.challenge({ factorId });
+    if (challengeErr || !challenge) {
+      return res.status(400).json({ error: "Impossible de créer le défi de vérification." });
+    }
+
+    const { error: verifyErr } = await client.auth.mfa.verify({ factorId, challengeId: challenge.id, code });
+    if (verifyErr) {
+      return res.status(401).json({ error: "Code de vérification invalide ou expiré." });
+    }
+
+    // La vérification du premier facteur MFA fait tourner la session (et invalide les autres,
+    // par design Supabase) : on resynchronise notre cookie avec la session à jour, sinon le
+    // prochain appel échouerait avec l'ancien refresh token désormais révoqué.
+    const { data: sessionData } = await client.auth.getSession();
+    if (sessionData?.session) {
+      setSessionCookies(res, { token: sessionData.session.access_token, refreshToken: sessionData.session.refresh_token });
+    }
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error("[Supabase Error] MFA enroll verify:", err.message);
+    res.status(500).json({ error: "Impossible de valider la double authentification pour le moment." });
+  }
+});
+
+router.get("/api/auth/mfa/status", requireAuth, async (req: express.Request, res: express.Response) => {
+  if (!isSupabaseEnabled) {
+    return res.json({ available: false, enabled: false, factorId: null });
+  }
+  const accessToken = req.cookies?.[SESSION_ACCESS_COOKIE];
+  const refreshToken = req.cookies?.[SESSION_REFRESH_COOKIE];
+  if (!accessToken || !refreshToken) {
+    return res.status(401).json({ error: "Session invalide." });
+  }
+
+  try {
+    const client = createEphemeralAuthClient();
+    const { error: setErr } = await client.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+    if (setErr) {
+      return res.status(401).json({ error: "Session invalide." });
+    }
+
+    const { data, error } = await client.auth.mfa.listFactors();
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    const verifiedFactor = (data?.totp || []).find((f: any) => f.status === "verified");
+    res.json({ available: true, enabled: Boolean(verifiedFactor), factorId: verifiedFactor?.id ?? null });
+  } catch (err: any) {
+    console.error("[Supabase Error] MFA status:", err.message);
+    res.status(500).json({ error: "Impossible de vérifier le statut de la double authentification." });
+  }
+});
+
+router.post("/api/auth/mfa/unenroll", requireAuth, async (req: express.Request, res: express.Response) => {
+  const { factorId } = req.body;
+  if (!factorId) {
+    return res.status(400).json({ error: "factorId requis." });
+  }
+  if (!isSupabaseEnabled) {
+    return res.status(400).json({ error: "La double authentification nécessite Supabase (non configuré en développement local)." });
+  }
+  const accessToken = req.cookies?.[SESSION_ACCESS_COOKIE];
+  const refreshToken = req.cookies?.[SESSION_REFRESH_COOKIE];
+  if (!accessToken || !refreshToken) {
+    return res.status(401).json({ error: "Session invalide." });
+  }
+
+  try {
+    const client = createEphemeralAuthClient();
+    const { error: setErr } = await client.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+    if (setErr) {
+      return res.status(401).json({ error: "Session invalide." });
+    }
+
+    const { error } = await client.auth.mfa.unenroll({ factorId });
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error("[Supabase Error] MFA unenroll:", err.message);
+    res.status(500).json({ error: "Impossible de désactiver la double authentification pour le moment." });
+  }
+});
+
+// Finalisation de la connexion pour un compte ayant activé la double authentification (cf.
+// /api/auth/login, qui pose une session AAL1 temporaire dans les cookies MFA_PENDING_* au
+// lieu de la session réelle tant que le second facteur n'est pas vérifié).
+router.post("/api/auth/mfa/login-verify", mfaVerifyRateLimiter, async (req: express.Request, res: express.Response) => {
+  const { code } = req.body;
+  const pendingAccess = req.cookies?.[MFA_PENDING_ACCESS_COOKIE];
+  const pendingRefresh = req.cookies?.[MFA_PENDING_REFRESH_COOKIE];
+
+  if (!pendingAccess || !pendingRefresh) {
+    return res.status(401).json({ error: "Aucune connexion en attente de vérification. Reconnectez-vous." });
+  }
+  if (!code) {
+    return res.status(400).json({ error: "Code de vérification requis." });
+  }
+  if (!isSupabaseEnabled) {
+    return res.status(400).json({ error: "Fonctionnalité indisponible." });
+  }
+
+  try {
+    const client = createEphemeralAuthClient();
+    const { error: setErr } = await client.auth.setSession({ access_token: pendingAccess, refresh_token: pendingRefresh });
+    if (setErr) {
+      clearMfaPendingCookies(res);
+      return res.status(401).json({ error: "Session expirée, reconnectez-vous." });
+    }
+
+    const { data: factors, error: factorsErr } = await client.auth.mfa.listFactors();
+    const factor = factorsErr ? null : (factors?.totp || []).find((f: any) => f.status === "verified");
+    if (!factor) {
+      clearMfaPendingCookies(res);
+      return res.status(400).json({ error: "Aucun facteur de double authentification enregistré." });
+    }
+
+    const { data: challenge, error: challengeErr } = await client.auth.mfa.challenge({ factorId: factor.id });
+    if (challengeErr || !challenge) {
+      return res.status(500).json({ error: "Impossible de créer le défi de vérification." });
+    }
+
+    const { error: verifyErr } = await client.auth.mfa.verify({ factorId: factor.id, challengeId: challenge.id, code });
+    if (verifyErr) {
+      return res.status(401).json({ error: "Code de vérification invalide ou expiré." });
+    }
+
+    const { data: sessionData } = await client.auth.getSession();
+    if (!sessionData?.session) {
+      return res.status(500).json({ error: "Erreur lors de la finalisation de la connexion." });
+    }
+
+    clearMfaPendingCookies(res);
+    setSessionCookies(res, { token: sessionData.session.access_token, refreshToken: sessionData.session.refresh_token });
+
+    const userId = sessionData.session.user.id;
+    const { data: profile } = await supabase!
+      .from("users")
+      .select("id, email, name, role")
+      .eq("id", userId)
+      .maybeSingle();
+
+    res.json(profile || { id: userId, email: sessionData.session.user.email, name: sessionData.session.user.email?.split("@")[0] || "Abonné ClicBillet", role: "client" });
+  } catch (err: any) {
+    console.error("[Supabase Error] MFA login verify:", err.message);
+    res.status(500).json({ error: "Impossible de finaliser la connexion pour le moment." });
+  }
 });
 
 export default router;

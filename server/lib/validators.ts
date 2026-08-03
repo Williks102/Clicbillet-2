@@ -115,10 +115,25 @@ export const validateResetPassword = async (req: express.Request, res: express.R
 
 // Middleware de validation pour la création / modification d'événements
 export const validateEvent = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const { title, date, time, price, venue, category, banner, totalTickets, organizerId } = req.body;
+  const { title, description, date, time, price, venue, category, banner, totalTickets, organizerId } = req.body;
 
   if (!title || !date || !time || !venue || !category || !organizerId) {
     return res.status(400).json({ error: "Veuillez remplir tous les champs obligatoires correctement." });
+  }
+
+  // Bornes de longueur : évite qu'un champ libre (des Mo de texte, le body JSON global
+  // autorisant jusqu'à 10 Mo) ne gonfle indéfiniment le stockage à chaque création d'événement.
+  if (String(title).length > 200) {
+    return res.status(400).json({ error: "Le titre ne peut pas dépasser 200 caractères." });
+  }
+  if (description && String(description).length > 5000) {
+    return res.status(400).json({ error: "La description ne peut pas dépasser 5000 caractères." });
+  }
+  if (String(venue).length > 200) {
+    return res.status(400).json({ error: "Le lieu ne peut pas dépasser 200 caractères." });
+  }
+  if (String(category).length > 100) {
+    return res.status(400).json({ error: "La catégorie ne peut pas dépasser 100 caractères." });
   }
 
   if (price === undefined || isNaN(Number(price)) || Number(price) < 0) {

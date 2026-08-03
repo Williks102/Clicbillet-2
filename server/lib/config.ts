@@ -90,6 +90,13 @@ export const PAYMENT_GATEWAY_ORIGINS = [
 
 export const isProduction = process.env.NODE_ENV === "production";
 
+// Origine canonique de l'application, utilisée pour construire des URL sensibles (lien de
+// réinitialisation de mot de passe) — jamais dérivée des en-têtes Host/Origin de la requête,
+// entièrement contrôlables par l'appelant (un attaquant peut les usurper sans passer par le
+// vrai frontend), ce qui permettrait sinon de faire pointer un email de réinitialisation
+// légitime vers un domaine de phishing tout en gardant un jeton valide.
+export const APP_ORIGIN = (process.env.APP_ORIGIN || (isProduction ? "https://www.clicbillet.com" : `http://localhost:${PORT}`)).trim();
+
 export const SUPABASE_HOST = (() => {
   try {
     return SUPABASE_URL ? new URL(SUPABASE_URL).host : "";

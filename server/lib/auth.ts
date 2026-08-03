@@ -58,6 +58,36 @@ export function clearSessionCookies(res: express.Response) {
   res.clearCookie(SESSION_REFRESH_COOKIE, { path: "/" });
 }
 
+// Session "en attente" pendant la double authentification (MFA) : quand un compte a activé la
+// 2FA, signInWithPassword réussit (AAL1) mais ne doit PAS suffire à accorder l'accès — le
+// second facteur (code TOTP) reste à vérifier. Ce couple de cookies distinct, à durée de vie
+// courte, porte cette session AAL1 le temps que l'utilisateur saisisse son code, sans jamais
+// être lu par getAuthenticatedUser() (qui ne connaît que SESSION_ACCESS_COOKIE) : tant que la
+// vérification MFA n'a pas eu lieu, aucune route protégée n'est accessible avec ce jeton.
+export const MFA_PENDING_ACCESS_COOKIE = "cb_mfa_pending_access";
+export const MFA_PENDING_REFRESH_COOKIE = "cb_mfa_pending_refresh";
+const MFA_PENDING_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes pour saisir le code
+
+function mfaPendingCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: MFA_PENDING_MAX_AGE_MS
+  };
+}
+
+export function setMfaPendingCookies(res: express.Response, session: { token: string; refreshToken: string }) {
+  res.cookie(MFA_PENDING_ACCESS_COOKIE, session.token, mfaPendingCookieOptions());
+  res.cookie(MFA_PENDING_REFRESH_COOKIE, session.refreshToken, mfaPendingCookieOptions());
+}
+
+export function clearMfaPendingCookies(res: express.Response) {
+  res.clearCookie(MFA_PENDING_ACCESS_COOKIE, { path: "/" });
+  res.clearCookie(MFA_PENDING_REFRESH_COOKIE, { path: "/" });
+}
+
 function getSessionTokenFromCookie(req: express.Request): string | null {
   const token = (req as any).cookies?.[SESSION_ACCESS_COOKIE];
   return typeof token === "string" && token ? token : null;
