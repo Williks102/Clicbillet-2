@@ -1,5 +1,6 @@
 import React, { Component, ReactNode } from "react";
 import { AlertTriangle, RotateCcw } from "lucide-react";
+import * as Sentry from "@sentry/react";
 
 interface Props {
   children: ReactNode;
@@ -17,9 +18,9 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // Pas de remontée réseau ici : il n'y a pas de route /api/errors côté serveur.
-    // La console reste la source de diagnostic pour l'instant.
     console.error("[ErrorBoundary] Crash React intercepté :", error, info.componentStack);
+    // No-op si VITE_SENTRY_DSN n'est pas définie (cf. src/lib/observability.ts).
+    Sentry.captureReactException(error, info);
   }
 
   render() {

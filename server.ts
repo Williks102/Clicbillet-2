@@ -1,3 +1,7 @@
+// Doit s'importer avant tout le reste : Sentry.init() (si SENTRY_DSN est défini) installe ses
+// gestionnaires globaux uncaughtException/unhandledRejection dès l'exécution de ce module.
+import { setupSentryExpressErrorHandler } from "./server/lib/observability.js";
+
 import express from "express";
 import path from "path";
 import helmet from "helmet";
@@ -102,6 +106,11 @@ app.use(ticketsRouter);
 app.use(webhooksRouter);
 app.use(organizerRouter);
 app.use(adminRouter);
+
+// Doit être enregistré après tous les routers ci-dessus (et avant le middleware statique/SPA
+// qui suit) : capture toute exception non interceptée levée dans une route pour la remonter
+// à Sentry avant la réponse d'erreur générique. No-op si SENTRY_DSN n'est pas définie.
+setupSentryExpressErrorHandler(app);
 
 // Configure Vite middleware and static serving as requested
 async function startServer() {
