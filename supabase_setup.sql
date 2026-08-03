@@ -42,6 +42,11 @@ ALTER TABLE public.events ADD COLUMN IF NOT EXISTS ticket_types JSONB;
 ALTER TABLE public.events ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
 
 -- 3. Table des RETRAITS (Payouts)
+-- details (numéro mobile money / IBAN) est chiffré applicativement avant écriture
+-- (server/lib/payoutEncryption.ts, AES-256-GCM) : la colonne reste TEXT, mais ne contient
+-- jamais la coordonnée en clair, y compris pour un accès direct à la base (service_role,
+-- dump, etc.) contournant l'application. Seul GET /api/admin/payouts la déchiffre, pour
+-- affichage à l'admin qui doit effectuer le virement.
 CREATE TABLE IF NOT EXISTS public.payouts (
     id TEXT PRIMARY KEY,
     organizer_id TEXT NOT NULL,

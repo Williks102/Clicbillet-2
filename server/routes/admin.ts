@@ -7,6 +7,7 @@ import { runInBackground } from "../lib/utils.js";
 import { sendOrganizerPayoutStatusEmail } from "../lib/email.js";
 import { getDefaultCommissionRate, computeCommissionBreakdown } from "../lib/commission.js";
 import { findTicketsByReference, confirmPaymentForTickets } from "../lib/paymentConfirmation.js";
+import { decryptPayoutDetails } from "../lib/payoutEncryption.js";
 
 const router = express.Router();
 
@@ -194,11 +195,15 @@ router.get("/api/admin/payouts", async (req: express.Request, res: express.Respo
   if (adminClient) {
     try {
       const { data, error } = await adminClient.from("payouts").select("*").order("request_date", { ascending: false });
-      if (!error) return res.json(data.map((p: any) => ({...p, organizerId: p.organizer_id, requestDate: p.request_date})));
+      if (!error) {
+        return res.json(data.map((p: any) => ({
+          ...p, organizerId: p.organizer_id, requestDate: p.request_date, details: decryptPayoutDetails(p.details)
+        })));
+      }
     } catch(e) {}
   }
   const db = getDB();
-  res.json(db.payouts || []);
+  res.json((db.payouts || []).map((p: any) => ({ ...p, details: decryptPayoutDetails(p.details) })));
 });
 
 const PAYOUT_STATUSES = ["pending", "completed", "rejected"];

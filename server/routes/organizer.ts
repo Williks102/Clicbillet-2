@@ -7,6 +7,7 @@ import { runInBackground } from "../lib/utils.js";
 import { sendAdminPayoutRequestEmail } from "../lib/email.js";
 import { getDefaultCommissionRate, computeCommissionBreakdown } from "../lib/commission.js";
 import { validateOrganizerAlias, MAX_ORGANIZER_BIO_LENGTH } from "../lib/organizerAlias.js";
+import { encryptPayoutDetails } from "../lib/payoutEncryption.js";
 
 const router = express.Router();
 
@@ -254,6 +255,9 @@ router.post("/api/organizer/payouts", requireRole("organizer", "admin"), async (
   if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !PAYOUT_METHODS.has(String(method))) {
     return res.status(400).json({ error: "Montant ou méthode de retrait invalide." });
   }
+  if (typeof details !== "string" || !details.trim() || details.length > 500) {
+    return res.status(400).json({ error: "Détails du compte de réception invalides." });
+  }
 
   // Anti-IDOR : un organisateur ne peut poser une demande de retrait que pour lui-même.
   const requestedOrganizerId = String(req.body.organizerId || authUser.id || "");
@@ -270,9 +274,12 @@ router.post("/api/organizer/payouts", requireRole("organizer", "admin"), async (
     return res.status(400).json({ error: "Le montant demandé dépasse votre solde disponible." });
   }
 
+  // Coordonnées de retrait (numéro mobile money / IBAN) chiffrées avant toute écriture
+  // (Supabase ou db.json) : une donnée financière sensible qui ne doit jamais être lisible en
+  // clair au repos, y compris via un accès direct à la base contournant l'application.
   const payout = {
     id: `pay-${crypto.randomUUID()}`, organizerId, amount: numericAmount, status: "pending" as const,
-    requestDate: new Date().toISOString(), method, details
+    requestDate: new Date().toISOString(), method, details: encryptPayoutDetails(details)
   };
 
   if (supabase) {

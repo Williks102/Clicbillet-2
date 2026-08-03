@@ -57,6 +57,34 @@ export const LOCAL_ADMIN_PASSWORD = process.env.LOCAL_ADMIN_PASSWORD || crypto.r
 export const LOCAL_CLIENT_PASSWORD = process.env.LOCAL_CLIENT_PASSWORD || crypto.randomBytes(12).toString("hex");
 export const LOCAL_ORGANIZER_PASSWORD = process.env.LOCAL_ORGANIZER_PASSWORD || crypto.randomBytes(12).toString("hex");
 
+// Clé de chiffrement des coordonnées de retrait des organisateurs (payouts.details : numéro
+// mobile money / IBAN, cf. server/lib/payoutEncryption.ts) : une donnée financière sensible qui
+// ne doit jamais être lisible en clair dans la base (Supabase ou db.json), y compris par un
+// éventuel accès direct à la base contournant l'application. Clé AES-256 attendue en hex (64
+// caractères) ou base64 dans PAYOUT_DETAILS_ENCRYPTION_KEY.
+function loadPayoutDetailsEncryptionKey(): Buffer {
+  const raw = (process.env.PAYOUT_DETAILS_ENCRYPTION_KEY || "").trim();
+  if (raw) {
+    const buf = /^[0-9a-fA-F]{64}$/.test(raw) ? Buffer.from(raw, "hex") : Buffer.from(raw, "base64");
+    if (buf.length !== 32) {
+      console.error("[Security] PAYOUT_DETAILS_ENCRYPTION_KEY doit représenter exactement 32 octets (64 caractères hex, ou l'équivalent en base64).");
+      process.exit(1);
+    }
+    return buf;
+  }
+  if (process.env.NODE_ENV === "production") {
+    console.error("[Security] PAYOUT_DETAILS_ENCRYPTION_KEY manquante en production : impossible de chiffrer les coordonnées de retrait (mobile money / IBAN) des organisateurs. Arrêt du serveur.");
+    process.exit(1);
+  }
+  // Dev uniquement : clé éphémère régénérée à chaque démarrage, même principe que
+  // LOCAL_*_PASSWORD ci-dessous — les retraits chiffrés avant un redémarrage local ne seront
+  // alors plus déchiffrables, sans conséquence puisqu'il s'agit de données db.json locales.
+  console.warn("[Payouts] PAYOUT_DETAILS_ENCRYPTION_KEY absente : clé de chiffrement éphémère générée pour ce process (développement uniquement).");
+  return crypto.randomBytes(32);
+}
+
+export const PAYOUT_DETAILS_ENCRYPTION_KEY = loadPayoutDetailsEncryptionKey();
+
 if (process.env.NODE_ENV !== "production") {
   console.info("[Dev login] Local fallback passwords are available only in development mode:");
   console.info(`  admin: ${LOCAL_ADMIN_PASSWORD}`);
