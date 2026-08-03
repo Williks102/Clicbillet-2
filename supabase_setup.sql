@@ -324,7 +324,9 @@ ALTER TABLE public.events ADD COLUMN IF NOT EXISTS commission_rate NUMERIC;
 -- La liste publique d'événements (page d'accueil) passait jusqu'ici par /api/events
 -- (fonction serverless Vercel), sujette au cold start. La RLS section 8 autorise déjà la
 -- lecture publique de public.events (status = 'approved') : le frontend peut donc lire
--- cette table directement via le client Supabase (clé anon), sans passer par server.ts.
+-- ces données directement via le client Supabase (clé anon), sans passer par server.ts.
+-- (Depuis la section 15, cette lecture directe se fait via la vue events_public plutôt que
+-- sur la table events elle-même, dont le SELECT direct par anon/authenticated est révoqué.)
 --
 -- Seule la disponibilité par palier (ticketsSoldByTier, cf. /api/events) nécessite encore
 -- une fonction dédiée : elle est calculée à partir de public.tickets, dont la RLS
@@ -406,7 +408,15 @@ FROM public.events;
 
 GRANT SELECT ON public.events_public TO anon, authenticated;
 
+-- La vue seule ne suffit pas : Supabase accorde par défaut SELECT sur toutes les tables du
+-- schéma public à anon/authenticated (la policy RLS ci-dessus ne fait que filtrer les lignes
+-- de ce SELECT déjà accordé). Sans cette révocation, un appel direct à l'API REST du type
+-- GET /rest/v1/events?select=id,commission_rate avec la clé anon continuerait de fonctionner
+-- et de contourner entièrement la vue events_public.
+REVOKE SELECT ON public.events FROM anon, authenticated;
+
 -- Le frontend (src/lib/publicEvents.ts) doit désormais interroger events_public au lieu de
--- events directement. La table events elle-même reste lisible par service_role (server.ts)
--- sans restriction, commission_rate compris — seule la lecture anon/authenticated directe
--- est désormais bornée aux colonnes non sensibles.
+-- events directement. La table events elle-même reste pleinement lisible/inscriptible par
+-- service_role (server.ts, qui contourne RLS et les grants de rôle par conception) ; seule
+-- la lecture directe par anon/authenticated est désormais bornée à events_public (colonnes
+-- non sensibles uniquement).
