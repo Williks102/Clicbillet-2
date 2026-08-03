@@ -426,15 +426,6 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken }: Aut
                 <ArrowRight className="h-3.5 w-3.5" />
               </button>
             )}
-
-            {mode === "login" && (
-              <div className="rounded-xl bg-orange-50/70 p-3 text-center text-xs text-orange-800 border border-orange-100 space-y-1">
-                <span className="font-black">💡 Mode démo :</span>
-                <div className="font-mono text-[10px] bg-white rounded-md p-1 border border-orange-100">
-                  Créez un compte ou utilisez les identifiants fournis par l'administrateur de la plateforme.
-                </div>
-              </div>
-            )}
           </div>
         )}
 
