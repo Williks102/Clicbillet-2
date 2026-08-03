@@ -8,6 +8,19 @@
 // généré — la CSP de production (server.ts, scriptSrc sans 'unsafe-inline' hors dev) bloque
 // silencieusement tout <script> inline, ce qui rendait le bouton "Télécharger PDF" inopérant.
 // Les styles, eux, peuvent rester inline (style-src autorise 'unsafe-inline' en prod comme en dev).
+// Les appelants construisent bodyHtml à partir de chaînes brutes interpolées dans du HTML
+// (titre d'événement, nom d'acheteur...), jamais rendues par React — donc jamais échappées
+// automatiquement. À utiliser sur toute valeur non fixe avant de l'insérer dans un template
+// HTML passé à printHtmlDocument (voir ClientDashboard/OrganizerDashboard).
+export function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 const DEFAULT_STYLES = `
   * { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; color: #111827; padding: 32px; margin: 0; background: #fff; }
@@ -53,7 +66,7 @@ export function printHtmlDocument(title: string, bodyHtml: string, styles: strin
   printDocument.write(`
     <html>
       <head>
-        <title>${title}</title>
+        <title>${escapeHtml(title)}</title>
         <style>${styles}</style>
       </head>
       <body>
