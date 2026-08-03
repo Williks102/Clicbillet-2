@@ -5,11 +5,23 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    # Les montées de version majeures (breaking changes potentiels) ne sont jamais groupées
+    # ni proposées automatiquement : une PR précédente a groupé vite 6->8, express 4->5,
+    # helmet 6->8, TypeScript 5.8->7.0 etc. en une seule fois, cassant le build sans qu'aucune
+    # ne soit individuellement revue. Ces montées majeures restent visibles sur la page
+    # Dependabot du repo pour une mise à jour manuelle, réfléchie une par une.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
-      production-dependencies:
-        dependency-type: "production"
-      development-dependencies:
-        dependency-type: "development"
+      # Un seul groupe (au lieu de production/development séparés) : des paquets liés par une
+      # dépendance de peer (ex: vite <-> esbuild) peuvent se trouver l'un en dependencies et
+      # l'autre en devDependencies ; les scinder en deux PR distinctes garantissait que chacune
+      # casse le build individuellement, même quand les fusionner ensemble aurait fonctionné.
+      npm-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "github-actions"
     directory: "/"
