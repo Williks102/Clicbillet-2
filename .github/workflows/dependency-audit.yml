@@ -1,0 +1,27 @@
+name: Dependency audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      # N'échoue que sur les vulnérabilités high/critical : les moderate/low connues et
+      # non corrigeables sans breaking change (cf. package-lock.json) restent visibles dans
+      # le rapport sans bloquer la CI sur chaque nouvelle dépendance transitive mineure.
+      - run: npm audit --audit-level=high
