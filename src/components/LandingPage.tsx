@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, Tag, Sparkles, Filter } from "lucide-react";
+import { Search, Tag, Sparkles, Filter, Rocket, Lock, Smartphone } from "lucide-react";
 import { Event } from "../types";
 import { isEventPast } from "../lib/eventStatus";
 import EventCard from "./EventCard";
@@ -52,9 +52,18 @@ export default function LandingPage({ events, onBuyTicket, userRole, onViewOrgan
 
           {/* Quick instructions indicator */}
           <div className="mt-8 flex flex-wrap justify-center gap-3 text-xs font-semibold text-amber-50">
-            <span className="rounded-lg bg-black/15 px-3 py-1.5 backdrop-blur-xs">🚀 Tickets Instantanés</span>
-            <span className="rounded-lg bg-black/15 px-3 py-1.5 backdrop-blur-xs">🔒 Transactions Sécurisées</span>
-            <span className="rounded-lg bg-black/15 px-3 py-1.5 backdrop-blur-xs">📱 QR Code de Vérification</span>
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-black/15 px-3 py-1.5 backdrop-blur-xs">
+              <Rocket className="h-3.5 w-3.5" />
+              <span>Tickets Instantanés</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-black/15 px-3 py-1.5 backdrop-blur-xs">
+              <Lock className="h-3.5 w-3.5" />
+              <span>Transactions Sécurisées</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-black/15 px-3 py-1.5 backdrop-blur-xs">
+              <Smartphone className="h-3.5 w-3.5" />
+              <span>QR Code de Vérification</span>
+            </span>
           </div>
         </div>
       </section>

@@ -20,7 +20,7 @@ type OrganizerSubTab = "dashboard" | "create" | "simulator" | "payouts" | "invoi
 const ORGANIZER_SUB_TAB_LABELS: Record<OrganizerSubTab, string> = {
   dashboard: "Suivi des Ventes",
   create: "Créer un Événement",
-  simulator: "🧪 Simulateur Sandbox",
+  simulator: "Simulateur Sandbox",
   payouts: "Retraits & Soldes",
   invoices: "Mes Factures"
 };
@@ -463,9 +463,9 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         alert(data.error || "Erreur de validation de scan.");
       } else {
         if (data.alreadyScanned) {
-          alert(`⚠️ Alerte Sécurité : Ce billet a déjà été validé à : ${new Date(data.scannedAt).toLocaleTimeString("fr-FR")}`);
+          alert(`Alerte Sécurité : Ce billet a déjà été validé à : ${new Date(data.scannedAt).toLocaleTimeString("fr-FR")}`);
         } else {
-          alert(`✅ Validation Réussie ! Entrée autorisée pour ${data.ticket.buyerName} (${data.ticket.tier.toUpperCase()})`);
+          alert(`Validation Réussie ! Entrée autorisée pour ${data.ticket.buyerName} (${data.ticket.tier.toUpperCase()})`);
         }
       }
       fetchSimulatedTickets();
@@ -704,7 +704,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             }`}
           >
             <Hammer className="h-4 w-4" />
-            <span>🧪 Simulateur Sandbox</span>
+            <span>Simulateur Sandbox</span>
           </button>
           <button
             id="orga-payouts-view-tab"
@@ -1350,13 +1350,16 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                             e.stopPropagation();
                             setCustomBannerUrl("");
                           }}
-                          className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-gray-200 bg-white text-red-500 shadow-md font-bold text-[10px] transition-colors hover:border-red-600 hover:bg-red-600 hover:text-white"
+                          className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-gray-200 bg-white text-red-500 shadow-md transition-colors hover:border-red-600 hover:bg-red-600 hover:text-white"
                           title="Effacer la photo"
                         >
-                          ✕
+                          <X className="h-3 w-3" />
                         </button>
                       </div>
-                      <p className="text-[11px] font-black text-emerald-800">✓ Photo importée avec succès !</p>
+                      <p className="flex items-center gap-1 text-[11px] font-black text-emerald-800">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        <span>Photo importée avec succès !</span>
+                      </p>
                     </div>
                   ) : (
                     <>
@@ -1458,7 +1461,10 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                   ))}
                 </select>
                 {myEvents.length === 0 && (
-                  <p className="text-[10px] text-red-500 font-bold mt-1">⚠️ Créez d'abord un événement pour tester l'injecteur.</p>
+                  <p className="flex items-center gap-1 text-[10px] text-red-500 font-bold mt-1">
+                    <AlertCircle className="h-3 w-3" />
+                    <span>Créez d'abord un événement pour tester l'injecteur.</span>
+                  </p>
                 )}
               </div>
 
@@ -1646,7 +1652,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
               className="absolute top-10 right-4 sm:top-4 h-8 w-8 rounded-full border border-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition"
               title="Fermer"
             >
-              ✕
+              <X className="h-4 w-4" />
             </button>
 
             <div className="border-b border-gray-50 pb-4">
