@@ -1,4 +1,4 @@
-import { Calendar, MapPin, ArrowRight, User as UserIcon } from "lucide-react";
+import { Calendar, Clock, MapPin, Ticket, User as UserIcon } from "lucide-react";
 import { Event } from "../types";
 
 interface EventCardProps {
@@ -26,8 +26,8 @@ export default function EventCard({ event: evt, onBuyTicket, userRole, onViewOrg
       id={`event-card-${evt.id}`}
       className="group relative flex flex-col overflow-hidden rounded-2xl bg-white border border-gray-100 shadow-xs transition-all duration-300 hover:-translate-y-1.5 hover:shadow-lg"
     >
-      {/* Event banner illustration */}
-      <div className="relative h-48 w-full overflow-hidden bg-gray-100">
+      {/* Event banner illustration, plein cadre sans surcouche */}
+      <div className="h-48 w-full overflow-hidden bg-gray-100">
         <img
           src={evt.banner}
           alt={evt.title}
@@ -36,19 +36,15 @@ export default function EventCard({ event: evt, onBuyTicket, userRole, onViewOrg
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
           referrerPolicy="no-referrer"
         />
-        <div className="absolute top-3 left-3 rounded-lg bg-black/60 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-white backdrop-blur-xs">
-          {evt.category}
-        </div>
-
-        {/* Left places indicator tag */}
-        <div className="absolute bottom-3 right-3 rounded-lg bg-orange-600/95 px-2.5 py-1 text-xs font-bold text-white shadow-md">
-          {evt.price.toLocaleString("fr-FR")} XOF
-        </div>
       </div>
 
       {/* Card Description Elements */}
-      <div className="flex flex-1 flex-col p-5">
-        <h3 className="line-clamp-1 text-base font-extrabold text-gray-900 group-hover:text-orange-600 transition-colors">
+      <div className="flex flex-1 flex-col p-5 space-y-3">
+        <span className="w-fit rounded-full bg-orange-50 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-orange-600">
+          {evt.category}
+        </span>
+
+        <h3 className="line-clamp-1 text-lg font-black text-gray-900 group-hover:text-orange-600 transition-colors">
           {evt.title}
         </h3>
 
@@ -56,23 +52,19 @@ export default function EventCard({ event: evt, onBuyTicket, userRole, onViewOrg
           <button
             id={`organizer-link-${evt.id}`}
             onClick={() => onViewOrganizer(evt.organizerAlias!)}
-            className="mt-1 flex items-center gap-1 text-xs font-bold text-orange-600 hover:underline w-fit"
+            className="flex items-center gap-1 text-xs font-bold text-orange-600 hover:underline w-fit"
           >
             <UserIcon className="h-3 w-3" />
-            {evt.organizerName}
+            <span>Publié par {evt.organizerName}</span>
           </button>
         ) : (
-          <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-gray-400">
+          <p className="flex items-center gap-1 text-xs font-semibold text-gray-400">
             <UserIcon className="h-3 w-3" />
-            {evt.organizerName}
+            <span>Publié par {evt.organizerName}</span>
           </p>
         )}
 
-        <p className="mt-2 line-clamp-2 flex-1 text-xs text-gray-500 leading-relaxed">
-          {evt.description}
-        </p>
-
-        <div className="mt-4 space-y-2 border-t border-gray-50 pt-4 text-xs text-gray-600">
+        <div className="space-y-2 text-sm text-gray-600">
           <div className="flex items-center space-x-2">
             <Calendar className="h-4 w-4 shrink-0 text-orange-500" />
             <span className="font-semibold">
@@ -81,9 +73,12 @@ export default function EventCard({ event: evt, onBuyTicket, userRole, onViewOrg
                 year: "numeric",
                 month: "long",
                 day: "numeric",
-              })}{" "}
-              à {evt.time}
+              })}
             </span>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Clock className="h-4 w-4 shrink-0 text-orange-500" />
+            <span className="font-semibold">{evt.time}</span>
           </div>
           <div className="flex items-center space-x-2">
             <MapPin className="h-4 w-4 shrink-0 text-orange-500" />
@@ -91,8 +86,12 @@ export default function EventCard({ event: evt, onBuyTicket, userRole, onViewOrg
           </div>
         </div>
 
+        <p className="text-sm text-gray-500">
+          À partir de <span className="text-lg font-black text-orange-600">{evt.price.toLocaleString("fr-FR")} XOF</span>
+        </p>
+
         {/* Stock tracker footer indicators */}
-        <div className="mt-4 space-y-3">
+        <div className="flex-1 space-y-3">
           {/* Per-tier availability pills */}
           {hasTiers ? (
             <div className="flex flex-wrap gap-1.5">
@@ -123,30 +122,27 @@ export default function EventCard({ event: evt, onBuyTicket, userRole, onViewOrg
               )}
             </div>
           )}
-
-          <div className="flex items-center justify-end">
-
-          {userRole === "organizer" ? (
-            <div className="rounded-full bg-orange-50 px-3 py-1.5 text-[11px] font-bold text-orange-700">
-              Mode Orga Actif
-            </div>
-          ) : (
-            <button
-              id={`buy-btn-${evt.id}`}
-              onClick={() => onBuyTicket(evt)}
-              disabled={isSoldOut}
-              className={`flex items-center space-x-1.5 rounded-xl px-4 py-2 text-xs font-bold transition-all active:scale-95 ${
-                isSoldOut
-                  ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                  : "bg-orange-600 hover:bg-orange-700 text-white shadow-sm shadow-orange-100"
-              }`}
-            >
-              <span>Acheter</span>
-              <ArrowRight className="h-3.5 w-3.5" />
-            </button>
-          )}
         </div>
-      </div>
+
+        {userRole === "organizer" ? (
+          <div className="w-full rounded-full bg-orange-50 py-3 text-center text-xs font-bold text-orange-700">
+            Mode Orga Actif
+          </div>
+        ) : (
+          <button
+            id={`buy-btn-${evt.id}`}
+            onClick={() => onBuyTicket(evt)}
+            disabled={isSoldOut}
+            className={`flex w-full items-center justify-center space-x-2 rounded-full py-3 text-sm font-bold transition-all active:scale-95 ${
+              isSoldOut
+                ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                : "bg-orange-600 hover:bg-orange-700 text-white shadow-sm shadow-orange-100"
+            }`}
+          >
+            <Ticket className="h-4 w-4" />
+            <span>Acheter un billet</span>
+          </button>
+        )}
       </div>
     </div>
   );
