@@ -7,6 +7,11 @@ import { cachedFetch } from "./fetchCache";
 // plus dépendre du cold start de la fonction serverless Vercel sur ce chemin très visité.
 // Si Supabase n'est pas configuré ou que la requête échoue, on retombe sur /api/events
 // (fonction serverless, avec son propre Cache-Control CDN) pour ne rien casser.
+//
+// Interroge la vue events_public (supabase_setup.sql section 15), pas la table events
+// directement : la RLS ne filtre que les LIGNES (status='approved'), pas les colonnes — un
+// SELECT * direct sur la table exposerait aussi commission_rate (donnée commerciale sensible,
+// négociée individuellement par organisateur) à quiconque interroge Supabase avec la clé anon.
 
 interface CacheEntry {
   data: Event[];
@@ -35,7 +40,10 @@ function mapEvent(e: any, tierSoldByEvent: Record<string, Record<string, number>
     status: e.status || "approved",
     waitingRoomEnabled: e.waiting_room_enabled,
     waitingRoomCapacity: e.waiting_room_capacity,
-    commissionRate: e.commission_rate != null ? Number(e.commission_rate) : null,
+    // commissionRate n'est plus lu depuis ce catalogue public (cf. commentaire d'en-tête) :
+    // volontairement absent de la vue events_public. Reste disponible pour les organisateurs/
+    // admins via /api/organizer/stats et /api/admin/stats (backend, service_role).
+    commissionRate: null,
     ticketsSoldByTier: tierSoldByEvent[e.id] || {}
   } as Event;
 }
@@ -44,7 +52,7 @@ async function fetchDirectFromSupabase(): Promise<Event[]> {
   if (!supabaseClient) throw new Error("Supabase non configuré côté client.");
 
   const [eventsResult, tierSoldResult] = await Promise.all([
-    supabaseClient.from("events").select("*").eq("status", "approved").order("created_at", { ascending: false }),
+    supabaseClient.from("events_public").select("*").eq("status", "approved").order("created_at", { ascending: false }),
     supabaseClient.rpc("get_public_events_tier_sold")
   ]);
 

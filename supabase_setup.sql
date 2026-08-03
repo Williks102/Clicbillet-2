@@ -383,3 +383,30 @@ GRANT EXECUTE ON FUNCTION public.get_organizer_aliases(TEXT[]) TO anon, authenti
 -- échecs consécutifs, indépendamment de l'origine des requêtes.
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS failed_login_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;
+
+-- ==========================================
+-- 15. VUE PUBLIQUE SANS COLONNES SENSIBLES (events_public)
+-- ==========================================
+-- La policy RLS "Public read access to approved events" (section 8) filtre les LIGNES
+-- (status = 'approved'), pas les COLONNES : un SELECT * direct via la clé anon (cf.
+-- src/lib/publicEvents.ts) expose donc aussi commission_rate — le taux de commission négocié
+-- individuellement avec chaque organisateur, une donnée commerciale sensible qui ne doit pas
+-- être extractible par un visiteur interrogeant directement Supabase. Cette vue n'expose que
+-- les colonnes réellement publiques ; security_invoker=true fait que la RLS de la table
+-- sous-jacente (donc le filtre status='approved') continue de s'appliquer normalement pour
+-- le rôle appelant (anon/authenticated), plutôt que de la contourner comme le ferait une vue
+-- SECURITY DEFINER classique.
+CREATE OR REPLACE VIEW public.events_public
+WITH (security_invoker = true) AS
+SELECT
+  id, title, description, date, time, price, ticket_types, venue, category, banner,
+  tickets_sold, total_tickets, organizer_id, organizer_name, status, created_at,
+  waiting_room_enabled, waiting_room_capacity
+FROM public.events;
+
+GRANT SELECT ON public.events_public TO anon, authenticated;
+
+-- Le frontend (src/lib/publicEvents.ts) doit désormais interroger events_public au lieu de
+-- events directement. La table events elle-même reste lisible par service_role (server.ts)
+-- sans restriction, commission_rate compris — seule la lecture anon/authenticated directe
+-- est désormais bornée aux colonnes non sensibles.
