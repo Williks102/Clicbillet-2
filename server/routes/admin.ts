@@ -147,6 +147,26 @@ router.delete("/api/admin/users/:id", async (req: express.Request, res: express.
   const adminClient = supabaseAdmin;
   if (adminClient) {
     try {
+      // events.organizer_id n'est pas une clé étrangère vers users(id) (aucune contrainte en
+      // base) : supprimer un organisateur ayant des événements approuvés les laisserait actifs
+      // et achetables indéfiniment, sans plus personne pour les gérer ni réclamer les paiements
+      // dus. On bloque plutôt que d'orpheliner silencieusement.
+      const { count: activeEventsCount } = await adminClient
+        .from("events")
+        .select("id", { count: "exact", head: true })
+        .eq("organizer_id", id)
+        .eq("status", "approved");
+      if ((activeEventsCount || 0) > 0) {
+        return res.status(409).json({ error: `Cet organisateur a ${activeEventsCount} événement(s) approuvé(s) actif(s). Réaffectez-les ou rejetez-les avant de supprimer le compte.` });
+      }
+
+      // Supprime le compte Supabase Auth lui-même : sans ça, seule la ligne public.users
+      // disparaît. auth.users (mot de passe compris) reste valide, et /api/auth/login recrée
+      // automatiquement un profil (avec le rôle d'origine) à la prochaine connexion réussie —
+      // la "suppression" ne révoquait donc rien en pratique.
+      const { error: authDeleteError } = await adminClient.auth.admin.deleteUser(id);
+      if (authDeleteError && (authDeleteError as any).status !== 404) throw authDeleteError;
+
       const { error } = await adminClient
         .from("users")
         .delete()
@@ -181,8 +201,13 @@ router.get("/api/admin/payouts", async (req: express.Request, res: express.Respo
   res.json(db.payouts || []);
 });
 
+const PAYOUT_STATUSES = ["pending", "completed", "rejected"];
+
 router.patch("/api/admin/payouts/:id/status", async (req: express.Request, res: express.Response) => {
   const { status } = req.body;
+  if (!PAYOUT_STATUSES.includes(status)) {
+    return res.status(400).json({ error: "Statut de retrait invalide." });
+  }
   if (isSupabaseEnabled && supabase) {
     try {
       const { data: updatedPayout, error } = await supabase.from("payouts").update({ status }).eq("id", req.params.id).select().maybeSingle();
