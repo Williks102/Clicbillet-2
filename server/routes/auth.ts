@@ -1,12 +1,11 @@
 import express from "express";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
-import { isSupabaseEnabled, supabase, supabaseAdmin, createEphemeralAuthClient } from "../lib/config.js";
+import { isSupabaseEnabled, supabase, supabaseAdmin, createEphemeralAuthClient, APP_ORIGIN } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { runInBackground } from "../lib/utils.js";
 import { sendWelcomeEmail, sendAdminNewOrganizerEmail, sendPasswordResetEmail } from "../lib/email.js";
-import { buildAppOrigin } from "../lib/security.js";
-import { loginRateLimiter, forgotPasswordRateLimiter } from "../lib/rateLimiters.js";
+import { registerRateLimiter, loginRateLimiter, resetPasswordRateLimiter, mfaVerifyRateLimiter, forgotPasswordRateLimiter } from "../lib/rateLimiters.js";
 import { validateRegister, validateLogin, validateForgotPassword, validateResetPassword } from "../lib/validators.js";
 import {
   requireAuth, requireRole,
@@ -22,7 +21,7 @@ const ACCOUNT_LOCKOUT_THRESHOLD = 5;
 const ACCOUNT_LOCKOUT_DURATION_MS = 15 * 60 * 1000;
 
 // Authentication Endpoints
-router.post("/api/auth/register", loginRateLimiter, validateRegister, async (req: express.Request, res: express.Response) => {
+router.post("/api/auth/register", registerRateLimiter, validateRegister, async (req: express.Request, res: express.Response) => {
   const { email, password, name, role } = req.body;
 
   if (!email || !password || !name || !role) {
@@ -313,7 +312,7 @@ router.post("/api/auth/forgot-password", forgotPasswordRateLimiter, validateForg
   const rawToken = crypto.randomBytes(32).toString("hex");
   const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1h
-  const resetUrl = `${buildAppOrigin(req)}/?reset_token=${rawToken}`;
+  const resetUrl = `${APP_ORIGIN}/?reset_token=${rawToken}`;
 
   if (isSupabaseEnabled && supabase) {
     try {
@@ -367,7 +366,7 @@ router.post("/api/auth/forgot-password", forgotPasswordRateLimiter, validateForg
 // Finalisation de la réinitialisation : vérifie le jeton (à usage unique, 1h de validité),
 // met à jour le mot de passe puis ouvre directement une session, pour éviter à l'utilisateur
 // de devoir se reconnecter manuellement juste après avoir choisi son nouveau mot de passe.
-router.post("/api/auth/reset-password", loginRateLimiter, validateResetPassword, async (req: express.Request, res: express.Response) => {
+router.post("/api/auth/reset-password", resetPasswordRateLimiter, validateResetPassword, async (req: express.Request, res: express.Response) => {
   const { token, newPassword } = req.body;
   const tokenHash = crypto.createHash("sha256").update(String(token)).digest("hex");
 
@@ -392,6 +391,11 @@ router.post("/api/auth/reset-password", loginRateLimiter, validateResetPassword,
 
       const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(resetEntry.user_id, { password: newPassword });
       if (updateError) throw updateError;
+
+      // Lève le verrouillage éventuel du compte (cf. /api/auth/login) : sans ça, un
+      // utilisateur qui suit le conseil du message de verrouillage ("réinitialisez votre mot
+      // de passe") resterait bloqué jusqu'à 15 minutes de plus malgré une réinitialisation réussie.
+      await supabase.from("users").update({ failed_login_count: 0, locked_until: null }).eq("id", resetEntry.user_id);
 
       // Jeton à usage unique : on le supprime immédiatement après consommation.
       await supabase.from("password_resets").delete().eq("token_hash", tokenHash);
@@ -447,6 +451,8 @@ router.post("/api/auth/reset-password", loginRateLimiter, validateResetPassword,
   }
 
   user.password = bcrypt.hashSync(newPassword, 10);
+  user.failedLoginCount = 0;
+  user.lockedUntil = null;
   db.passwordResets = db.passwordResets.filter((r: any) => r.tokenHash !== tokenHash);
   saveDB(db);
 
@@ -699,7 +705,7 @@ router.post("/api/auth/mfa/unenroll", requireAuth, async (req: express.Request, 
 // Finalisation de la connexion pour un compte ayant activé la double authentification (cf.
 // /api/auth/login, qui pose une session AAL1 temporaire dans les cookies MFA_PENDING_* au
 // lieu de la session réelle tant que le second facteur n'est pas vérifié).
-router.post("/api/auth/mfa/login-verify", loginRateLimiter, async (req: express.Request, res: express.Response) => {
+router.post("/api/auth/mfa/login-verify", mfaVerifyRateLimiter, async (req: express.Request, res: express.Response) => {
   const { code } = req.body;
   const pendingAccess = req.cookies?.[MFA_PENDING_ACCESS_COOKIE];
   const pendingRefresh = req.cookies?.[MFA_PENDING_REFRESH_COOKIE];
