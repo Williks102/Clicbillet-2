@@ -1,13 +1,12 @@
 import { useState, useEffect } from "react";
 import { Ticket as TicketIcon, Calendar, MapPin, Download, CheckCircle2, AlertTriangle, ExternalLink, Printer, Sparkles, Receipt } from "lucide-react";
 import { Ticket, User } from "../types";
-import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
+import { authFetch } from "../lib/apiClient";
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import ResponsiveSheet from "./ResponsiveSheet";
 
 interface ClientDashboardProps {
   user: User;
-  onTokenRefresh: TokenRefreshHandler;
 }
 
 interface BuyerOrder {
@@ -77,7 +76,7 @@ function buildInvoiceHtml(order: BuyerOrder, buyer: User): string {
   `;
 }
 
-export default function ClientDashboard({ user, onTokenRefresh }: ClientDashboardProps) {
+export default function ClientDashboard({ user }: ClientDashboardProps) {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
@@ -87,7 +86,7 @@ export default function ClientDashboard({ user, onTokenRefresh }: ClientDashboar
   // Fetch tickets for this user from backend
   async function fetchTickets() {
     try {
-      const response = await authFetch(`/api/my-tickets`, {}, user, onTokenRefresh);
+      const response = await authFetch(`/api/my-tickets`, {});
       if (!response.ok) {
         throw new Error("Impossible de récupérer vos billets.");
       }
@@ -116,7 +115,7 @@ export default function ClientDashboard({ user, onTokenRefresh }: ClientDashboar
     
     if (hasPending) {
       interval = setInterval(() => {
-        authFetch(`/api/my-tickets`, {}, user, onTokenRefresh)
+        authFetch(`/api/my-tickets`, {})
           .then(res => res.json())
           .then((data: Ticket[]) => {
             // Compare the tickets to avoid unnecessary re-renders

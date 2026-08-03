@@ -1,6 +1,28 @@
+import crypto from "crypto";
 import express from "express";
 
-export const validateRegister = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+const MIN_PASSWORD_LENGTH = 10;
+
+// Vérifie un mot de passe contre l'API "Pwned Passwords" (k-anonymité) : seuls les 5
+// premiers caractères du SHA-1 du mot de passe sont envoyés à l'API, jamais le mot de passe
+// ni son hash complet — impossible pour le service tiers de le reconstituer. Best-effort :
+// si l'API est indisponible/lente, on ne bloque jamais l'inscription pour autant (délai de
+// 3s max), la seule vraie barrière contre les mots de passe faibles reste la longueur minimale.
+async function isPasswordBreached(password: string): Promise<boolean> {
+  const sha1 = crypto.createHash("sha1").update(password).digest("hex").toUpperCase();
+  const prefix = sha1.slice(0, 5);
+  const suffix = sha1.slice(5);
+
+  const response = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`, {
+    signal: AbortSignal.timeout(3000)
+  });
+  if (!response.ok) throw new Error(`Réponse HIBP inattendue : ${response.status}`);
+
+  const body = await response.text();
+  return body.split("\n").some((line) => line.split(":")[0].trim() === suffix);
+}
+
+export const validateRegister = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const { email, password, name, role } = req.body;
 
   if (!email || !password || !name || !role) {
@@ -13,8 +35,16 @@ export const validateRegister = (req: express.Request, res: express.Response, ne
     return res.status(400).json({ error: "Le format de l'e-mail est invalide." });
   }
 
-  if (password.length < 6) {
-    return res.status(400).json({ error: "Le mot de passe doit contenir au moins 6 caractères pour des raisons de sécurité." });
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return res.status(400).json({ error: `Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères pour des raisons de sécurité.` });
+  }
+
+  try {
+    if (await isPasswordBreached(password)) {
+      return res.status(400).json({ error: "Ce mot de passe est apparu dans une fuite de données connue. Choisissez-en un autre." });
+    }
+  } catch (err: any) {
+    console.warn("[Password Check] Vérification anti-fuite indisponible, inscription non bloquée :", err.message);
   }
 
   if (name.length < 2 || name.length > 100) {
@@ -61,15 +91,23 @@ export const validateForgotPassword = (req: express.Request, res: express.Respon
 };
 
 // Middleware de validation pour la finalisation de la réinitialisation de mot de passe
-export const validateResetPassword = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+export const validateResetPassword = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const { token, newPassword } = req.body;
 
   if (!token || !newPassword) {
     return res.status(400).json({ error: "Lien de réinitialisation ou nouveau mot de passe manquant." });
   }
 
-  if (newPassword.length < 6) {
-    return res.status(400).json({ error: "Le mot de passe doit contenir au moins 6 caractères pour des raisons de sécurité." });
+  if (newPassword.length < MIN_PASSWORD_LENGTH) {
+    return res.status(400).json({ error: `Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères pour des raisons de sécurité.` });
+  }
+
+  try {
+    if (await isPasswordBreached(newPassword)) {
+      return res.status(400).json({ error: "Ce mot de passe est apparu dans une fuite de données connue. Choisissez-en un autre." });
+    }
+  } catch (err: any) {
+    console.warn("[Password Check] Vérification anti-fuite indisponible, réinitialisation non bloquée :", err.message);
   }
 
   next();
@@ -77,10 +115,25 @@ export const validateResetPassword = (req: express.Request, res: express.Respons
 
 // Middleware de validation pour la création / modification d'événements
 export const validateEvent = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const { title, date, time, price, venue, category, banner, totalTickets, organizerId } = req.body;
+  const { title, description, date, time, price, venue, category, banner, totalTickets, organizerId } = req.body;
 
   if (!title || !date || !time || !venue || !category || !organizerId) {
     return res.status(400).json({ error: "Veuillez remplir tous les champs obligatoires correctement." });
+  }
+
+  // Bornes de longueur : évite qu'un champ libre (des Mo de texte, le body JSON global
+  // autorisant jusqu'à 10 Mo) ne gonfle indéfiniment le stockage à chaque création d'événement.
+  if (String(title).length > 200) {
+    return res.status(400).json({ error: "Le titre ne peut pas dépasser 200 caractères." });
+  }
+  if (description && String(description).length > 5000) {
+    return res.status(400).json({ error: "La description ne peut pas dépasser 5000 caractères." });
+  }
+  if (String(venue).length > 200) {
+    return res.status(400).json({ error: "Le lieu ne peut pas dépasser 200 caractères." });
+  }
+  if (String(category).length > 100) {
+    return res.status(400).json({ error: "La catégorie ne peut pas dépasser 100 caractères." });
   }
 
   if (price === undefined || isNaN(Number(price)) || Number(price) < 0) {

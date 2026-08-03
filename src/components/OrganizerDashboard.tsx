@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Plus, LayoutDashboard, Calendar, MapPin, Tag, TrendingUp, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X, AtSign, CheckCircle2, AlertCircle, Receipt, Download } from "lucide-react";
 import { Event, User, SalesStatus } from "../types";
-import { authFetch, TokenRefreshHandler } from "../lib/apiClient";
+import { authFetch } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
 import { isEventPast } from "../lib/eventStatus";
 import { compressImageToDataUrl } from "../lib/imageCompress";
@@ -13,7 +13,6 @@ interface OrganizerDashboardProps {
   events: Event[];
   onEventCreated: () => void;
   setActiveTab: (tab: string) => void;
-  onTokenRefresh: TokenRefreshHandler;
 }
 
 type OrganizerSubTab = "dashboard" | "create" | "simulator" | "payouts" | "invoices";
@@ -143,7 +142,7 @@ function buildOrganizerInvoiceHtml(statement: MonthlyStatement, organizerName: s
   `;
 }
 
-export default function OrganizerDashboard({ user, events, onEventCreated, setActiveTab, onTokenRefresh }: OrganizerDashboardProps) {
+export default function OrganizerDashboard({ user, events, onEventCreated, setActiveTab }: OrganizerDashboardProps) {
   const [subTab, setSubTab] = useState<OrganizerSubTab>("dashboard");
   const [stats, setStats] = useState<SalesStatus | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
@@ -225,7 +224,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
 
   // Charge l'alias/bio actuels au montage (page publique organisateur)
   useEffect(() => {
-    authFetch("/api/organizer/profile", { method: "GET" }, user, onTokenRefresh)
+    authFetch("/api/organizer/profile", { method: "GET" })
       .then((res) => res.json())
       .then((data) => {
         setProfileAlias(data.alias || "");
@@ -247,7 +246,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     }
     setAliasCheck("checking");
     const timeout = setTimeout(() => {
-      authFetch(`/api/organizer/check-alias?alias=${encodeURIComponent(trimmed)}`, { method: "GET" }, user, onTokenRefresh)
+      authFetch(`/api/organizer/check-alias?alias=${encodeURIComponent(trimmed)}`, { method: "GET" })
         .then((res) => res.json())
         .then((data) => {
           if (data.error) {
@@ -277,7 +276,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ alias: profileAlias, bio: profileBio }),
-      }, user, onTokenRefresh);
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Échec de la mise à jour.");
       setSavedAlias(data.alias);
@@ -295,7 +294,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   async function fetchSimulatedTickets() {
     setLoadingSimTickets(true);
     try {
-      const response = await authFetch(`/api/organizer/stats?organizerId=${user.id}`, {}, user, onTokenRefresh);
+      const response = await authFetch(`/api/organizer/stats?organizerId=${user.id}`, {});
       if (response.ok) {
         const data = await response.json();
         setSimulatedTickets(data.tickets || []);
@@ -311,7 +310,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       try {
         const response = await authFetch(`/api/organizer/export?organizerId=${user.id}`, {
           method: "GET"
-        }, user, onTokenRefresh);
+        });
         if (!response.ok) {
           const data = await response.json();
           throw new Error(data.error || "Impossible de générer l'export.");
@@ -387,7 +386,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
-      }, user, onTokenRefresh);
+      });
       let data: any = {};
       try { data = await response.json(); } catch { /* réponse non-JSON (ex. 413, 502) */ }
       if (!response.ok) {
@@ -427,7 +426,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
-      }, user, onTokenRefresh);
+      });
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || "Échec de simuler le checkout.");
@@ -458,7 +457,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ qrCodeData, organizerId: user.id })
-      }, user, onTokenRefresh);
+      });
       const data = await response.json();
       if (!response.ok || data.error) {
         alert(data.error || "Erreur de validation de scan.");
@@ -526,8 +525,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   async function fetchStats() {
     try {
       const [response, payoutRes] = await Promise.all([
-        authFetch(`/api/organizer/stats?organizerId=${user.id}`, {}, user, onTokenRefresh),
-        authFetch(`/api/organizer/payouts?organizerId=${user.id}`, {}, user, onTokenRefresh)
+        authFetch(`/api/organizer/stats?organizerId=${user.id}`, {}),
+        authFetch(`/api/organizer/payouts?organizerId=${user.id}`, {})
       ]);
       if (!response.ok) {
         throw new Error("Impossible de charger les statistiques.");
@@ -561,7 +560,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ organizerId: user.id, amount: payoutAmount, method: payoutMethod, details: payoutDetails })
-      }, user, onTokenRefresh);
+      });
       if (!resp.ok) throw new Error("Erreur de demande.");
       
       const newPayout = await resp.json();
@@ -604,7 +603,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      }, user, onTokenRefresh);
+      });
 
       let data: any = {};
       try { data = await response.json(); } catch { /* réponse non-JSON (ex. 413, 502) */ }

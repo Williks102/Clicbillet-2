@@ -32,15 +32,6 @@ export function verifyPaystackSignature(req: express.Request): boolean {
   }
 }
 
-// Le même serveur Express sert l'API et le frontend (SPA) sur la même origine : on peut donc
-// dériver l'URL publique de l'app directement depuis la requête entrante, sans variable
-// d'environnement dédiée.
-export function buildAppOrigin(req: express.Request): string {
-  const forwardedProto = req.headers["x-forwarded-proto"];
-  const scheme = typeof forwardedProto === "string" ? forwardedProto : req.protocol;
-  const host = req.get("host") || "localhost:3000";
-  return (req.get("origin") || `${scheme}://${host}`).replace(/\/$/, "");
-}
 
 /**
  * UTILS DE SÉCURITÉ ET D'ASSAINISSEMENT DES ENTRÉES

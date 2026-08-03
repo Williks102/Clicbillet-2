@@ -31,11 +31,13 @@ export const CRON_SECRET = (process.env.CRON_SECRET || "").trim();
 // échoué) est considéré abandonné et annulé automatiquement, libérant l'inventaire réservé.
 export const PENDING_TICKET_EXPIRY_MINUTES = Number(process.env.PENDING_TICKET_EXPIRY_MINUTES) || 30;
 
-// Le serveur n'utilise que la clé service_role : toutes les routes qui touchent à des
-// données sensibles sont déjà protégées par requireAuth/requireRole côté Express, donc un
-// client "anon" séparé (qui ne ferait que retomber sur service_role en pratique) n'apporte
-// rien ici et n'est jamais sollicité par le frontend (qui ne parle jamais à Supabase
-// directement).
+// Le serveur n'utilise que la clé service_role pour toutes les écritures/lectures sensibles,
+// protégées par requireAuth/requireRole côté Express. Le frontend possède néanmoins SON PROPRE
+// client Supabase, à clé anon uniquement (src/lib/supabaseClient.ts), utilisé pour deux lectures
+// publiques bornées par RLS : l'abonnement Realtime à ses propres tickets, et la lecture directe
+// du catalogue d'événements approuvés (src/lib/publicEvents.ts), pour éviter le cold-start
+// serverless sur ces deux chemins très visités. Ce module (config.ts) ne gère que le client
+// côté serveur.
 const useSupabaseAdmin = Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
 export const supabaseAdmin = useSupabaseAdmin ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) : null;
 export const supabase = supabaseAdmin;
@@ -47,6 +49,10 @@ export function createEphemeralAuthClient() {
   });
 }
 
+// Régénérés aléatoirement à CHAQUE démarrage du process si non définis en variable
+// d'environnement : un redémarrage du serveur local invalide le mot de passe précédemment
+// loggué. Définissez LOCAL_*_PASSWORD dans .env si vous voulez un mot de passe stable entre
+// redémarrages.
 export const LOCAL_ADMIN_PASSWORD = process.env.LOCAL_ADMIN_PASSWORD || crypto.randomBytes(12).toString("hex");
 export const LOCAL_CLIENT_PASSWORD = process.env.LOCAL_CLIENT_PASSWORD || crypto.randomBytes(12).toString("hex");
 export const LOCAL_ORGANIZER_PASSWORD = process.env.LOCAL_ORGANIZER_PASSWORD || crypto.randomBytes(12).toString("hex");
@@ -83,6 +89,13 @@ export const PAYMENT_GATEWAY_ORIGINS = [
 ];
 
 export const isProduction = process.env.NODE_ENV === "production";
+
+// Origine canonique de l'application, utilisée pour construire des URL sensibles (lien de
+// réinitialisation de mot de passe) — jamais dérivée des en-têtes Host/Origin de la requête,
+// entièrement contrôlables par l'appelant (un attaquant peut les usurper sans passer par le
+// vrai frontend), ce qui permettrait sinon de faire pointer un email de réinitialisation
+// légitime vers un domaine de phishing tout en gardant un jeton valide.
+export const APP_ORIGIN = (process.env.APP_ORIGIN || (isProduction ? "https://www.clicbillet.com" : `http://localhost:${PORT}`)).trim();
 
 export const SUPABASE_HOST = (() => {
   try {

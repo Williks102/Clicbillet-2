@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import express from "express";
 import { isSupabaseEnabled, supabase, supabaseAdmin } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
@@ -238,7 +239,7 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
     return res.status(400).json({ error: "Veuillez remplir tous les champs obligatoires correctement." });
   }
 
-  const newEventId = `evt-${Date.now()}`;
+  const newEventId = `evt-${crypto.randomUUID()}`;
   const bannerUrl = banner || "https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=800&auto=format&fit=crop&q=60";
 
   if (isSupabaseEnabled && supabase) {

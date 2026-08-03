@@ -372,3 +372,14 @@ RETURNS TABLE(id TEXT, organizer_alias TEXT) AS $$
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 GRANT EXECUTE ON FUNCTION public.get_organizer_aliases(TEXT[]) TO anon, authenticated;
+
+-- ==========================================
+-- 14. VERROUILLAGE PROGRESSIF PAR COMPTE (anti-bruteforce)
+-- ==========================================
+-- Le rate limiting existant sur /api/auth/login (server/lib/rateLimiters.ts) est appliqué
+-- par IP : un attaquant disposant de plusieurs IP (proxies/botnet) peut toujours tenter de
+-- deviner le mot de passe d'un compte précis en répartissant les tentatives. Ce compteur,
+-- tenu par compte (pas par IP), verrouille temporairement le compte lui-même après plusieurs
+-- échecs consécutifs, indépendamment de l'origine des requêtes.
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS failed_login_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;

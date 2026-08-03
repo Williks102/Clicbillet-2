@@ -21,6 +21,11 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken }: Aut
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [forgotPasswordSent, setForgotPasswordSent] = useState(false);
+  const [confirmationEmailSentTo, setConfirmationEmailSentTo] = useState<string | null>(null);
+  // Double authentification (TOTP) : posée par le serveur quand le compte l'a activée (cf.
+  // /api/auth/login qui renvoie mfaRequired:true au lieu d'ouvrir directement la session).
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaCode, setMfaCode] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -48,7 +53,8 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken }: Aut
     try {
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Requested-With": "ClicBillet" },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
 
@@ -62,6 +68,21 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken }: Aut
         return;
       }
 
+      // Inscription : tant que l'e-mail n'est pas confirmé, le serveur ne renvoie pas de
+      // session (cf. server/routes/auth.ts) — on invite l'utilisateur à consulter sa boîte
+      // de réception au lieu de le connecter automatiquement.
+      if (mode === "register" && data.requiresEmailConfirmation) {
+        setConfirmationEmailSentTo(data.email || email);
+        return;
+      }
+
+      // Connexion : ce compte a activé la double authentification, une session temporaire
+      // (5 min) attend la vérification du code — cf. /api/auth/mfa/login-verify.
+      if (mode === "login" && data.mfaRequired) {
+        setMfaRequired(true);
+        return;
+      }
+
       // login / register / reset renvoient tous un objet utilisateur + session
       onSuccess(data);
     } catch (err: any) {
@@ -71,10 +92,36 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken }: Aut
     }
   }
 
+  async function handleMfaSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const response = await fetch("/api/auth/mfa/login-verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Requested-With": "ClicBillet" },
+        credentials: "include",
+        body: JSON.stringify({ code: mfaCode }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Code de vérification invalide.");
+      }
+      onSuccess(data);
+    } catch (err: any) {
+      setError(err.message || "Impossible de vérifier le code.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function switchMode(next: AuthMode) {
     setMode(next);
     setError(null);
     setForgotPasswordSent(false);
+    setConfirmationEmailSentTo(null);
+    setMfaRequired(false);
+    setMfaCode("");
     setPassword("");
     setConfirmPassword("");
   }
@@ -112,7 +159,67 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken }: Aut
           </div>
         )}
 
-        {mode === "forgot" && forgotPasswordSent ? (
+        {mode === "login" && mfaRequired ? (
+          <form onSubmit={handleMfaSubmit} className="space-y-5" id="mfa-challenge-view">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-orange-50 text-orange-600">
+              <KeyRound className="h-6 w-6" />
+            </div>
+            <p className="text-center text-sm font-semibold text-gray-700">
+              Entrez le code à 6 chiffres généré par votre application d'authentification.
+            </p>
+            <div className="space-y-1" id="mfa-code-field">
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                required
+                autoFocus
+                maxLength={6}
+                placeholder="123456"
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                className="w-full rounded-xl border border-gray-200 py-3 px-4 text-center text-lg tracking-[0.5em] font-mono outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100"
+              />
+            </div>
+            <button
+              type="submit"
+              id="mfa-verify-btn"
+              disabled={loading || mfaCode.length !== 6}
+              className="flex w-full items-center justify-center space-x-2 rounded-xl bg-orange-600 py-3.5 text-xs font-extrabold text-white shadow-md shadow-orange-100 transition-all hover:bg-orange-700 disabled:bg-gray-300"
+            >
+              {loading ? <span className="animate-pulse">Vérification...</span> : <span>Vérifier</span>}
+            </button>
+            <button
+              type="button"
+              id="back-to-login-btn"
+              onClick={() => switchMode("login")}
+              className="inline-flex w-full items-center justify-center space-x-1 text-xs font-bold text-orange-600 hover:underline"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>Retour à la connexion</span>
+            </button>
+          </form>
+        ) : mode === "register" && confirmationEmailSentTo ? (
+          <div className="space-y-5 text-center" id="registration-confirmation-sent-view">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+              <CheckCircle2 className="h-6 w-6" />
+            </div>
+            <p className="text-sm font-semibold text-gray-700">
+              Un e-mail de confirmation vient d'être envoyé à <span className="text-orange-600">{confirmationEmailSentTo}</span>.
+            </p>
+            <p className="text-xs text-gray-400">
+              Cliquez sur le lien qu'il contient avant de vous connecter (vérifiez aussi vos spams).
+            </p>
+            <button
+              id="back-to-login-btn"
+              onClick={() => switchMode("login")}
+              className="inline-flex items-center space-x-1 text-xs font-bold text-orange-600 hover:underline"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>Retour à la connexion</span>
+            </button>
+          </div>
+        ) : mode === "forgot" && forgotPasswordSent ? (
           <div className="space-y-5 text-center" id="forgot-password-sent-view">
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
               <CheckCircle2 className="h-6 w-6" />
@@ -298,7 +405,7 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken }: Aut
         )}
 
         {/* Toggle between Login / Sign Up / Forgot */}
-        {!forgotPasswordSent && (
+        {!forgotPasswordSent && !mfaRequired && !confirmationEmailSentTo && (
           <div className="mt-6 border-t border-gray-100 pt-5 text-center space-y-4">
             {mode === "forgot" ? (
               <button
