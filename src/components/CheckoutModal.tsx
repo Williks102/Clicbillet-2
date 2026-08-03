@@ -503,15 +503,6 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
                 </div>
               )}
 
-              {!isFreeOrder && (
-                <div className="p-3 bg-orange-50/20 border border-orange-100/20 rounded-2xl space-y-1">
-                  <div className="flex items-center justify-between text-[10px] text-gray-500 font-semibold">
-                    <span>Passerelle Actrice :</span>
-                    <span className="text-orange-600 font-extrabold uppercase">Paystack</span>
-                  </div>
-                </div>
-              )}
-
               {/* Action buttons triggers */}
               <div className="pt-6 border-t border-gray-100 flex items-center justify-between">
                 <button
