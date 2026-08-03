@@ -31,6 +31,13 @@ export const CRON_SECRET = (process.env.CRON_SECRET || "").trim();
 // échoué) est considéré abandonné et annulé automatiquement, libérant l'inventaire réservé.
 export const PENDING_TICKET_EXPIRY_MINUTES = Number(process.env.PENDING_TICKET_EXPIRY_MINUTES) || 30;
 
+// Politique de rétention des données : au-delà de ce délai, un panier abandonné/échoué
+// ("EXPIRED-"/"FAILED-", jamais payé) est définitivement supprimé plutôt que conservé
+// indéfiniment — aucune valeur financière ou légale (contrairement à un billet payé ou une
+// transaction réussie, jamais touchés par cette purge), seulement du PII acheteur (nom, email)
+// qui traîne sans raison une fois le délai passé. Cf. /api/cron/expire-pending-tickets.
+export const ABANDONED_TICKET_RETENTION_DAYS = Number(process.env.ABANDONED_TICKET_RETENTION_DAYS) || 90;
+
 // Le serveur n'utilise que la clé service_role pour toutes les écritures/lectures sensibles,
 // protégées par requireAuth/requireRole côté Express. Le frontend possède néanmoins SON PROPRE
 // client Supabase, à clé anon uniquement (src/lib/supabaseClient.ts), utilisé pour deux lectures

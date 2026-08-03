@@ -425,3 +425,32 @@ REVOKE SELECT ON public.events FROM anon, authenticated;
 -- service_role (server.ts, qui contourne RLS et les grants de rôle par conception) ; seule
 -- la lecture directe par anon/authenticated est désormais bornée à events_public (colonnes
 -- non sensibles uniquement).
+
+-- ==========================================
+-- 16. POLITIQUE DE RÉTENTION DES DONNÉES
+-- ==========================================
+-- Résumé de ce qui est conservé, purgé, ou ni l'un ni l'autre, et pourquoi. Le mécanisme de
+-- purge automatique est implémenté dans server/routes/tickets.ts
+-- (GET /api/cron/expire-pending-tickets), appelé périodiquement par un planificateur externe.
+--
+-- PURGÉ AUTOMATIQUEMENT (aucune valeur passé le délai, PII résiduel sans raison) :
+--   - public.tickets dont transaction_ref commence par "EXPIRED-" ou "FAILED-" (panier
+--     abandonné ou paiement refusé, jamais payé) : supprimés après ABANDONED_TICKET_RETENTION_DAYS
+--     (server/lib/config.ts, 90 jours par défaut). Un billet payé (tout autre préfixe :
+--     "PAID-", "FREE-", la référence Paystack d'origine, etc.) n'est JAMAIS concerné par cette
+--     purge, quel que soit son âge.
+--   - public.password_resets dont expires_at est dépassée : supprimés dès l'expiration (déjà
+--     rejetés par la route reset-password de toute façon, aucune fenêtre de grâce nécessaire).
+--
+-- CONSERVÉS INDÉFINIMENT (aucune purge automatique) :
+--   - Billets payés, public.events, public.transactions : pièces comptables/justificatifs
+--     d'entrée à l'événement. La durée légale de conservation des documents comptables/
+--     fiscaux en Côte d'Ivoire (ou toute autre juridiction concernée) est une décision qui
+--     revient à la plateforme et à son conseil juridique/comptable — elle n'est pas figée en
+--     dur ici, volontairement, plutôt que d'inventer une durée arbitraire.
+--   - public.users : le compte et son historique restent tant qu'il n'y a pas de demande
+--     explicite de suppression (cf. DELETE /api/admin/users/:id, server/routes/admin.ts, qui
+--     supprime à la fois le profil et le compte Supabase Auth sous-jacent).
+--   - public.payouts.details : chiffré au repos (server/lib/payoutEncryption.ts) plutôt que
+--     purgé, puisqu'il s'agit d'un justificatif de virement à conserver au même titre que les
+--     autres pièces comptables.
