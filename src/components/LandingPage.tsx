@@ -58,7 +58,7 @@ export default function LandingPage({ events, onBuyTicket, userRole, onViewOrgan
 
       {/* Categories : cartes icône + libellé, défilement horizontal */}
       <section id="categories-section">
-        <div className="-mx-4 flex overflow-x-auto px-4 pb-1 sm:mx-0 sm:overflow-visible sm:px-0 scrollbar-none" id="categories-bar">
+        <div className="-mx-4 flex overflow-x-auto px-4 pb-1 scrollbar-none" id="categories-bar">
           <div className="flex space-x-3">
             {CATEGORIES.map(({ label, icon: Icon }) => (
               <button
