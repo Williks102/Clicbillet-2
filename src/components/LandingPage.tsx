@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Search, Tag, LayoutGrid, Music, PartyPopper, Drama, Trophy } from "lucide-react";
 import { Event } from "../types";
 import { isEventPast } from "../lib/eventStatus";
@@ -22,6 +22,32 @@ const CATEGORIES = [
 export default function LandingPage({ events, onBuyTicket, userRole, onViewOrganizer }: LandingPageProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Tous");
+  const categoriesScrollRef = useRef<HTMLDivElement>(null);
+  const [autoScrollPaused, setAutoScrollPaused] = useState(false);
+
+  // Défilement automatique en va-et-vient de la barre de catégories : en pause au survol/
+  // toucher pour ne pas gêner le clic, et désactivé si l'utilisateur préfère un mouvement
+  // réduit (accessibilité).
+  useEffect(() => {
+    const container = categoriesScrollRef.current;
+    if (!container) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    let direction: 1 | -1 = 1;
+    const speedPxPerTick = 0.6;
+
+    const interval = setInterval(() => {
+      if (autoScrollPaused) return;
+      const maxScroll = container.scrollWidth - container.clientWidth;
+      if (maxScroll <= 0) return;
+
+      container.scrollLeft += speedPxPerTick * direction;
+      if (container.scrollLeft >= maxScroll) direction = -1;
+      else if (container.scrollLeft <= 0) direction = 1;
+    }, 16);
+
+    return () => clearInterval(interval);
+  }, [autoScrollPaused]);
 
   // Filter events based on search query, selected category, and exclude events whose
   // date is already past (dépublication automatique côté acheteur).
@@ -58,7 +84,15 @@ export default function LandingPage({ events, onBuyTicket, userRole, onViewOrgan
 
       {/* Categories : cartes icône + libellé, défilement horizontal */}
       <section id="categories-section">
-        <div className="-mx-4 flex overflow-x-auto px-4 pb-1 scrollbar-none" id="categories-bar">
+        <div
+          ref={categoriesScrollRef}
+          onMouseEnter={() => setAutoScrollPaused(true)}
+          onMouseLeave={() => setAutoScrollPaused(false)}
+          onTouchStart={() => setAutoScrollPaused(true)}
+          onTouchEnd={() => setAutoScrollPaused(false)}
+          className="-mx-4 flex overflow-x-auto px-4 pb-1 scrollbar-none"
+          id="categories-bar"
+        >
           <div className="flex space-x-3">
             {CATEGORIES.map(({ label, icon: Icon }) => (
               <button
