@@ -464,3 +464,35 @@ REVOKE SELECT ON public.events FROM anon, authenticated;
 --   - public.payouts.details : chiffré au repos (server/lib/payoutEncryption.ts) plutôt que
 --     purgé, puisqu'il s'agit d'un justificatif de virement à conserver au même titre que les
 --     autres pièces comptables.
+
+-- ==========================================
+-- 17. HISTORIQUE DES TRANSFERTS DE BILLETS
+-- ==========================================
+-- Un transfert (cf. POST /api/tickets/:id/transfer) réattribue directement le billet à son
+-- nouveau propriétaire (tickets.buyer_id/buyer_name/buyer_email), donc l'expéditeur perd toute
+-- trace de ce billet dans /api/my-tickets (filtré par buyer_id). Cette table ne gouverne aucune
+-- règle métier : c'est un historique en lecture seule ("Billets transférés" / "Mes billets
+-- reçus" côté espace client), une ligne immuable par transfert effectué.
+CREATE TABLE IF NOT EXISTS public.ticket_transfers (
+    id TEXT PRIMARY KEY,
+    ticket_id TEXT REFERENCES public.tickets(id) ON DELETE CASCADE,
+    event_title TEXT,
+    event_date TEXT,
+    event_time TEXT,
+    event_venue TEXT,
+    tier TEXT,
+    price_paid NUMERIC,
+    from_user_id TEXT NOT NULL,
+    from_name TEXT,
+    from_email TEXT,
+    to_name TEXT,
+    to_email TEXT NOT NULL,
+    transferred_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ticket_transfers_from_user ON public.ticket_transfers (from_user_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_transfers_to_email ON public.ticket_transfers (to_email);
+
+ALTER TABLE public.ticket_transfers ENABLE ROW LEVEL SECURITY;
+-- Pas de policy anon/authenticated : accès exclusif via la clé service_role (server.ts),
+-- comme les autres tables sensibles (cf. section 8).
