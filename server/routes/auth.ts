@@ -15,6 +15,40 @@ import {
 
 const router = express.Router();
 
+// Rattache à ce compte les billets achetés en tant qu'invité (buyer_id "guest-*", posé par
+// /api/checkout en optionalAuth) sous la même adresse email, avant même que le compte
+// n'existe. N'est appelée qu'après une connexion pleinement réussie (email confirmé par
+// Supabase Auth, ou compte local de dev) : seule la personne qui contrôle réellement cette
+// boîte mail peut donc en bénéficier, jamais un tiers qui se contenterait de saisir l'adresse
+// de quelqu'un d'autre à l'inscription.
+async function claimGuestTickets(userId: string, email: string): Promise<void> {
+  const normalizedEmail = email.toLowerCase();
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { error } = await supabase
+        .from("tickets")
+        .update({ buyer_id: userId })
+        .ilike("buyer_email", normalizedEmail)
+        .like("buyer_id", "guest-%");
+      if (error) throw error;
+      return;
+    } catch (err: any) {
+      console.error("[Guest Ticket Claim] Échec Supabase, tentative sur db.json:", err.message);
+    }
+  }
+
+  const db = getDB();
+  let changed = false;
+  for (const t of db.tickets as any[]) {
+    if (typeof t.buyerId === "string" && t.buyerId.startsWith("guest-") && t.buyerEmail?.toLowerCase() === normalizedEmail) {
+      t.buyerId = userId;
+      changed = true;
+    }
+  }
+  if (changed) saveDB(db);
+}
+
 // Verrouillage par compte (voir /api/auth/login) : au-delà de ce nombre d'échecs consécutifs,
 // le compte reste bloqué pendant ACCOUNT_LOCKOUT_DURATION_MS, indépendamment de l'IP d'origine.
 const ACCOUNT_LOCKOUT_THRESHOLD = 5;
@@ -128,6 +162,7 @@ router.post("/api/auth/register", registerRateLimiter, validateRegister, async (
 
   db.users.push(newUser);
   saveDB(db);
+  await claimGuestTickets(newUser.id, newUser.email);
 
   // Webhook DB Supabase indisponible sur ce repli local : on envoie directement
   // l'email de bienvenue (+ notification admin si organisateur) en filet de sécurité.
@@ -251,6 +286,7 @@ router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: expr
         }
       }
 
+      await claimGuestTickets(authUser.id, normalizedEmail);
       setSessionCookies(res, { token: authData?.session?.access_token, refreshToken: authData?.session?.refresh_token });
 
       if (profile) {
@@ -298,6 +334,8 @@ router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: expr
     user.lockedUntil = null;
     saveDB(db);
   }
+
+  await claimGuestTickets(user.id, user.email);
 
   const { password: _, ...userWithoutPassword } = user;
   setSessionCookies(res, { token: `local-${user.id}` });
@@ -758,6 +796,9 @@ router.post("/api/auth/mfa/login-verify", mfaVerifyRateLimiter, async (req: expr
     setSessionCookies(res, { token: sessionData.session.access_token, refreshToken: sessionData.session.refresh_token });
 
     const userId = sessionData.session.user.id;
+    if (sessionData.session.user.email) {
+      await claimGuestTickets(userId, sessionData.session.user.email);
+    }
     const { data: profile } = await supabase!
       .from("users")
       .select("id, email, name, role")
