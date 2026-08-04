@@ -203,7 +203,7 @@ router.get("/api/organizer/stats", requireRole("organizer", "admin"), async (req
   res.json({
     totalRevenue, // Net Balance
     totalGrossRevenue, // Gross 100%
-    totalCommission, // 10% platform share
+    totalCommission, // Part de la plateforme (taux effectif, cf. commissionRate ci-dessous)
     commissionRate,
     ticketsSold,
     activeEvents,

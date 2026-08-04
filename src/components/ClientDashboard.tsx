@@ -3,6 +3,7 @@ import { Ticket as TicketIcon, Calendar, MapPin, Download, CheckCircle2, AlertTr
 import { Ticket, User } from "../types";
 import { authFetch } from "../lib/apiClient";
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
+import { isVipTier, formatTierLabel } from "../lib/ticketTier";
 import ResponsiveSheet from "./ResponsiveSheet";
 
 interface ClientDashboardProps {
@@ -44,7 +45,7 @@ function buildInvoiceHtml(order: BuyerOrder, buyer: User): string {
       (t) => `
       <tr>
         <td>${escapeHtml(t.eventTitle)}</td>
-        <td>${t.tier === "vip" ? "VIP" : "Standard"}</td>
+        <td>${escapeHtml(formatTierLabel(t.tier))}</td>
         <td class="right">${t.pricePaid.toLocaleString("fr-FR")} FCFA</td>
       </tr>`
     )
@@ -344,11 +345,11 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
               >
                 <div className="flex justify-between items-start">
                   <span className={`inline-flex items-center space-x-0.5 rounded-md px-2 py-0.5 text-[9px] font-extrabold uppercase ${
-                    tkt.tier === "vip" 
-                      ? "bg-amber-100 text-amber-800" 
+                    isVipTier(tkt.tier)
+                      ? "bg-amber-100 text-amber-800"
                       : "bg-blue-100 text-blue-800"
                   }`}>
-                    {tkt.tier === "vip" ? "Pass VIP" : "Pass Standard"}
+                    Pass {formatTierLabel(tkt.tier)}
                   </span>
 
                   <span className={`inline-flex items-center text-xs font-bold ${
@@ -432,12 +433,12 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
               {/* Event Badge and Title */}
               <div className="text-center space-y-2">
                 <span className={`inline-flex items-center space-x-1 rounded-sm px-2.5 py-0.5 text-[10px] font-black uppercase ${
-                  selectedTicket.tier === "vip" 
-                    ? "bg-amber-100 text-amber-900 border border-amber-200" 
+                  isVipTier(selectedTicket.tier)
+                    ? "bg-amber-100 text-amber-900 border border-amber-200"
                     : "bg-blue-100 text-blue-900 border border-blue-200"
                 }`}>
                   <Sparkles className="h-3 w-3 text-amber-600 shrink-0" />
-                  <span>{selectedTicket.tier === "vip" ? "Pass VIP" : "Pass Standard"}</span>
+                  <span>Pass {formatTierLabel(selectedTicket.tier)}</span>
                 </span>
                 
                 <h3 className="text-lg font-black text-gray-900 leading-tight">

@@ -1,6 +1,6 @@
 import { supabase } from "./config.js";
 
-export const DEFAULT_TICKET_COMMISSION_RATE = 0.10;
+export const DEFAULT_TICKET_COMMISSION_RATE = 0.06;
 
 // Taux de commission plateforme par défaut, lu depuis platform_config (voir supabase_setup.sql
 // section 11). Un événement peut le surcharger individuellement via events.commission_rate.

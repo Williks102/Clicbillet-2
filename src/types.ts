@@ -70,7 +70,7 @@ export interface Ticket {
   buyerId: string;
   buyerName: string;
   buyerEmail: string;
-  tier: 'standard' | 'vip';
+  tier: string; // Nom du type de billet en minuscules (ex: "standard", "vip", ou tout nom personnalisé défini par l'organisateur)
   pricePaid: number; // in XOF
   qrCodeData: string; // Contains JSON state or verification hash
   scanned: boolean;

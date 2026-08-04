@@ -302,8 +302,8 @@ ALTER TABLE public.password_resets ENABLE ROW LEVEL SECURITY;
 -- ==========================================
 -- 11. CONFIGURATION PLATEFORME — taux de commission
 -- ==========================================
--- Remplace la constante `commissionRate = 0.10` auparavant codée en dur à plusieurs endroits
--- de server.ts. Le taux par défaut vit ici ; un événement peut le surcharger individuellement
+-- Remplace la constante `commissionRate` auparavant codée en dur à plusieurs endroits de
+-- server.ts. Le taux par défaut vit ici ; un événement peut le surcharger individuellement
 -- (accord négocié avec un organisateur, offre promotionnelle) via events.commission_rate.
 CREATE TABLE IF NOT EXISTS public.platform_config (
     key TEXT PRIMARY KEY,
@@ -311,9 +311,19 @@ CREATE TABLE IF NOT EXISTS public.platform_config (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+-- ON CONFLICT DO NOTHING : ne sert qu'à l'installation initiale (première exécution du
+-- script sur une base vide). Si cette ligne existe déjà avec l'ancienne valeur '0.10', ce
+-- INSERT ne la met PAS à jour silencieusement — voir la migration ponctuelle ci-dessous.
 INSERT INTO public.platform_config (key, value)
-VALUES ('ticket_commission_rate', '0.10')
+VALUES ('ticket_commission_rate', '0.06')
 ON CONFLICT (key) DO NOTHING;
+
+-- MIGRATION PONCTUELLE (à exécuter une seule fois si '0.10' était déjà en base) : passage du
+-- taux de commission plateforme de 10% à 6%. Contrairement à l'INSERT ci-dessus (conçu pour
+-- être rejoué sans risque), cette UPDATE est volontairement tenue à part du script principal
+-- pour ne jamais écraser un taux ajusté manuellement après coup par un administrateur.
+UPDATE public.platform_config SET value = '0.06', updated_at = now()
+WHERE key = 'ticket_commission_rate' AND value = '0.10';
 
 ALTER TABLE public.platform_config ENABLE ROW LEVEL SECURITY;
 -- Pas de policy anon/authenticated : accès exclusif via la clé service_role (server.ts),
