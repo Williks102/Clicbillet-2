@@ -253,3 +253,36 @@ export const validateVerifyTicket = (req: express.Request, res: express.Response
   next();
 };
 
+// Middleware de validation du formulaire de contact public (page /contact, non authentifié).
+const CONTACT_SUBJECTS = new Set([
+  "Question générale",
+  "Problème technique",
+  "Problème de paiement",
+  "Demande de remboursement",
+  "Devenir partenaire",
+  "Autre"
+]);
+
+export const validateContactMessage = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { name, email, subject, message } = req.body;
+
+  if (!name || typeof name !== "string" || !name.trim() || name.length > 100) {
+    return res.status(400).json({ error: "Le nom est requis (100 caractères maximum)." });
+  }
+
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!email || typeof email !== "string" || !emailRegex.test(email)) {
+    return res.status(400).json({ error: "L'adresse e-mail est invalide." });
+  }
+
+  if (!subject || !CONTACT_SUBJECTS.has(subject)) {
+    return res.status(400).json({ error: "Veuillez choisir un sujet valide." });
+  }
+
+  if (!message || typeof message !== "string" || !message.trim() || message.length > 5000) {
+    return res.status(400).json({ error: "Le message est requis (5000 caractères maximum)." });
+  }
+
+  next();
+};
+

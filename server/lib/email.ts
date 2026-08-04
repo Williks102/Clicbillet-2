@@ -364,3 +364,39 @@ export async function sendAdminPayoutRequestEmail(organizerName: string, payout:
     html: buildAdminPayoutRequestHtml(organizerName, payout)
   });
 }
+
+// --- Admin : message reçu via le formulaire de contact public ---
+// Contrairement aux autres emails de ce fichier (données d'utilisateurs authentifiés,
+// réutilisées dans LEURS PROPRES emails), ce formulaire est accessible sans authentification :
+// chaque champ doit être échappé avant injection dans le HTML de l'email, sans quoi un
+// visiteur pourrait y injecter du HTML/JS arbitraire visible par l'administrateur.
+function escapeHtmlForEmail(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+export function buildAdminContactMessageHtml(payload: { name: string; email: string; subject: string; message: string }): string {
+  const details = infoCard([
+    { label: "Nom", value: escapeHtmlForEmail(payload.name) },
+    { label: "Email", value: escapeHtmlForEmail(payload.email) },
+    { label: "Sujet", value: escapeHtmlForEmail(payload.subject) }
+  ]);
+  return emailLayout("Nouveau message de contact", `
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">Un visiteur a soumis le formulaire de contact du site :</p>
+    ${details}
+    <p style="font-size:13px; font-weight:bold; color:#9a3412; margin:20px 0 6px; text-transform:uppercase; letter-spacing:0.04em;">Message</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0; white-space:pre-wrap;">${escapeHtmlForEmail(payload.message)}</p>
+  `);
+}
+
+export async function sendAdminContactMessageEmail(payload: { name: string; email: string; subject: string; message: string }): Promise<void> {
+  await sendEmail({
+    to: ADMIN_NOTIFICATION_EMAIL,
+    subject: `[Contact] ${payload.subject} — ${payload.name}`,
+    html: buildAdminContactMessageHtml(payload)
+  });
+}
