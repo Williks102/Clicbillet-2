@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Ticket, LogOut, User as UserIcon, LayoutDashboard, Calendar, Camera, ShieldCheck, Menu } from "lucide-react";
+import { Ticket, LogOut, User as UserIcon, LayoutDashboard, Calendar, Camera, ShieldCheck, Menu, Tag, Mail } from "lucide-react";
 import { User } from "../types";
 import MobileNavDrawer from "./MobileNavDrawer";
 
@@ -36,6 +36,28 @@ export default function Navbar({ user, onLogout, activeTab, setActiveTab, onOpen
           {/* Nav complète (texte + icônes), visible à partir de "sm" (tablette/desktop). Sur
               mobile, ces destinations sont accessibles via le tiroir hamburger ci-dessous. */}
           <div className="hidden items-center space-x-3 sm:flex">
+            {/* Pages publiques, accessibles à tous (connecté ou non) */}
+            <button
+              id="tab-pricing-btn"
+              onClick={() => setActiveTab("pricing")}
+              className={`flex items-center space-x-1.5 rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
+                activeTab === "pricing" ? "bg-orange-50 text-orange-600" : "text-gray-600 hover:bg-gray-50 hover:text-gray-950"
+              }`}
+            >
+              <Tag className="h-4 w-4" />
+              <span>Tarifs</span>
+            </button>
+            <button
+              id="tab-contact-btn"
+              onClick={() => setActiveTab("contact")}
+              className={`flex items-center space-x-1.5 rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
+                activeTab === "contact" ? "bg-orange-50 text-orange-600" : "text-gray-600 hover:bg-gray-50 hover:text-gray-950"
+              }`}
+            >
+              <Mail className="h-4 w-4" />
+              <span>Contact</span>
+            </button>
+
             {user ? (
               <>
                 {/* User Dashboard Tab Selector */}
