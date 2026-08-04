@@ -8,6 +8,7 @@ import { compressImageToDataUrl } from "../lib/imageCompress";
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
 import DashboardMobileMenu from "./DashboardMobileMenu";
+import AccountCodeBadge from "./AccountCodeBadge";
 
 interface OrganizerDashboardProps {
   user: User;
@@ -667,6 +668,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
           <p className="mt-1 text-xs text-gray-500 font-semibold uppercase tracking-wider">
             Tableau de Bord & Création d'événements
           </p>
+          <AccountCodeBadge code={user.publicCode} className="mt-3" />
         </div>
 
         {/* Dash selector pills (desktop / large écrans uniquement), sur leur propre ligne

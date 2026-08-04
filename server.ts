@@ -17,6 +17,7 @@ import authRouter from "./server/routes/auth.js";
 import ticketsRouter from "./server/routes/tickets.js";
 import webhooksRouter from "./server/routes/webhooks.js";
 import organizerRouter from "./server/routes/organizer.js";
+import organizerRequestsRouter from "./server/routes/organizerRequests.js";
 import adminRouter from "./server/routes/admin.js";
 
 const app = express();
@@ -105,6 +106,7 @@ app.use(authRouter);
 app.use(ticketsRouter);
 app.use(webhooksRouter);
 app.use(organizerRouter);
+app.use(organizerRequestsRouter);
 app.use(adminRouter);
 
 // Doit être enregistré après tous les routers ci-dessus (et avant le middleware statique/SPA

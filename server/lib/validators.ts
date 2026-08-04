@@ -273,6 +273,30 @@ export const validateTransferTicket = (req: express.Request, res: express.Respon
   next();
 };
 
+// Middleware de validation de la demande de passage acheteur -> organisateur.
+// Le nom de structure et le téléphone sont obligatoires : ce sont les deux éléments dont
+// l'administrateur a besoin pour rappeler le demandeur avant d'approuver un compte qui
+// encaissera de l'argent. La motivation reste facultative.
+export const validateOrganizerRequest = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { organizationName, phone, motivation } = req.body;
+
+  if (!organizationName || typeof organizationName !== "string" || !organizationName.trim() || organizationName.length > 120) {
+    return res.status(400).json({ error: "Le nom de votre structure est requis (120 caractères maximum)." });
+  }
+
+  const normalizedPhone = String(phone || "").replace(/\s+/g, "");
+  if (!normalizedPhone || normalizedPhone.length < 8 || normalizedPhone.length > 20 || !/^\+?\d+$/.test(normalizedPhone)) {
+    return res.status(400).json({ error: "Un numéro de téléphone valide est requis." });
+  }
+
+  if (motivation !== undefined && (typeof motivation !== "string" || motivation.length > 1000)) {
+    return res.status(400).json({ error: "La description de votre activité ne peut pas dépasser 1000 caractères." });
+  }
+
+  req.body.phone = normalizedPhone;
+  next();
+};
+
 // Middleware de validation du formulaire de contact public (page /contact, non authentifié).
 const CONTACT_SUBJECTS = new Set([
   "Question générale",

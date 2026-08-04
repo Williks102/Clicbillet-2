@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { User, Event, Ticket } from "../types";
+import { User, Event, Ticket, OrganizerRequest } from "../types";
 import {
   Building2, Users, Calendar, DollarSign, Trash2, ShieldCheck,
   Search, ShieldAlert, Sparkles, Ticket as TicketIcon, TrendingUp, Filter, Percent,
-  Image as ImageIcon, RefreshCw
+  Image as ImageIcon, RefreshCw, Store, ArrowUpCircle, ArrowDownCircle
 } from "lucide-react";
 import { authFetch } from "../lib/apiClient";
 import { isEventPast } from "../lib/eventStatus";
@@ -23,19 +23,20 @@ interface AdminStats {
   totalTicketsSold: number;
   totalUsers: number;
   totalEvents: number;
-  users: { id: string; name: string; email: string; role: string }[];
+  users: { id: string; name: string; email: string; role: string; publicCode?: string | null }[];
   events: Event[];
   tickets: Ticket[];
 }
 
-type AdminSubTab = "overview" | "events" | "users" | "tickets" | "payouts" | "transactions";
+type AdminSubTab = "overview" | "events" | "users" | "organizer-requests" | "tickets" | "payouts" | "transactions";
 
-const ADMIN_SUB_TABS: AdminSubTab[] = ["overview", "events", "users", "tickets", "payouts", "transactions"];
+const ADMIN_SUB_TABS: AdminSubTab[] = ["overview", "events", "users", "organizer-requests", "tickets", "payouts", "transactions"];
 
 const ADMIN_SUB_TAB_LABELS: Record<AdminSubTab, string> = {
   overview: "Tableau de Bord",
   events: "Événements & Modération",
   users: "Membres & Rôles",
+  "organizer-requests": "Demandes Organisateur",
   tickets: "Billets Vendus",
   payouts: "Demandes de Retrait",
   transactions: "Log Transactions"
@@ -45,6 +46,7 @@ const ADMIN_SUB_TAB_ICONS: Record<AdminSubTab, React.ReactNode> = {
   overview: <Sparkles className="h-4 w-4" />,
   events: <Calendar className="h-4 w-4" />,
   users: <Users className="h-4 w-4" />,
+  "organizer-requests": <Store className="h-4 w-4" />,
   tickets: <TicketIcon className="h-4 w-4" />,
   payouts: <DollarSign className="h-4 w-4" />,
   transactions: <TrendingUp className="h-4 w-4" />
@@ -117,14 +119,19 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
   const [roleFilter, setRoleFilter] = useState("Tous");
   const [commissionSheetEvent, setCommissionSheetEvent] = useState<Event | null>(null);
 
+  // File de modération des demandes de passage acheteur -> organisateur.
+  const [organizerRequests, setOrganizerRequests] = useState<OrganizerRequest[]>([]);
+  const [reviewingRequestId, setReviewingRequestId] = useState<string | null>(null);
+
   async function fetchAdminData() {
     setLoading(true);
     setError(null);
     try {
-      const [response, respPayouts, respTx] = await Promise.all([
+      const [response, respPayouts, respTx, respRequests] = await Promise.all([
         authFetch("/api/admin/stats", {}),
         authFetch("/api/admin/payouts", {}),
-        authFetch("/api/admin/transactions", {})
+        authFetch("/api/admin/transactions", {}),
+        authFetch("/api/admin/organizer-requests", {})
       ]);
       if (!response.ok) {
         throw new Error("Impossible de communiquer avec l'interface d'administration.");
@@ -134,6 +141,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
 
       if (respPayouts.ok) setPayouts(await respPayouts.json());
       if (respTx.ok) setTransactions(await respTx.json());
+      if (respRequests.ok) setOrganizerRequests(await respRequests.json());
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Impossible de récupérer les statistiques d'administration.");
@@ -214,9 +222,76 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
     }
   }
 
+  // Décision sur une demande d'accès organisateur. L'approbation est le seul chemin qui fait
+  // passer un compte de "client" à "organizer" (cf. server/routes/organizerRequests.ts) : on
+  // demande confirmation, puisqu'elle ouvre la création d'événements et l'encaissement.
+  async function handleReviewOrganizerRequest(request: OrganizerRequest, status: "approved" | "rejected") {
+    const confirmMessage = status === "approved"
+      ? `Accorder l'accès organisateur à ${request.userName} (${request.organizationName}) ? Ce compte pourra créer des événements et encaisser des paiements.`
+      : `Refuser la demande de ${request.userName} ? Son compte acheteur reste inchangé.`;
+    if (!confirm(confirmMessage)) return;
+
+    const reviewNote = prompt(
+      status === "approved"
+        ? "Message à joindre à l'e-mail d'activation (facultatif) :"
+        : "Motif du refus, transmis au demandeur par e-mail (facultatif) :",
+      ""
+    );
+    // prompt() renvoie null quand l'utilisateur annule la boîte de dialogue : on interrompt la
+    // décision plutôt que de la valider sans message.
+    if (reviewNote === null) return;
+
+    setReviewingRequestId(request.id);
+    try {
+      const response = await authFetch(`/api/admin/organizer-requests/${request.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status, reviewNote })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Erreur de traitement de la demande.");
+      fetchAdminData();
+    } catch (err: any) {
+      alert(err.message || "Impossible de traiter cette demande.");
+    } finally {
+      setReviewingRequestId(null);
+    }
+  }
+
+  // Attribution directe du rôle, sans demande préalable (organisateur démarché en direct,
+  // compte créé par erreur du mauvais côté). Le rôle admin n'est pas attribuable ici.
+  async function handleChangeUserRole(usr: { id: string; name: string; role: string }, role: "client" | "organizer") {
+    const confirmMessage = role === "organizer"
+      ? `Passer ${usr.name} en compte organisateur ? Ce compte pourra créer des événements et encaisser des paiements.`
+      : `Repasser ${usr.name} en compte acheteur ? Ses événements existants ne seront plus gérables par ce compte.`;
+    if (!confirm(confirmMessage)) return;
+
+    try {
+      const response = await authFetch(`/api/admin/users/${usr.id}/role`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Erreur de changement de rôle.");
+      fetchAdminData();
+    } catch (err: any) {
+      alert(err.message || "Impossible de modifier le rôle de ce compte.");
+    }
+  }
+
+  const pendingOrganizerRequests = organizerRequests.filter(r => r.status === "pending");
+
   const filteredUsers = stats?.users.filter(u => {
-    const matchesSearch = u.name.toLowerCase().includes(userSearch.toLowerCase()) || 
-                          u.email.toLowerCase().includes(userSearch.toLowerCase());
+    const needle = userSearch.trim().toLowerCase();
+    // Recherche par code public : c'est la référence que l'utilisateur communique au support
+    // (cf. AccountCodeBadge). Les deux côtés sont comparés sans le préfixe "CB-", pour que la
+    // saisie fonctionne aussi bien avec que sans.
+    const codeNeedle = needle.replace(/^cb-/, "");
+    const matchesSearch = !needle
+      || u.name.toLowerCase().includes(needle)
+      || u.email.toLowerCase().includes(needle)
+      || (codeNeedle.length > 0 && (u.publicCode || "").toLowerCase().replace(/^cb-/, "").includes(codeNeedle));
     const matchesRole = roleFilter === "Tous" || u.role === roleFilter;
     return matchesSearch && matchesRole;
   }) || [];
@@ -316,6 +391,25 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         title="Révoquer le compte définitivement"
       >
         <Trash2 className="h-4 w-4 text-red-500" />
+      </button>
+    );
+  }
+
+  // Bascule client <-> organisateur. Volontairement absente pour les administrateurs : leur
+  // rôle ne se modifie pas depuis l'interface (cf. PATCH /api/admin/users/:id/role, qui refuse
+  // aussi ces cas côté serveur — l'affichage seul ne fait jamais autorité).
+  function userRoleAction(usr: { id: string; name: string; role: string }) {
+    if (usr.role === "admin" || usr.id === user.id) return null;
+    const promote = usr.role === "client";
+    return (
+      <button
+        onClick={() => handleChangeUserRole(usr, promote ? "organizer" : "client")}
+        className={`p-2 rounded-xl transition ${promote ? "bg-orange-50 hover:bg-orange-100" : "bg-gray-50 hover:bg-gray-100"}`}
+        title={promote ? "Passer ce compte en organisateur" : "Repasser ce compte en acheteur"}
+      >
+        {promote
+          ? <ArrowUpCircle className="h-4 w-4 text-orange-600" />
+          : <ArrowDownCircle className="h-4 w-4 text-gray-500" />}
       </button>
     );
   }
@@ -422,6 +516,14 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
             >
               {ADMIN_SUB_TAB_ICONS[tab]}
               <span>{ADMIN_SUB_TAB_LABELS[tab]}</span>
+              {/* Une demande d'accès organisateur laissée en attente bloque quelqu'un qui ne
+                  peut plus rien faire de son côté : le compteur la rend visible sans avoir à
+                  ouvrir l'onglet. */}
+              {tab === "organizer-requests" && pendingOrganizerRequests.length > 0 && (
+                <span className="ml-auto rounded-full bg-orange-600 px-2 py-0.5 text-[9px] font-black text-white">
+                  {pendingOrganizerRequests.length}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -822,7 +924,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                   <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-gray-400" />
                   <input
                     type="text"
-                    placeholder="Filtrer par nom ou email..."
+                    placeholder="Filtrer par nom, email ou code..."
                     value={userSearch}
                     onChange={(e) => setUserSearch(e.target.value)}
                     className="w-full rounded-xl border border-gray-200 py-2.5 pr-4 pl-9 text-xs outline-none focus:border-orange-500"
@@ -855,7 +957,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b border-gray-100 text-gray-400 font-extrabold uppercase text-[9px] tracking-wider">
-                    <th className="pb-3">Identifiant ID</th>
+                    <th className="pb-3">Code client / ID</th>
                     <th className="pb-3">Nom complet / Organisation</th>
                     <th className="pb-3">Adresse de messagerie</th>
                     <th className="pb-3">Statut Rôle</th>
@@ -865,11 +967,19 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                 <tbody className="divide-y divide-gray-50">
                   {filteredUsers.map((usr) => (
                     <tr key={usr.id} className="hover:bg-gray-50/50">
-                      <td className="py-3 font-mono text-[10px] text-gray-400 font-bold">{usr.id}</td>
+                      <td className="py-3">
+                        <p className="font-mono text-xs font-black tracking-wider text-gray-900">{usr.publicCode || "—"}</p>
+                        <p className="font-mono text-[9px] font-bold text-gray-400">{usr.id}</p>
+                      </td>
                       <td className="py-3 font-black text-gray-950">{usr.name}</td>
                       <td className="py-3 text-gray-600 font-semibold font-mono">{usr.email}</td>
                       <td className="py-3">{userRoleBadge(usr.role)}</td>
-                      <td className="py-3 text-center">{userDeleteAction(usr)}</td>
+                      <td className="py-3">
+                        <div className="flex items-center justify-center gap-2">
+                          {userRoleAction(usr)}
+                          {userDeleteAction(usr)}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -882,14 +992,101 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                   <div className="min-w-0">
                     <p className="text-xs font-black text-gray-950 truncate">{usr.name}</p>
                     <p className="text-[10px] text-gray-600 font-semibold font-mono truncate">{usr.email}</p>
-                    <p className="text-[9px] text-gray-400 font-mono mt-0.5">{usr.id}</p>
+                    <p className="mt-0.5 font-mono text-[10px] font-black tracking-wider text-gray-700">{usr.publicCode || "—"}</p>
                     <div className="mt-1.5">{userRoleBadge(usr.role)}</div>
                   </div>
-                  <div className="shrink-0">{userDeleteAction(usr)}</div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {userRoleAction(usr)}
+                    {userDeleteAction(usr)}
+                  </div>
                 </div>
               ))}
             </div>
             </>}
+          </div>
+        )}
+
+        {/* DEMANDES DE PASSAGE ACHETEUR -> ORGANISATEUR */}
+        {activeSubTab === "organizer-requests" && (
+          <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
+            <div className="border-b border-gray-50 pb-4">
+              <h4 className="text-sm font-black text-gray-950">
+                Demandes d'accès organisateur ({pendingOrganizerRequests.length} en attente)
+              </h4>
+              <p className="mt-1 text-[11px] text-gray-500 font-semibold">
+                Approuver une demande fait passer le compte en organisateur : il pourra créer des événements et encaisser
+                des paiements. Le compte, son e-mail et ses billets déjà achetés sont conservés.
+              </p>
+            </div>
+
+            {organizerRequests.length === 0 ? (
+              <p className="py-10 text-center text-xs font-semibold text-gray-400">Aucune demande pour le moment.</p>
+            ) : (
+              <div className="space-y-3">
+                {organizerRequests.map((request) => (
+                  <div
+                    key={request.id}
+                    id={`organizer-request-${request.id}`}
+                    className="rounded-2xl border border-gray-100 p-4"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-sm font-black text-gray-950">{request.organizationName}</p>
+                        <p className="mt-0.5 text-[11px] font-semibold text-gray-600">
+                          {request.userName} · <span className="font-mono">{request.userEmail}</span>
+                        </p>
+                        <p className="mt-0.5 text-[11px] font-semibold text-gray-500">
+                          Tél. <span className="font-mono">{request.phone}</span>
+                          {request.userPublicCode && <> · Code <span className="font-mono font-black text-gray-700">{request.userPublicCode}</span></>}
+                        </p>
+                        <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                          Reçue le {new Date(request.createdAt).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
+                        </p>
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-2">
+                        {request.status === "pending" ? (
+                          <>
+                            <button
+                              onClick={() => handleReviewOrganizerRequest(request, "approved")}
+                              disabled={reviewingRequestId === request.id}
+                              className="rounded-xl bg-green-600 px-3 py-2 text-[11px] font-black text-white transition-colors hover:bg-green-700 disabled:bg-gray-300"
+                            >
+                              Approuver
+                            </button>
+                            <button
+                              onClick={() => handleReviewOrganizerRequest(request, "rejected")}
+                              disabled={reviewingRequestId === request.id}
+                              className="rounded-xl border border-red-200 px-3 py-2 text-[11px] font-black text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
+                            >
+                              Refuser
+                            </button>
+                          </>
+                        ) : (
+                          <span className={`rounded-md px-2 py-1 text-[9px] font-black uppercase tracking-wider ${
+                            request.status === "approved" ? "bg-green-100 text-green-800" : "bg-red-50 text-red-600"
+                          }`}>
+                            {request.status === "approved" ? "Approuvée" : "Refusée"}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {request.motivation && (
+                      <p className="mt-3 whitespace-pre-wrap rounded-xl bg-gray-50 p-3 text-[11px] leading-relaxed text-gray-600">
+                        {request.motivation}
+                      </p>
+                    )}
+
+                    {request.reviewNote && (
+                      <p className="mt-2 text-[11px] font-semibold text-gray-500">
+                        Décision : <span className="font-normal">{request.reviewNote}</span>
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

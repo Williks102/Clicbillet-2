@@ -310,8 +310,9 @@ export default function App() {
     // jusqu'à expiration du TTL).
     fetchEvents(true);
     // Les invités n'ont pas d'espace "Mes billets" connecté : les renvoyer vers l'accueil
-    // évite une page blanche, leurs QR codes étant envoyés par email.
-    if (user?.role === "client") {
+    // évite une page blanche, leurs QR codes étant envoyés par email. Un organisateur, lui,
+    // achète des billets comme tout le monde et dispose bien de cet espace.
+    if (user && user.role !== "admin") {
       setActiveTab("client-dashboard");
     } else {
       setActiveTab("home");

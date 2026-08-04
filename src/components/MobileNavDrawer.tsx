@@ -130,6 +130,18 @@ export default function MobileNavDrawer({ user, activeTab, setActiveTab, onLogou
                     <LayoutDashboard className="h-4.5 w-4.5" />
                     <span>Tableau de bord</span>
                   </button>
+                  {/* Cf. Navbar : un organisateur garde l'accès à ses propres billets, en
+                      particulier après une promotion depuis un compte acheteur. */}
+                  <button
+                    id="mobile-nav-organizer-tickets-btn"
+                    onClick={() => go("client-dashboard")}
+                    className={`flex w-full items-center space-x-3 rounded-xl px-3 py-3 text-sm font-bold transition-colors ${
+                      activeTab === "client-dashboard" ? "bg-orange-50 text-orange-600" : "text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    <Ticket className="h-4.5 w-4.5" />
+                    <span>Mes Billets</span>
+                  </button>
                   <button
                     id="mobile-nav-scanner-btn"
                     onClick={() => go("scanner")}

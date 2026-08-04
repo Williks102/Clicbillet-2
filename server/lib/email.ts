@@ -514,3 +514,84 @@ export async function sendAdminContactMessageEmail(payload: { name: string; emai
     html: buildAdminContactMessageHtml(payload)
   });
 }
+
+// --- Admin : demande de passage acheteur -> organisateur ---
+// Contenu saisi librement par le demandeur (nom de structure, motivation) : échappé avant
+// injection dans le HTML, comme le formulaire de contact ci-dessus.
+export interface OrganizerRequestPayload {
+  userName: string;
+  userEmail: string;
+  publicCode?: string | null;
+  organizationName: string;
+  phone: string;
+  motivation?: string | null;
+}
+
+export function buildAdminOrganizerRequestHtml(request: OrganizerRequestPayload): string {
+  const rows = [
+    { label: "Demandeur", value: escapeHtmlForEmail(request.userName) },
+    { label: "Email", value: escapeHtmlForEmail(request.userEmail) },
+    { label: "Code client", value: escapeHtmlForEmail(request.publicCode || "—") },
+    { label: "Structure", value: escapeHtmlForEmail(request.organizationName) },
+    { label: "Téléphone", value: escapeHtmlForEmail(request.phone) }
+  ];
+
+  const motivationBlock = request.motivation
+    ? `
+      <p style="font-size:13px; font-weight:bold; color:#9a3412; margin:20px 0 6px; text-transform:uppercase; letter-spacing:0.04em;">Activité décrite</p>
+      <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px; white-space:pre-wrap;">${escapeHtmlForEmail(request.motivation)}</p>
+    `
+    : "";
+
+  return emailLayout("Demande pour devenir organisateur", `
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">Un acheteur demande à passer en compte organisateur :</p>
+    ${infoCard(rows)}
+    ${motivationBlock}
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0;">Approuvez ou refusez la demande depuis l'onglet <strong>Demandes organisateur</strong> du tableau de bord admin.</p>
+  `);
+}
+
+export async function sendAdminOrganizerRequestEmail(request: OrganizerRequestPayload): Promise<void> {
+  await sendEmail({
+    to: ADMIN_NOTIFICATION_EMAIL,
+    subject: `Demande organisateur — ${request.organizationName}`,
+    html: buildAdminOrganizerRequestHtml(request)
+  });
+}
+
+// --- Demandeur : décision sur sa demande d'accès organisateur ---
+export function buildOrganizerRequestDecisionHtml(name: string, status: string, reviewNote?: string | null): string {
+  const approved = status === "approved";
+  const noteBlock = reviewNote
+    ? `<p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px; white-space:pre-wrap;"><strong>Message de l'équipe :</strong><br/>${escapeHtmlForEmail(reviewNote)}</p>`
+    : "";
+
+  const body = approved
+    ? `
+      <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonne nouvelle : votre compte ClicBillet est désormais un <strong>compte organisateur</strong>.</p>
+      ${noteBlock}
+      <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">Vous gardez le même identifiant de connexion et l'historique de vos achats. Reconnectez-vous pour accéder à votre tableau de bord et créer votre premier événement.</p>
+      <p style="font-size:12px; color:#6b7280; margin:0;">Pensez à activer la double authentification depuis votre profil : elle protège un compte qui encaisse désormais des paiements.</p>
+    `
+    : `
+      <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Votre demande de passage en compte organisateur n'a pas été retenue pour le moment.</p>
+      ${noteBlock}
+      <p style="font-size:14px; line-height:1.6; color:#374151; margin:0;">Votre compte acheteur reste pleinement actif, et vous pouvez soumettre une nouvelle demande plus tard.</p>
+    `;
+
+  return emailLayout(approved ? "Votre compte organisateur est activé" : "Suite à votre demande d'accès organisateur", `
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonjour ${escapeHtmlForEmail(name)},</p>
+    ${body}
+  `);
+}
+
+export async function sendOrganizerRequestDecisionEmail(user: { email: string; name: string }, status: string, reviewNote?: string | null): Promise<void> {
+  if (!user.email) return;
+  await sendEmail({
+    to: user.email,
+    subject: status === "approved"
+      ? "Votre compte organisateur ClicBillet est activé"
+      : "Suite à votre demande d'accès organisateur ClicBillet",
+    html: buildOrganizerRequestDecisionHtml(user.name, status, reviewNote)
+  });
+}

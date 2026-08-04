@@ -34,7 +34,7 @@ router.get("/api/admin/stats", async (req: express.Request, res: express.Respons
       const totalUsers = (users || []).length;
       const totalEvents = (events || []).length;
 
-      const mappedUsers = (users || []).map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role }));
+      const mappedUsers = (users || []).map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role, publicCode: u.public_code || null }));
       const mappedEvents = (events || []).map(e => ({
         id: e.id,
         title: e.title,
@@ -110,7 +110,7 @@ router.get("/api/admin/stats", async (req: express.Request, res: express.Respons
     totalTicketsSold,
     totalUsers,
     totalEvents,
-    users: db.users.map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role })),
+    users: db.users.map((u: any) => ({ id: u.id, name: u.name, email: u.email, role: u.role, publicCode: u.publicCode || null })),
     events: db.events,
     tickets: db.tickets.map(t => ({
       ...t,
