@@ -82,6 +82,24 @@ export interface Ticket {
   paymentStatus?: 'pending' | 'paid' | 'failed';
 }
 
+// Historique en lecture seule d'un transfert de billet (cf. GET /api/my-transfers) : une ligne
+// immuable par transfert, indépendante de qui possède actuellement le billet aujourd'hui.
+export interface TicketTransfer {
+  id: string;
+  ticketId: string;
+  eventTitle: string;
+  eventDate: string;
+  eventTime: string;
+  eventVenue: string;
+  tier: string;
+  pricePaid: number;
+  fromName: string;
+  fromEmail: string;
+  toName: string;
+  toEmail: string;
+  transferredAt: string;
+}
+
 export type PaymentMethod = 'orange_money' | 'mtn_momo' | 'moov_money' | 'wave' | 'card';
 
 export interface PaymentDetails {

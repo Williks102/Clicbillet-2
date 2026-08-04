@@ -148,6 +148,29 @@ router.post("/api/tickets/:id/transfer", transferTicketRateLimiter, requireAuth,
         .eq("id", ticketId);
       if (updateError) throw updateError;
 
+      // Historique en lecture seule ("Billets transférés" / "Mes billets reçus") : best-effort,
+      // un échec ici ne doit jamais annuler le transfert déjà appliqué ci-dessus.
+      try {
+        await supabase.from("ticket_transfers").insert({
+          id: `trf-${crypto.randomUUID()}`,
+          ticket_id: ticketId,
+          event_title: ticket.event_title,
+          event_date: ticket.event_date,
+          event_time: ticket.event_time,
+          event_venue: ticket.event_venue,
+          tier: ticket.tier,
+          price_paid: ticket.price_paid,
+          from_user_id: authUser.id,
+          from_name: ticket.buyer_name,
+          from_email: ticket.buyer_email,
+          to_name: newBuyerName,
+          to_email: recipientEmail,
+          transferred_at: new Date().toISOString()
+        });
+      } catch (logErr: any) {
+        console.warn("[Ticket Transfer] Échec de journalisation de l'historique:", logErr.message);
+      }
+
       runInBackground(sendTicketTransferredEmail({
         recipientEmail,
         recipientName: newBuyerName,
@@ -206,6 +229,24 @@ router.post("/api/tickets/:id/transfer", transferTicketRateLimiter, requireAuth,
   ticket.buyerName = newBuyerName;
   ticket.buyerEmail = recipientEmail;
   ticket.qrCodeData = newQrCodeData;
+
+  db.transfers = db.transfers || [];
+  db.transfers.push({
+    id: `trf-${crypto.randomUUID()}`,
+    ticketId,
+    eventTitle: ticket.eventTitle,
+    eventDate: ticket.eventDate,
+    eventTime: ticket.eventTime,
+    eventVenue: ticket.eventVenue,
+    tier: ticket.tier,
+    pricePaid: ticket.pricePaid,
+    fromUserId: authUser.id,
+    fromName: originalBuyerName,
+    fromEmail: originalBuyerEmail,
+    toName: newBuyerName,
+    toEmail: recipientEmail,
+    transferredAt: new Date().toISOString()
+  });
   saveDB(db);
 
   runInBackground(sendTicketTransferredEmail({
@@ -227,6 +268,51 @@ router.post("/api/tickets/:id/transfer", transferTicketRateLimiter, requireAuth,
   }));
 
   res.json({ success: true });
+});
+
+// Historique en lecture seule des transferts de billets : "sent" = billets donnés (from_user_id
+// = ce compte), "received" = billets reçus (to_email = l'email de ce compte — comparé par email,
+// pas par id, pour couvrir aussi les transferts reçus avant même la création du compte).
+router.get("/api/my-transfers", requireAuth, async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
+  const email = authUser.email?.toLowerCase();
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const [sentRes, receivedRes] = await Promise.all([
+        supabase.from("ticket_transfers").select("*").eq("from_user_id", authUser.id).order("transferred_at", { ascending: false }),
+        supabase.from("ticket_transfers").select("*").ilike("to_email", email).order("transferred_at", { ascending: false })
+      ]);
+      if (sentRes.error) throw sentRes.error;
+      if (receivedRes.error) throw receivedRes.error;
+
+      const mapRow = (r: any) => ({
+        id: r.id,
+        ticketId: r.ticket_id,
+        eventTitle: r.event_title,
+        eventDate: r.event_date,
+        eventTime: r.event_time,
+        eventVenue: r.event_venue,
+        tier: r.tier,
+        pricePaid: Number(r.price_paid),
+        fromName: r.from_name,
+        fromEmail: r.from_email,
+        toName: r.to_name,
+        toEmail: r.to_email,
+        transferredAt: r.transferred_at
+      });
+
+      return res.json({ sent: (sentRes.data || []).map(mapRow), received: (receivedRes.data || []).map(mapRow) });
+    } catch (err: any) {
+      console.error("[Supabase Error] Fetching my transfers, falling back to local file DB:", err.message);
+    }
+  }
+
+  const db = getDB();
+  const transfers = db.transfers || [];
+  const sent = transfers.filter((t: any) => t.fromUserId === authUser.id);
+  const received = transfers.filter((t: any) => t.toEmail?.toLowerCase() === email);
+  res.json({ sent, received });
 });
 
 router.post("/api/waiting-room/join", requireAuth, async (req: express.Request, res: express.Response) => {

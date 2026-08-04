@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { Ticket as TicketIcon, Calendar, MapPin, Download, CheckCircle2, AlertTriangle, ExternalLink, Printer, Sparkles, Receipt, Lock, Send } from "lucide-react";
-import { Ticket, User } from "../types";
+import { Ticket as TicketIcon, Calendar, MapPin, Download, CheckCircle2, AlertTriangle, ExternalLink, Printer, Sparkles, Receipt, Lock, Send, Gift } from "lucide-react";
+import { Ticket, TicketTransfer, User } from "../types";
 import { authFetch } from "../lib/apiClient";
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
@@ -83,7 +83,9 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
   const [loading, setLoading] = useState(true);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [dashTab, setDashTab] = useState<"tickets" | "invoices">("tickets");
+  const [dashTab, setDashTab] = useState<"tickets" | "invoices" | "transferred" | "received">("tickets");
+  const [transfersSent, setTransfersSent] = useState<TicketTransfer[]>([]);
+  const [transfersReceived, setTransfersReceived] = useState<TicketTransfer[]>([]);
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferEmail, setTransferEmail] = useState("");
   const [transferName, setTransferName] = useState("");
@@ -108,8 +110,24 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
     }
   }
 
+  // Historique en lecture seule des transferts (onglets "Billets transférés"/"Mes billets
+  // reçus") : indépendant de fetchTickets, un échec ici ne doit pas empêcher d'afficher les
+  // billets eux-mêmes.
+  async function fetchTransfers() {
+    try {
+      const response = await authFetch(`/api/my-transfers`, {});
+      if (!response.ok) return;
+      const data = await response.json();
+      setTransfersSent(data.sent || []);
+      setTransfersReceived(data.received || []);
+    } catch (err) {
+      console.error("Erreur de récupération de l'historique des transferts", err);
+    }
+  }
+
   useEffect(() => {
     fetchTickets();
+    fetchTransfers();
 
     const handleRefresh = () => fetchTickets();
     window.addEventListener("refresh_tickets", handleRefresh);
@@ -142,7 +160,7 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
       }
       setTransferSuccess(`Billet transféré à ${transferEmail} !`);
       setSelectedTicket(null);
-      await fetchTickets();
+      await Promise.all([fetchTickets(), fetchTransfers()]);
     } catch (err: any) {
       setTransferError(err.message || "Impossible de transférer ce billet.");
     } finally {
@@ -309,8 +327,8 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
         </div>
       )}
 
-      {/* Sub-tabs: Billets / Factures */}
-      <div className="flex space-x-2 rounded-xl bg-gray-50 p-1.5 w-fit" id="client-dashboard-subtabs">
+      {/* Sub-tabs: Billets / Factures / Transférés / Reçus */}
+      <div className="flex flex-wrap gap-2 rounded-xl bg-gray-50 p-1.5 w-fit" id="client-dashboard-subtabs">
         <button
           onClick={() => setDashTab("tickets")}
           className={`flex items-center space-x-1.5 rounded-lg px-4 py-2 text-xs font-bold transition-all ${
@@ -329,9 +347,29 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
           <Receipt className="h-3.5 w-3.5" />
           <span>Mes Factures</span>
         </button>
+        <button
+          id="dashtab-transferred-btn"
+          onClick={() => setDashTab("transferred")}
+          className={`flex items-center space-x-1.5 rounded-lg px-4 py-2 text-xs font-bold transition-all ${
+            dashTab === "transferred" ? "bg-white text-orange-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <Send className="h-3.5 w-3.5" />
+          <span>Billets Transférés</span>
+        </button>
+        <button
+          id="dashtab-received-btn"
+          onClick={() => setDashTab("received")}
+          className={`flex items-center space-x-1.5 rounded-lg px-4 py-2 text-xs font-bold transition-all ${
+            dashTab === "received" ? "bg-white text-orange-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          <Gift className="h-3.5 w-3.5" />
+          <span>Mes Billets Reçus</span>
+        </button>
       </div>
 
-      {dashTab === "invoices" ? (
+      {dashTab === "invoices" && (
         <section className="space-y-4" id="client-invoices-section">
           {(() => {
             const orders = groupPaidOrders(tickets);
@@ -372,7 +410,9 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
             );
           })()}
         </section>
-      ) : (
+      )}
+
+      {dashTab === "tickets" && (
       <>
       {/* Ticket List Section */}
       <section className="space-y-4">
@@ -459,6 +499,72 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
         )}
       </section>
       </>
+      )}
+
+      {dashTab === "transferred" && (
+        <section className="space-y-4" id="client-transfers-sent-section">
+          <h3 className="text-lg font-extrabold text-gray-900 flex items-center space-x-2">
+            <Send className="h-5 w-5 text-orange-600" />
+            <span>Billets Transférés ({transfersSent.length})</span>
+          </h3>
+          {transfersSent.length > 0 ? (
+            <div className="space-y-3">
+              {transfersSent.map((t) => (
+                <div key={t.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-gray-100 bg-white p-4">
+                  <div className="min-w-0">
+                    <p className="font-bold text-gray-900 truncate">{t.eventTitle}</p>
+                    <p className="mt-0.5 text-xs text-gray-400">
+                      Transféré à <span className="font-semibold text-gray-600">{t.toName}</span> ({t.toEmail})
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-gray-400 font-mono">
+                      {new Date(t.transferredAt).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
+                    </p>
+                  </div>
+                  <span className="shrink-0 font-black text-orange-600 text-sm">{t.pricePaid.toLocaleString("fr-FR")} FCFA</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border-2 border-dashed border-gray-100 py-16 text-center">
+              <Send className="mx-auto h-12 w-12 text-gray-300" />
+              <h4 className="mt-4 text-base font-bold text-gray-900">Aucun billet transféré</h4>
+              <p className="mt-2 text-xs text-gray-500">Les billets que vous cédez à quelqu'un d'autre apparaîtront ici.</p>
+            </div>
+          )}
+        </section>
+      )}
+
+      {dashTab === "received" && (
+        <section className="space-y-4" id="client-transfers-received-section">
+          <h3 className="text-lg font-extrabold text-gray-900 flex items-center space-x-2">
+            <Gift className="h-5 w-5 text-orange-600" />
+            <span>Mes Billets Reçus ({transfersReceived.length})</span>
+          </h3>
+          {transfersReceived.length > 0 ? (
+            <div className="space-y-3">
+              {transfersReceived.map((t) => (
+                <div key={t.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-gray-100 bg-white p-4">
+                  <div className="min-w-0">
+                    <p className="font-bold text-gray-900 truncate">{t.eventTitle}</p>
+                    <p className="mt-0.5 text-xs text-gray-400">
+                      Reçu de <span className="font-semibold text-gray-600">{t.fromName}</span> ({t.fromEmail})
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-gray-400 font-mono">
+                      {new Date(t.transferredAt).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
+                    </p>
+                  </div>
+                  <span className="shrink-0 font-black text-orange-600 text-sm">{t.pricePaid.toLocaleString("fr-FR")} FCFA</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border-2 border-dashed border-gray-100 py-16 text-center">
+              <Gift className="mx-auto h-12 w-12 text-gray-300" />
+              <h4 className="mt-4 text-base font-bold text-gray-900">Aucun billet reçu</h4>
+              <p className="mt-2 text-xs text-gray-500">Les billets que quelqu'un vous transfère apparaîtront ici, retrouvables aussi dans "Mes Billets".</p>
+            </div>
+          )}
+        </section>
       )}
 
       {/* Ticket Details & QR Code Drawer Modal */}

@@ -116,7 +116,8 @@ export const INITIAL_DATABASE = {
   ],
   payouts: [],
   transactions: [],
-  passwordResets: []
+  passwordResets: [],
+  transfers: []
 };
 
 // Initialize DB file helper
