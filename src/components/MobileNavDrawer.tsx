@@ -113,8 +113,8 @@ export default function MobileNavDrawer({ user, activeTab, setActiveTab, onLogou
                     activeTab === "client-dashboard" ? "bg-orange-50 text-orange-600" : "text-gray-600 hover:bg-gray-50"
                   }`}
                 >
-                  <Ticket className="h-4.5 w-4.5" />
-                  <span>Mes Billets</span>
+                  <LayoutDashboard className="h-4.5 w-4.5" />
+                  <span>Tableau de bord</span>
                 </button>
               ) : (
                 <>
