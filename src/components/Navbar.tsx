@@ -84,8 +84,8 @@ export default function Navbar({ user, onLogout, activeTab, setActiveTab, onOpen
                         : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                     }`}
                   >
-                    <Ticket className="h-4 w-4" />
-                    <span>Mes Billets</span>
+                    <LayoutDashboard className="h-4 w-4" />
+                    <span>Tableau de bord</span>
                   </button>
                 ) : (
                   <>
