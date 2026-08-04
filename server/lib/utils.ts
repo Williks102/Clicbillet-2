@@ -17,3 +17,21 @@ export function isEventPast(evt: { date: string; time: string }): boolean {
   return eventDateTime.getTime() < Date.now();
 }
 
+// Anti-fraude : le QR code réel d'un billet ne doit pas être exploitable des jours/semaines
+// à l'avance (revente d'une capture d'écran avant que l'acheteur légitime n'arrive). Il ne
+// devient visible/scannable qu'à partir de H-4 avant le début de l'événement.
+export const QR_UNLOCK_HOURS_BEFORE_EVENT = 4;
+
+export function getQrUnlockTime(evt: { date: string; time: string }): Date {
+  const eventDateTime = new Date(`${evt.date}T${evt.time}`);
+  return new Date(eventDateTime.getTime() - QR_UNLOCK_HOURS_BEFORE_EVENT * 60 * 60 * 1000);
+}
+
+// Repli permissif (déverrouillé) si la date/heure de l'événement est invalide : mieux vaut
+// laisser voir un QR code que bloquer un acheteur légitime à cause d'une donnée corrompue.
+export function isQrUnlocked(evt: { date: string; time: string }): boolean {
+  const unlockTime = getQrUnlockTime(evt);
+  if (isNaN(unlockTime.getTime())) return true;
+  return Date.now() >= unlockTime.getTime();
+}
+

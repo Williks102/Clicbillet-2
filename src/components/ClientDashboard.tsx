@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Ticket as TicketIcon, Calendar, MapPin, Download, CheckCircle2, AlertTriangle, ExternalLink, Printer, Sparkles, Receipt } from "lucide-react";
+import { Ticket as TicketIcon, Calendar, MapPin, Download, CheckCircle2, AlertTriangle, ExternalLink, Printer, Sparkles, Receipt, Lock } from "lucide-react";
 import { Ticket, User } from "../types";
 import { authFetch } from "../lib/apiClient";
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
@@ -456,12 +456,25 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
                       <span className="text-[10px] text-gray-500 mt-1 leading-tight">Le QR Code sera généré dès validation.</span>
                     </div>
                   )}
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(selectedTicket.qrCodeData)}`}
-                    alt="Billet QR Code"
-                    className={`h-40 w-40 ${selectedTicket.paymentStatus === "pending" ? 'opacity-20 grayscale blur-sm' : ''}`}
-                    referrerPolicy="no-referrer"
-                  />
+                  {selectedTicket.paymentStatus !== "pending" && !selectedTicket.qrCodeData ? (
+                    <div className="flex flex-col items-center justify-center p-3 text-center" id="qr-locked-view">
+                      <Lock className="h-10 w-10 text-gray-400" />
+                      <span className="text-xs font-extrabold text-gray-600 mt-2">QR Code verrouillé</span>
+                      <span className="text-[10px] text-gray-400 mt-1 leading-tight">
+                        Disponible à partir du{" "}
+                        {selectedTicket.qrUnlocksAt
+                          ? new Date(selectedTicket.qrUnlocksAt).toLocaleString("fr-FR", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })
+                          : "quelques heures avant l'événement"}
+                      </span>
+                    </div>
+                  ) : (
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(selectedTicket.qrCodeData || "")}`}
+                      alt="Billet QR Code"
+                      className={`h-40 w-40 ${selectedTicket.paymentStatus === "pending" ? 'opacity-20 grayscale blur-sm' : ''}`}
+                      referrerPolicy="no-referrer"
+                    />
+                  )}
                   {selectedTicket.scanned && (
                     <div className="absolute inset-0 bg-white/90 flex flex-col items-center justify-center p-3 text-center">
                       <AlertTriangle className="h-10 w-10 text-red-500 animate-bounce" />
@@ -474,7 +487,11 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
                 </div>
                 <div className="text-center">
                   <p className="text-[10px] font-black tracking-widest text-gray-400 uppercase font-mono">ID: {selectedTicket.id}</p>
-                  <p className="text-[9px] text-gray-400 mt-1">Présentez ce QR Code à l'entrée de l'événement.</p>
+                  <p className="text-[9px] text-gray-400 mt-1">
+                    {selectedTicket.qrCodeData
+                      ? "Présentez ce QR Code à l'entrée de l'événement."
+                      : "Revenez sur cette page le jour J pour afficher votre QR Code."}
+                  </p>
                 </div>
               </div>
 

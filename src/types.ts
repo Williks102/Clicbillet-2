@@ -72,7 +72,8 @@ export interface Ticket {
   buyerEmail: string;
   tier: string; // Nom du type de billet en minuscules (ex: "standard", "vip", ou tout nom personnalisé défini par l'organisateur)
   pricePaid: number; // in XOF
-  qrCodeData: string; // Contains JSON state or verification hash
+  qrCodeData: string | null; // null si verrouillé (cf. qrUnlocksAt) : anti-fraude, visible seulement à l'approche de l'événement
+  qrUnlocksAt?: string | null; // ISO ; présent seulement quand qrCodeData est verrouillé
   scanned: boolean;
   scannedAt: string | null;
   transactionRef: string;
