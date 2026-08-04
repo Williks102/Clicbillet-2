@@ -4,7 +4,7 @@ import { isSupabaseEnabled, supabase, isProduction } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { requireAuth, requireRole, optionalAuth } from "../lib/auth.js";
 import { validateCheckout, validateVerifyTicket } from "../lib/validators.js";
-import { runInBackground, isEventPast } from "../lib/utils.js";
+import { runInBackground, isEventPast, isQrUnlocked, getQrUnlockTime } from "../lib/utils.js";
 import { sendOrganizerSaleEmail, sendTicketEmail, sendReservationExpiredEmail } from "../lib/email.js";
 import { verifyPaystackSignature } from "../lib/security.js";
 import { checkoutRateLimiter } from "../lib/rateLimiters.js";
@@ -60,26 +60,30 @@ router.get("/api/my-tickets", requireAuth, async (req: express.Request, res: exp
 
       if (error) throw error;
 
-      const mappedTickets = (data || []).map((t: any) => ({
-        id: t.id,
-        eventId: t.event_id,
-        eventTitle: t.event_title,
-        eventDate: t.event_date,
-        eventTime: t.event_time,
-        eventVenue: t.event_venue,
-        buyerId: t.buyer_id,
-        buyerName: t.buyer_name,
-        buyerEmail: t.buyer_email,
-        tier: t.tier,
-        pricePaid: Number(t.price_paid),
-        qrCodeData: t.qr_code_data,
-        scanned: t.scanned,
-        scannedAt: t.scanned_at,
-        transactionRef: t.transaction_ref,
-        purchaseDate: t.purchase_date,
-        quantity: t.quantity,
-        paymentStatus: t.transaction_ref?.startsWith("PENDING-") ? "pending" : "paid"
-      }));
+      const mappedTickets = (data || []).map((t: any) => {
+        const unlocked = isQrUnlocked({ date: t.event_date, time: t.event_time });
+        return {
+          id: t.id,
+          eventId: t.event_id,
+          eventTitle: t.event_title,
+          eventDate: t.event_date,
+          eventTime: t.event_time,
+          eventVenue: t.event_venue,
+          buyerId: t.buyer_id,
+          buyerName: t.buyer_name,
+          buyerEmail: t.buyer_email,
+          tier: t.tier,
+          pricePaid: Number(t.price_paid),
+          qrCodeData: unlocked ? t.qr_code_data : null,
+          qrUnlocksAt: unlocked ? null : getQrUnlockTime({ date: t.event_date, time: t.event_time }).toISOString(),
+          scanned: t.scanned,
+          scannedAt: t.scanned_at,
+          transactionRef: t.transaction_ref,
+          purchaseDate: t.purchase_date,
+          quantity: t.quantity,
+          paymentStatus: t.transaction_ref?.startsWith("PENDING-") ? "pending" : "paid"
+        };
+      });
       return res.json(mappedTickets);
     } catch (err: any) {
       console.error("[Supabase Error] Fetching my tickets, falling back to local file DB:", err.message);
@@ -87,10 +91,15 @@ router.get("/api/my-tickets", requireAuth, async (req: express.Request, res: exp
   }
 
   const db = getDB();
-  const filtered = db.tickets.filter((t: any) => t.buyerId === buyerId).map((t: any) => ({
-    ...t,
-    paymentStatus: t.transactionRef?.startsWith("PENDING-") ? "pending" : "paid"
-  }));
+  const filtered = db.tickets.filter((t: any) => t.buyerId === buyerId).map((t: any) => {
+    const unlocked = isQrUnlocked({ date: t.eventDate, time: t.eventTime });
+    return {
+      ...t,
+      qrCodeData: unlocked ? t.qrCodeData : null,
+      qrUnlocksAt: unlocked ? null : getQrUnlockTime({ date: t.eventDate, time: t.eventTime }).toISOString(),
+      paymentStatus: t.transactionRef?.startsWith("PENDING-") ? "pending" : "paid"
+    };
+  });
   res.json(filtered);
 });
 

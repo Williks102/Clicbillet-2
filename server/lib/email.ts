@@ -1,4 +1,5 @@
-import { RESEND_API_KEY, RESEND_FROM_EMAIL, ADMIN_NOTIFICATION_EMAIL } from "./config.js";
+import { RESEND_API_KEY, RESEND_FROM_EMAIL, ADMIN_NOTIFICATION_EMAIL, APP_ORIGIN } from "./config.js";
+import { isQrUnlocked, getQrUnlockTime } from "./utils.js";
 
 // ==========================================
 // SERVICE D'ENVOI D'EMAILS (Resend)
@@ -173,6 +174,13 @@ export async function sendPasswordResetEmail(user: { email: string; name: string
 // Une commande peut regrouper plusieurs billets (un QR code par billet, cf. /api/checkout) :
 // on envoie UN SEUL email par commande listant tous les QR codes, plutôt qu'un email par billet.
 export function buildTicketConfirmationHtml(order: { buyerName: string; eventTitle: string; eventDate: string; eventTime: string; eventVenue: string; tickets: { tier: string; qrCodeData: string }[] }): string {
+  // Anti-fraude : le QR code réel n'est envoyé par email que s'il est déjà déverrouillé (achat
+  // fait à moins de 4h de l'événement). Sinon, on renvoie l'acheteur vers son espace client, où
+  // le QR code n'apparaîtra qu'à l'approche de l'événement (cf. GET /api/my-tickets).
+  const unlocked = isQrUnlocked({ date: order.eventDate, time: order.eventTime });
+  const unlockTimeLabel = unlocked ? null : getQrUnlockTime({ date: order.eventDate, time: order.eventTime })
+    .toLocaleString("fr-FR", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+
   const qrBlocks = order.tickets.map((t, i) => {
     const isVip = t.tier === "vip";
     // t.tier est le nom du type de billet en minuscules (organisateur libre de le nommer,
@@ -181,17 +189,31 @@ export function buildTicketConfirmationHtml(order: { buyerName: string; eventTit
     const tierLabel = isVip ? "VIP" : (t.tier || "standard").replace(/\b\w/g, (c) => c.toUpperCase());
     const pillBg = isVip ? "#fef3c7" : "#dbeafe";
     const pillColor = isVip ? "#92400e" : "#1e40af";
+    const ticketLabel = `
+      <p style="margin:0 0 14px; font-size:12.5px;">
+        <span style="font-weight:bold; color:#6b7280;">Billet ${i + 1}/${order.tickets.length}</span>
+        &nbsp;&nbsp;
+        <span style="display:inline-block; font-size:10px; font-weight:bold; letter-spacing:0.04em; text-transform:uppercase; padding:3px 9px; border-radius:999px; background-color:${pillBg}; color:${pillColor};">${tierLabel}</span>
+      </p>
+    `;
+    const body = unlocked
+      ? `
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(t.qrCodeData)}" alt="QR Code billet ${i + 1}" width="220" height="220" style="border-radius:8px;" />
+        <p style="margin:12px 0 0; font-size:11px; color:#9ca3af;">Valable une seule fois — présentez-le à l'entrée</p>
+      `
+      : `
+        <div style="width:220px; height:220px; margin:0 auto; border-radius:8px; background-color:#f3f4f6; display:flex; align-items:center; justify-content:center;">
+          <span style="font-size:34px;">&#128274;</span>
+        </div>
+        <p style="margin:12px 0 0; font-size:11.5px; color:#6b7280; font-weight:bold;">QR code disponible à partir du ${unlockTimeLabel}</p>
+        <p style="margin:4px 0 0; font-size:11px; color:#9ca3af;">Consultez votre espace client "Mes Billets" ce jour-là pour l'afficher</p>
+      `;
     return `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb; border-radius:12px; margin-bottom:16px;">
         <tr>
           <td style="padding:18px; text-align:center;">
-            <p style="margin:0 0 14px; font-size:12.5px;">
-              <span style="font-weight:bold; color:#6b7280;">Billet ${i + 1}/${order.tickets.length}</span>
-              &nbsp;&nbsp;
-              <span style="display:inline-block; font-size:10px; font-weight:bold; letter-spacing:0.04em; text-transform:uppercase; padding:3px 9px; border-radius:999px; background-color:${pillBg}; color:${pillColor};">${tierLabel}</span>
-            </p>
-            <img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(t.qrCodeData)}" alt="QR Code billet ${i + 1}" width="220" height="220" style="border-radius:8px;" />
-            <p style="margin:12px 0 0; font-size:11px; color:#9ca3af;">Valable une seule fois — présentez-le à l'entrée</p>
+            ${ticketLabel}
+            ${body}
           </td>
         </tr>
       </table>
@@ -205,12 +227,23 @@ export function buildTicketConfirmationHtml(order: { buyerName: string; eventTit
     { label: "Billets", value: String(order.tickets.length) }
   ]);
 
+  const intro = unlocked
+    ? `<p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">Présentez le QR code correspondant à chaque billet à l'entrée (1 QR code = 1 personne) :</p>`
+    : `<p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">Pour éviter toute fraude par capture d'écran, votre QR code ne sera visible que quelques heures avant l'événement, sur votre espace client :</p>`;
+
+  const clientSpaceLink = unlocked ? "" : `
+    <p style="text-align:center; margin:8px 0 20px;">
+      <a href="${APP_ORIGIN}" style="display:inline-block; background-color:#ea580c; color:#ffffff; font-size:13px; font-weight:bold; padding:10px 22px; border-radius:8px; text-decoration:none;">Accéder à mon espace client</a>
+    </p>
+  `;
+
   return emailLayout(order.tickets.length > 1 ? "Vos billets sont confirmés !" : "Votre billet est confirmé !", `
     <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonjour ${order.buyerName},</p>
     <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">Merci pour votre achat. Voici les détails de votre commande :</p>
     ${details}
-    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">Présentez le QR code correspondant à chaque billet à l'entrée (1 QR code = 1 personne) :</p>
+    ${intro}
     ${qrBlocks}
+    ${clientSpaceLink}
   `);
 }
 
