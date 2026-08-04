@@ -13,6 +13,8 @@ import ToastStack, { ToastItem } from "./components/ToastStack";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
 import TermsPage from "./components/legal/TermsPage";
 import PrivacyPage from "./components/legal/PrivacyPage";
+import PricingPage from "./components/PricingPage";
+import ContactPage from "./components/ContactPage";
 import ProfilePage from "./components/ProfilePage";
 import OrganizerProfilePage from "./components/OrganizerProfilePage";
 import BottomTabBar from "./components/native/BottomTabBar";
@@ -435,6 +437,16 @@ export default function App() {
 
             {activeTab === "privacy" && <PrivacyPage onBack={() => setActiveTab("home")} />}
 
+            {activeTab === "pricing" && (
+              <PricingPage
+                onBack={() => setActiveTab("home")}
+                onCreateAccount={() => setAuthModalVisible(true)}
+                onContact={() => setActiveTab("contact")}
+              />
+            )}
+
+            {activeTab === "contact" && <ContactPage onBack={() => setActiveTab("pricing")} />}
+
             {activeTab === "profile" && user && (
               <ProfilePage user={user} onLogout={handleLogout} setActiveTab={setActiveTab} />
             )}
@@ -487,7 +499,15 @@ export default function App() {
         <footer className="mt-auto border-t border-gray-100 bg-white py-6 text-center text-xs text-gray-400 font-semibold uppercase tracking-wider print:hidden">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
             <p>© {new Date().getFullYear()} clicbillet. Tous droits réservés.</p>
-            <div className="flex space-x-4">
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+              <button onClick={() => setActiveTab("pricing")} className="hover:text-gray-600">
+                Tarifs
+              </button>
+              <span>•</span>
+              <button onClick={() => setActiveTab("contact")} className="hover:text-gray-600">
+                Contact
+              </button>
+              <span>•</span>
               <button onClick={() => setActiveTab("terms")} className="hover:text-gray-600">
                 Conditions Générales de Vente
               </button>

@@ -3,12 +3,22 @@ import express from "express";
 import { isSupabaseEnabled, supabase, supabaseAdmin } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { requireAuth, requireRole } from "../lib/auth.js";
-import { validateEvent } from "../lib/validators.js";
+import { validateEvent, validateContactMessage } from "../lib/validators.js";
 import { runInBackground } from "../lib/utils.js";
-import { sendOrganizerEventStatusEmail } from "../lib/email.js";
+import { sendOrganizerEventStatusEmail, sendAdminContactMessageEmail } from "../lib/email.js";
 import { getDefaultCommissionRate } from "../lib/commission.js";
+import { contactRateLimiter } from "../lib/rateLimiters.js";
 
 const router = express.Router();
+
+// Formulaire de contact public (page /contact) : best-effort, comme tous les autres emails
+// de ce projet — un souci d'envoi ne doit jamais empêcher le visiteur de recevoir une
+// confirmation que son message a bien été reçu côté serveur.
+router.post("/api/contact", contactRateLimiter, validateContactMessage, async (req: express.Request, res: express.Response) => {
+  const { name, email, subject, message } = req.body;
+  runInBackground(sendAdminContactMessageEmail({ name, email, subject, message }));
+  res.json({ success: true });
+});
 
 // API Endpoints: Event Fetching
 router.get("/api/events", async (req: express.Request, res: express.Response) => {
