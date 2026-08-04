@@ -574,17 +574,22 @@ router.get("/api/auth/me", requireAuth, async (req: express.Request, res: expres
 
   if (isSupabaseEnabled && supabase) {
     try {
-      const { data: profile } = await supabase
+      // L'erreur de requête était auparavant déstructurée hors de l'objet (seul `data` était
+      // lu) : un échec Supabase passager donnait donc profile = null en silence, et la route
+      // repartait sur le repli db.json — inopérant en serverless. L'alerte remontée décrivait
+      // alors un problème de fichier en lecture seule, pas la vraie panne. On la journalise ici.
+      const { data: profile, error } = await supabase
         .from("users")
         .select("id, email, name, role, public_code")
         .eq("id", authUser.id)
         .maybeSingle();
+      if (error) throw error;
       if (profile) {
         const { public_code, ...rest } = profile;
         return res.json({ ...rest, publicCode: await ensureUserPublicCode(profile.id, public_code) });
       }
     } catch (err: any) {
-      console.warn("[Supabase Warning] /api/auth/me :", err.message);
+      console.error("[Supabase Error] /api/auth/me :", err.message);
     }
   }
 
