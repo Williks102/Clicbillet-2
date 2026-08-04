@@ -101,6 +101,21 @@ export default function Navbar({ user, onLogout, activeTab, setActiveTab, onOpen
                       <LayoutDashboard className="h-4 w-4" />
                       <span>Tableau de bord</span>
                     </button>
+                    {/* Un organisateur achète aussi des billets — et une promotion depuis un
+                        compte acheteur conserve tout l'historique d'achats : cet onglet ne doit
+                        pas disparaître au passage en organisateur. */}
+                    <button
+                      id="tab-organizer-tickets-btn"
+                      onClick={() => setActiveTab("client-dashboard")}
+                      className={`flex items-center space-x-1.5 rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
+                        activeTab === "client-dashboard"
+                          ? "bg-orange-50 text-orange-600"
+                          : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                      }`}
+                    >
+                      <Ticket className="h-4 w-4" />
+                      <span>Mes Billets</span>
+                    </button>
                     <button
                       id="tab-scanner-btn"
                       onClick={() => setActiveTab("scanner")}

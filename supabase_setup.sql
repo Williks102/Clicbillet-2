@@ -496,3 +496,81 @@ CREATE INDEX IF NOT EXISTS idx_ticket_transfers_to_email ON public.ticket_transf
 ALTER TABLE public.ticket_transfers ENABLE ROW LEVEL SECURITY;
 -- Pas de policy anon/authenticated : accès exclusif via la clé service_role (server.ts),
 -- comme les autres tables sensibles (cf. section 8).
+
+-- ==========================================
+-- 18. CODE PUBLIC UTILISATEUR (référence support)
+-- ==========================================
+-- Identifiant court et dictable au téléphone (ex: "CB-7K4P2M"), attribué à chaque compte et
+-- affiché dans son espace, pour que le support retrouve une personne sans lui faire épeler son
+-- UUID Supabase ni son adresse e-mail. Généré par l'application (server/lib/publicCode.ts).
+--
+-- CE CODE N'EST PAS UN SECRET : il ne donne aucun droit et n'authentifie rien. Aucune route ne
+-- doit accorder d'accès sur sa seule présentation — il ne sert qu'à identifier un compte dans
+-- une conversation de support, jamais à l'autoriser.
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS public_code TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS users_public_code_unique
+  ON public.users (UPPER(public_code))
+  WHERE public_code IS NOT NULL;
+
+-- Attribution aux comptes créés avant l'introduction de la colonne. L'application sait déjà le
+-- faire à la volée à la connexion (ensureUserPublicCode), mais un compte qui ne s'est pas
+-- reconnecté depuis la migration resterait sans code visible dans le back-office : ce bloc le
+-- comble d'un coup. Idempotent — ne touche que les lignes dont public_code est NULL.
+-- Même alphabet que server/lib/publicCode.ts (ni 0/O ni 1/I/L, confondus à l'oral).
+DO $$
+DECLARE
+  target RECORD;
+  candidate TEXT;
+  alphabet TEXT := '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+  i INT;
+BEGIN
+  FOR target IN SELECT id FROM public.users WHERE public_code IS NULL LOOP
+    LOOP
+      candidate := 'CB-';
+      FOR i IN 1..6 LOOP
+        candidate := candidate || substr(alphabet, floor(random() * length(alphabet))::int + 1, 1);
+      END LOOP;
+      EXIT WHEN NOT EXISTS (SELECT 1 FROM public.users WHERE UPPER(public_code) = candidate);
+    END LOOP;
+    UPDATE public.users SET public_code = candidate WHERE id = target.id;
+  END LOOP;
+END $$;
+
+-- ==========================================
+-- 19. DEMANDES DE PASSAGE ACHETEUR -> ORGANISATEUR
+-- ==========================================
+-- Le rôle est choisi à l'inscription et n'était jusqu'ici modifiable par personne (ni par
+-- l'utilisateur, ni par l'admin) : un acheteur voulant organiser devait recréer un compte avec
+-- une autre adresse e-mail, en perdant l'historique de ses achats. Cette table porte la demande
+-- et sa décision ; l'approbation (PATCH /api/admin/organizer-requests/:id) est le SEUL chemin
+-- qui fait passer users.role de 'client' à 'organizer'.
+--
+-- Un compte organisateur encaisse de l'argent (payouts, commissions) : la bascule reste donc
+-- volontairement soumise à validation humaine, jamais en libre-service.
+CREATE TABLE IF NOT EXISTS public.organizer_requests (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    user_name TEXT,
+    user_email TEXT,
+    organization_name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    motivation TEXT,
+    status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'approved', 'rejected'
+    review_note TEXT,
+    reviewed_by TEXT,
+    reviewed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_organizer_requests_user_id ON public.organizer_requests (user_id);
+CREATE INDEX IF NOT EXISTS idx_organizer_requests_status ON public.organizer_requests (status);
+
+-- Une seule demande en attente à la fois par compte : sans cet index, un utilisateur pourrait
+-- inonder la file de modération en soumettant le formulaire en boucle.
+CREATE UNIQUE INDEX IF NOT EXISTS organizer_requests_one_pending_per_user
+  ON public.organizer_requests (user_id)
+  WHERE status = 'pending';
+
+ALTER TABLE public.organizer_requests ENABLE ROW LEVEL SECURITY;
+-- Pas de policy anon/authenticated : accès exclusif via la clé service_role (server.ts).

@@ -117,8 +117,36 @@ export const INITIAL_DATABASE = {
   payouts: [],
   transactions: [],
   passwordResets: [],
-  transfers: []
+  transfers: [],
+  organizerRequests: []
 };
+
+// Un système de fichiers en lecture seule est le cas NORMAL en exécution serverless (sur
+// Vercel, /var/task est monté en lecture seule) : le repli db.json n'y a de toute façon aucun
+// sens, puisque rien de ce qui y serait écrit ne survivrait à l'invocation suivante.
+//
+// On le signale donc une seule fois en warn, au lieu d'un console.error à chaque requête :
+// console.error est remonté à Sentry comme événement applicatif (captureConsoleIntegration,
+// cf. server/lib/observability.ts), si bien qu'une simple indisponibilité passagère de
+// Supabase — qui fait retomber une route sur ce repli — déclenchait une alerte "EROFS:
+// read-only file system" trompeuse, masquant la vraie cause (l'échec Supabase) sous une
+// erreur de fichier non actionnable.
+const READ_ONLY_FS_CODES = new Set(["EROFS", "EACCES", "EPERM"]);
+let readOnlyFsWarned = false;
+
+function isReadOnlyFsError(err: any): boolean {
+  return READ_ONLY_FS_CODES.has(err?.code);
+}
+
+function warnReadOnlyFsOnce(operation: string, err: any): void {
+  if (readOnlyFsWarned) return;
+  readOnlyFsWarned = true;
+  console.warn(
+    `[DB] Système de fichiers en lecture seule (${err.code}) lors de ${operation} : le repli db.json est inopérant ` +
+    `dans cet environnement. Les données servies proviennent donc de Supabase uniquement — si une route retombe ici, ` +
+    `c'est que l'appel Supabase correspondant a échoué.`
+  );
+}
 
 // Initialize DB file helper
 export function getDB() {
@@ -153,13 +181,21 @@ export function getDB() {
     if (migrated) {
       try {
         fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf8");
-      } catch (e) {
-        console.warn("Failed to persist migrated hashed passwords:", e);
+      } catch (e: any) {
+        if (isReadOnlyFsError(e)) {
+          warnReadOnlyFsOnce("la persistance des mots de passe migrés", e);
+        } else {
+          console.warn("Failed to persist migrated hashed passwords:", e);
+        }
       }
     }
     return db;
-  } catch (error) {
-    console.error("Error reading db.json, returning initial value", error);
+  } catch (error: any) {
+    if (isReadOnlyFsError(error)) {
+      warnReadOnlyFsOnce("l'initialisation de db.json", error);
+    } else {
+      console.error("Error reading db.json, returning initial value", error);
+    }
     return INITIAL_DATABASE;
   }
 }
@@ -167,8 +203,12 @@ export function getDB() {
 export function saveDB(data: typeof INITIAL_DATABASE) {
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf8");
-  } catch (err) {
-    console.error("Error saving to db.json", err);
+  } catch (err: any) {
+    if (isReadOnlyFsError(err)) {
+      warnReadOnlyFsOnce("l'écriture de db.json", err);
+    } else {
+      console.error("Error saving to db.json", err);
+    }
   }
 }
 

@@ -12,6 +12,7 @@ import {
   setSessionCookies, clearSessionCookies, SESSION_ACCESS_COOKIE, SESSION_REFRESH_COOKIE,
   setMfaPendingCookies, clearMfaPendingCookies, MFA_PENDING_ACCESS_COOKIE, MFA_PENDING_REFRESH_COOKIE
 } from "../lib/auth.js";
+import { ensureUserPublicCode } from "../lib/publicCode.js";
 
 const router = express.Router();
 
@@ -121,6 +122,11 @@ router.post("/api/auth/register", registerRateLimiter, validateRegister, async (
         throw profileError;
       }
 
+      // Code public de support : attribué dans un second temps plutôt que dans l'INSERT
+      // ci-dessus, pour réutiliser la boucle de réessai sur collision d'unicité (cf.
+      // server/lib/publicCode.ts) au lieu de la dupliquer ici.
+      const publicCode = await ensureUserPublicCode(data.id);
+
       // Tant que l'email n'est pas confirmé, signInWithPassword échoue (comportement Supabase
       // Auth par défaut) — on ne tente donc plus d'ouvrir une session immédiatement après
       // l'inscription. Le frontend doit inviter l'utilisateur à confirmer son adresse avant de
@@ -138,7 +144,8 @@ router.post("/api/auth/register", registerRateLimiter, validateRegister, async (
         id: data.id,
         email: data.email,
         name: data.name,
-        role: data.role
+        role: data.role,
+        publicCode
       });
     } catch (err: any) {
       console.error("[Supabase Error] User registration, falling back to local file DB:", err.message);
@@ -162,6 +169,7 @@ router.post("/api/auth/register", registerRateLimiter, validateRegister, async (
 
   db.users.push(newUser);
   saveDB(db);
+  const localPublicCode = await ensureUserPublicCode(newUser.id);
   await claimGuestTickets(newUser.id, newUser.email);
 
   // Webhook DB Supabase indisponible sur ce repli local : on envoie directement
@@ -175,7 +183,7 @@ router.post("/api/auth/register", registerRateLimiter, validateRegister, async (
   // jamais renvoyé dans le corps JSON (cf. server/lib/auth.ts).
   const { password: _, ...userWithoutPassword } = newUser;
   setSessionCookies(res, { token: `local-${newUser.id}` });
-  res.status(201).json(userWithoutPassword);
+  res.status(201).json({ ...userWithoutPassword, publicCode: localPublicCode });
 });
 
 router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: express.Request, res: express.Response) => {
@@ -290,11 +298,16 @@ router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: expr
       setSessionCookies(res, { token: authData?.session?.access_token, refreshToken: authData?.session?.refresh_token });
 
       if (profile) {
+        // Comptes créés avant l'introduction du code public : on le complète à la volée plutôt
+        // que de dépendre d'un script de migration. Aucun coût quand le code existe déjà
+        // (ensureUserPublicCode rend la main immédiatement sur une valeur non nulle).
+        const publicCode = await ensureUserPublicCode(profile.id, profile.public_code);
         return res.json({
           id: profile.id,
           email: profile.email,
           name: profile.name,
-          role: profile.role
+          role: profile.role,
+          publicCode
         });
       }
 
@@ -336,10 +349,11 @@ router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: expr
   }
 
   await claimGuestTickets(user.id, user.email);
+  const publicCode = await ensureUserPublicCode(user.id, user.publicCode);
 
   const { password: _, ...userWithoutPassword } = user;
   setSessionCookies(res, { token: `local-${user.id}` });
-  res.json(userWithoutPassword);
+  res.json({ ...userWithoutPassword, publicCode });
 });
 
 // Demande de réinitialisation de mot de passe : génère un jeton à usage unique (valable 1h)
@@ -560,16 +574,22 @@ router.get("/api/auth/me", requireAuth, async (req: express.Request, res: expres
 
   if (isSupabaseEnabled && supabase) {
     try {
-      const { data: profile } = await supabase
+      // L'erreur de requête était auparavant déstructurée hors de l'objet (seul `data` était
+      // lu) : un échec Supabase passager donnait donc profile = null en silence, et la route
+      // repartait sur le repli db.json — inopérant en serverless. L'alerte remontée décrivait
+      // alors un problème de fichier en lecture seule, pas la vraie panne. On la journalise ici.
+      const { data: profile, error } = await supabase
         .from("users")
-        .select("id, email, name, role")
+        .select("id, email, name, role, public_code")
         .eq("id", authUser.id)
         .maybeSingle();
+      if (error) throw error;
       if (profile) {
-        return res.json(profile);
+        const { public_code, ...rest } = profile;
+        return res.json({ ...rest, publicCode: await ensureUserPublicCode(profile.id, public_code) });
       }
     } catch (err: any) {
-      console.warn("[Supabase Warning] /api/auth/me :", err.message);
+      console.error("[Supabase Error] /api/auth/me :", err.message);
     }
   }
 
@@ -577,7 +597,7 @@ router.get("/api/auth/me", requireAuth, async (req: express.Request, res: expres
   const dbUser = db.users.find((u: any) => u.id === authUser.id) as any;
   if (dbUser) {
     const { password: _, ...rest } = dbUser;
-    return res.json(rest);
+    return res.json({ ...rest, publicCode: await ensureUserPublicCode(dbUser.id, dbUser.publicCode) });
   }
 
   res.json({ id: authUser.id, email: authUser.email, role: authUser.role, name: authUser.email.split("@")[0] });
@@ -801,11 +821,15 @@ router.post("/api/auth/mfa/login-verify", mfaVerifyRateLimiter, async (req: expr
     }
     const { data: profile } = await supabase!
       .from("users")
-      .select("id, email, name, role")
+      .select("id, email, name, role, public_code")
       .eq("id", userId)
       .maybeSingle();
 
-    res.json(profile || { id: userId, email: sessionData.session.user.email, name: sessionData.session.user.email?.split("@")[0] || "Abonné ClicBillet", role: "client" });
+    if (profile) {
+      const { public_code, ...rest } = profile;
+      return res.json({ ...rest, publicCode: await ensureUserPublicCode(profile.id, public_code) });
+    }
+    res.json({ id: userId, email: sessionData.session.user.email, name: sessionData.session.user.email?.split("@")[0] || "Abonné ClicBillet", role: "client" });
   } catch (err: any) {
     console.error("[Supabase Error] MFA login verify:", err.message);
     res.status(500).json({ error: "Impossible de finaliser la connexion pour le moment." });

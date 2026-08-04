@@ -6,6 +6,7 @@ import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
 import { isEventPast } from "../lib/eventStatus";
 import ResponsiveSheet from "./ResponsiveSheet";
+import AccountCodeBadge from "./AccountCodeBadge";
 
 interface ClientDashboardProps {
   user: User;
@@ -306,6 +307,7 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
           <p className="mt-1 text-xs text-gray-500 font-medium">
             Retrouvez tous vos tickets d'événements et présentez votre QR Code aux points de contrôle d'accès.
           </p>
+          <AccountCodeBadge code={user.publicCode} className="mt-4" />
         </div>
         <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-600 text-white shadow-md shadow-orange-100 shrink-0">
           <TicketIcon className="h-6 w-6 rotate-12" />

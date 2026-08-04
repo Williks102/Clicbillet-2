@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { KeyRound, LogOut, FileText, ShieldCheck, ChevronRight, Ticket, LayoutDashboard, CheckCircle2, ShieldAlert, Smartphone } from "lucide-react";
 import { User } from "../types";
 import { authFetch } from "../lib/apiClient";
+import AccountCodeBadge from "./AccountCodeBadge";
+import BecomeOrganizerCard from "./BecomeOrganizerCard";
 
 interface ProfilePageProps {
   user: User;
@@ -139,10 +141,19 @@ export default function ProfilePage({ user, onLogout, setActiveTab }: ProfilePag
         }`}>
           {roleLabel[user.role]}
         </span>
+        <AccountCodeBadge code={user.publicCode} className="mt-3" />
+        {user.publicCode && (
+          <p className="mt-2 max-w-xs text-[11px] leading-relaxed text-gray-400">
+            Communiquez ce code au support ClicBillet pour être identifié immédiatement.
+          </p>
+        )}
       </div>
 
       <div className="mt-6 space-y-3">
-        {user.role === "client" && (
+        {/* "Mes billets" reste accessible aux organisateurs : un organisateur peut acheter des
+            billets comme n'importe qui, et sa promotion depuis un compte acheteur (cf. demande
+            ci-dessous) conserve tout son historique d'achats. */}
+        {user.role !== "admin" && (
           <button
             onClick={() => setActiveTab("client-dashboard")}
             className="flex w-full items-center justify-between rounded-2xl border border-gray-100 bg-white px-4 py-3.5 text-sm font-bold text-gray-800 shadow-xs transition-colors hover:bg-gray-50"
@@ -161,6 +172,8 @@ export default function ProfilePage({ user, onLogout, setActiveTab }: ProfilePag
             <ChevronRight className="h-4 w-4 text-gray-300" />
           </button>
         )}
+
+        {user.role === "client" && <BecomeOrganizerCard />}
 
         <div className="rounded-2xl border border-gray-100 bg-white shadow-xs">
           <button

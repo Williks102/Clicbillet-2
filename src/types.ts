@@ -7,6 +7,27 @@ export interface User {
   email: string;
   name: string;
   role: UserRole;
+  // Référence courte et dictable du compte (ex: "CB-7K4P2M"), affichée dans l'espace de
+  // l'utilisateur pour faciliter sa prise en charge par le support. Purement identifiante :
+  // elle n'ouvre aucun droit et n'authentifie rien (cf. server/lib/publicCode.ts).
+  publicCode?: string | null;
+}
+
+// Demande de passage acheteur -> organisateur (cf. server/routes/organizerRequests.ts).
+// Seule l'approbation par un administrateur fait basculer le rôle du compte.
+export interface OrganizerRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userPublicCode?: string | null;
+  organizationName: string;
+  phone: string;
+  motivation: string | null;
+  status: "pending" | "approved" | "rejected";
+  reviewNote: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
 }
 
 export interface Event {
