@@ -53,7 +53,11 @@ router.post("/api/auth/register", registerRateLimiter, validateRegister, async (
         email: normalizedEmail,
         password: password,
         options: {
-          data: { name, role }
+          data: { name, role },
+          // Sans ceci, le lien de confirmation dans l'email pointe vers le "Site URL" configuré
+          // dans le tableau de bord Supabase (Authentication > URL Configuration) — qui doit
+          // aussi lister cette URL dans "Redirect URLs" pour que Supabase l'accepte.
+          emailRedirectTo: APP_ORIGIN
         }
       });
 
