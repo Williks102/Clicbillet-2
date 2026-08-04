@@ -255,6 +255,87 @@ export async function sendTicketEmail(order: { buyerEmail: string; buyerName: st
   });
 }
 
+// --- Destinataire d'un transfert de billet (cf. POST /api/tickets/:id/transfer) ---
+// Même règle anti-fraude que la confirmation d'achat : le QR ne s'affiche que si l'événement
+// est déjà à moins de 4h, sinon message + lien vers l'espace client.
+export function buildTicketTransferredHtml(transfer: { recipientName: string; senderName: string; eventTitle: string; eventDate: string; eventTime: string; eventVenue: string; tier: string; qrCodeData: string }): string {
+  const unlocked = isQrUnlocked({ date: transfer.eventDate, time: transfer.eventTime });
+  const unlockTimeLabel = unlocked ? null : getQrUnlockTime({ date: transfer.eventDate, time: transfer.eventTime })
+    .toLocaleString("fr-FR", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+
+  const tierLabel = (transfer.tier || "standard").replace(/\b\w/g, (c) => c.toUpperCase());
+  const details = infoCard([
+    { label: "Événement", value: transfer.eventTitle },
+    { label: "Date", value: `${formatEventDateFr(transfer.eventDate)} à ${transfer.eventTime}` },
+    { label: "Lieu", value: transfer.eventVenue },
+    { label: "Catégorie", value: tierLabel }
+  ]);
+
+  const qrSection = unlocked
+    ? `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb; border-radius:12px; margin-bottom:16px;">
+        <tr>
+          <td style="padding:18px; text-align:center;">
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(transfer.qrCodeData)}" alt="QR Code billet" width="220" height="220" style="border-radius:8px;" />
+            <p style="margin:12px 0 0; font-size:11px; color:#9ca3af;">Valable une seule fois — présentez-le à l'entrée</p>
+          </td>
+        </tr>
+      </table>
+    `
+    : `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb; border-radius:12px; margin-bottom:16px;">
+        <tr>
+          <td style="padding:18px; text-align:center;">
+            <div style="width:220px; height:220px; margin:0 auto; border-radius:8px; background-color:#f3f4f6; display:flex; align-items:center; justify-content:center;">
+              <span style="font-size:34px;">&#128274;</span>
+            </div>
+            <p style="margin:12px 0 0; font-size:11.5px; color:#6b7280; font-weight:bold;">QR code disponible à partir du ${unlockTimeLabel}</p>
+            <p style="margin:4px 0 0; font-size:11px; color:#9ca3af;">Consultez votre espace client "Mes Billets" ce jour-là pour l'afficher</p>
+          </td>
+        </tr>
+      </table>
+    `;
+
+  const clientSpaceLink = unlocked ? "" : `
+    <p style="text-align:center; margin:8px 0 20px;">
+      <a href="${APP_ORIGIN}" style="display:inline-block; background-color:#ea580c; color:#ffffff; font-size:13px; font-weight:bold; padding:10px 22px; border-radius:8px; text-decoration:none;">Accéder à mon espace client</a>
+    </p>
+  `;
+
+  return emailLayout("Un billet vient de vous être transféré !", `
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonjour ${transfer.recipientName},</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;"><strong>${transfer.senderName}</strong> vous a transféré son billet pour l'événement suivant. Le billet qu'il avait reçu au départ est désormais invalide — seul celui-ci vous donne accès à l'entrée.</p>
+    ${details}
+    ${qrSection}
+    ${clientSpaceLink}
+  `);
+}
+
+export async function sendTicketTransferredEmail(transfer: { recipientEmail: string; recipientName: string; senderName: string; eventTitle: string; eventDate: string; eventTime: string; eventVenue: string; tier: string; qrCodeData: string }): Promise<void> {
+  await sendEmail({
+    to: transfer.recipientEmail,
+    subject: `${transfer.senderName} vous a transféré un billet pour ${transfer.eventTitle}`,
+    html: buildTicketTransferredHtml(transfer)
+  });
+}
+
+// --- Expéditeur d'un transfert de billet : simple accusé de réception ---
+export function buildTicketTransferConfirmationHtml(transfer: { senderName: string; recipientEmail: string; eventTitle: string }): string {
+  return emailLayout("Votre billet a été transféré", `
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonjour ${transfer.senderName},</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Votre billet pour <strong>${transfer.eventTitle}</strong> a bien été transféré à <strong>${transfer.recipientEmail}</strong>.</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0;">Ce billet n'apparaît plus dans votre espace client et ne vous donnera plus accès à l'entrée. Si vous n'êtes pas à l'origine de cette action, contactez-nous immédiatement.</p>
+  `);
+}
+
+export async function sendTicketTransferConfirmationEmail(transfer: { senderEmail: string; senderName: string; recipientEmail: string; eventTitle: string }): Promise<void> {
+  await sendEmail({
+    to: transfer.senderEmail,
+    subject: `Votre billet pour ${transfer.eventTitle} a été transféré`,
+    html: buildTicketTransferConfirmationHtml(transfer)
+  });
+}
+
 // --- Acheteur : échec de paiement ---
 export function buildPaymentFailedHtml(ticket: any): string {
   return emailLayout("Échec de votre paiement", `

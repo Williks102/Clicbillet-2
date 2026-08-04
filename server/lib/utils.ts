@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { waitUntil } from "@vercel/functions";
 
 export function runInBackground(promise: Promise<unknown>): void {
@@ -33,5 +34,13 @@ export function isQrUnlocked(evt: { date: string; time: string }): boolean {
   const unlockTime = getQrUnlockTime(evt);
   if (isNaN(unlockTime.getTime())) return true;
   return Date.now() >= unlockTime.getTime();
+}
+
+// Le suffixe aléatoire (pas seulement l'id du billet) est ce qui rend le transfert de billet
+// possible : régénérer cette valeur invalide immédiatement toute copie (capture d'écran, email)
+// du QR précédent, puisque /api/verify-ticket compare désormais la chaîne scannée telle quelle
+// à cette valeur stockée plutôt que d'en extraire seulement l'id du billet.
+export function generateTicketQrCode(ticketId: string): string {
+  return `clicbillet-verify:${ticketId}:${crypto.randomBytes(9).toString("hex")}`;
 }
 
