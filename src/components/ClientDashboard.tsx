@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { Ticket as TicketIcon, Calendar, MapPin, Download, CheckCircle2, AlertTriangle, ExternalLink, Printer, Sparkles, Receipt, Lock } from "lucide-react";
+import { Ticket as TicketIcon, Calendar, MapPin, Download, CheckCircle2, AlertTriangle, ExternalLink, Printer, Sparkles, Receipt, Lock, Send } from "lucide-react";
 import { Ticket, User } from "../types";
 import { authFetch } from "../lib/apiClient";
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
+import { isEventPast } from "../lib/eventStatus";
 import ResponsiveSheet from "./ResponsiveSheet";
 
 interface ClientDashboardProps {
@@ -83,6 +84,12 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dashTab, setDashTab] = useState<"tickets" | "invoices">("tickets");
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferEmail, setTransferEmail] = useState("");
+  const [transferName, setTransferName] = useState("");
+  const [transferSending, setTransferSending] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [transferSuccess, setTransferSuccess] = useState<string | null>(null);
 
   // Fetch tickets for this user from backend
   async function fetchTickets() {
@@ -103,11 +110,45 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
 
   useEffect(() => {
     fetchTickets();
-    
+
     const handleRefresh = () => fetchTickets();
     window.addEventListener("refresh_tickets", handleRefresh);
     return () => window.removeEventListener("refresh_tickets", handleRefresh);
   }, [user.id]);
+
+  // Repart d'un formulaire de transfert vierge à chaque ouverture/changement/fermeture du
+  // billet sélectionné, plutôt que de laisser traîner la saisie d'un billet précédent.
+  useEffect(() => {
+    setTransferOpen(false);
+    setTransferEmail("");
+    setTransferName("");
+    setTransferError(null);
+  }, [selectedTicket?.id]);
+
+  async function handleTransferTicket(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedTicket) return;
+    setTransferSending(true);
+    setTransferError(null);
+    try {
+      const response = await authFetch(`/api/tickets/${selectedTicket.id}/transfer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipientEmail: transferEmail, recipientName: transferName || undefined })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Impossible de transférer ce billet.");
+      }
+      setTransferSuccess(`Billet transféré à ${transferEmail} !`);
+      setSelectedTicket(null);
+      await fetchTickets();
+    } catch (err: any) {
+      setTransferError(err.message || "Impossible de transférer ce billet.");
+    } finally {
+      setTransferSending(false);
+    }
+  }
 
   // Polling for pending tickets automatically
   useEffect(() => {
@@ -252,6 +293,21 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
           <TicketIcon className="h-6 w-6 rotate-12" />
         </div>
       </section>
+
+      {transferSuccess && (
+        <div
+          id="transfer-success-banner"
+          className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-3 text-sm font-bold text-emerald-800"
+        >
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4.5 w-4.5 shrink-0" />
+            <span>{transferSuccess}</span>
+          </div>
+          <button onClick={() => setTransferSuccess(null)} className="text-xs font-black text-emerald-600 hover:text-emerald-800">
+            Fermer
+          </button>
+        </div>
+      )}
 
       {/* Sub-tabs: Billets / Factures */}
       <div className="flex space-x-2 rounded-xl bg-gray-50 p-1.5 w-fit" id="client-dashboard-subtabs">
@@ -530,6 +586,67 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
                   </div>
                 </div>
               </div>
+
+              {/* Transfert officiel du billet : alternative légitime au partage d'une capture
+                  d'écran, seulement pour un billet payé, pas encore scanné, événement à venir. */}
+              {selectedTicket.paymentStatus !== "pending" && !selectedTicket.scanned && !isEventPast({ date: selectedTicket.eventDate, time: selectedTicket.eventTime }) && (
+                <div className="border-t border-dashed border-gray-200 pt-5 print:hidden" id="ticket-transfer-section">
+                  {!transferOpen ? (
+                    <button
+                      id="open-transfer-form-btn"
+                      onClick={() => setTransferOpen(true)}
+                      className="flex w-full items-center justify-center space-x-1.5 rounded-xl border border-gray-200 px-4 py-2.5 text-xs font-bold text-gray-700 hover:bg-gray-50 active:scale-95"
+                    >
+                      <Send className="h-3.5 w-3.5 text-orange-600" />
+                      <span>Transférer ce billet à quelqu'un d'autre</span>
+                    </button>
+                  ) : (
+                    <form onSubmit={handleTransferTicket} className="space-y-3" id="transfer-ticket-form">
+                      <p className="text-[11px] text-gray-500">
+                        L'ancien QR code sera immédiatement invalidé — le destinataire recevra un nouveau billet par e-mail.
+                      </p>
+                      {transferError && (
+                        <div className="rounded-lg bg-red-50 p-2.5 text-[11px] font-semibold text-red-600 border border-red-100" id="transfer-error-alert">
+                          {transferError}
+                        </div>
+                      )}
+                      <input
+                        type="email"
+                        required
+                        placeholder="Email du destinataire"
+                        value={transferEmail}
+                        onChange={(e) => setTransferEmail(e.target.value)}
+                        className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Nom du destinataire (optionnel)"
+                        maxLength={100}
+                        value={transferName}
+                        onChange={(e) => setTransferName(e.target.value)}
+                        className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setTransferOpen(false)}
+                          className="flex-1 rounded-xl border border-gray-200 px-4 py-2.5 text-xs font-bold text-gray-600 hover:bg-gray-50"
+                        >
+                          Annuler
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={transferSending}
+                          className="flex flex-1 items-center justify-center space-x-1.5 rounded-xl bg-orange-600 px-4 py-2.5 text-xs font-black text-white hover:bg-orange-700 disabled:opacity-60"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          <span>{transferSending ? "Envoi..." : "Confirmer le transfert"}</span>
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* PDF print actions trigger */}

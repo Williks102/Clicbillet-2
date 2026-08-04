@@ -25,4 +25,5 @@ export const forgotPasswordRateLimiter = makeRateLimiter(5, 15 * 60 * 1000, "Tro
 export const checkoutRateLimiter = makeRateLimiter(20, 10 * 60 * 1000, "Trop de tentatives d'achat. Réessayez dans quelques minutes.");
 export const apiGeneralRateLimiter = makeRateLimiter(300, 5 * 60 * 1000, "Trop de requêtes. Réessayez dans quelques instants.");
 export const contactRateLimiter = makeRateLimiter(5, 15 * 60 * 1000, "Trop de messages envoyés. Réessayez dans quelques minutes.");
+export const transferTicketRateLimiter = makeRateLimiter(10, 15 * 60 * 1000, "Trop de transferts de billets. Réessayez dans quelques minutes.");
 

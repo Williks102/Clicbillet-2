@@ -253,6 +253,26 @@ export const validateVerifyTicket = (req: express.Request, res: express.Response
   next();
 };
 
+// Middleware de validation du transfert de billet (espace client)
+export const validateTransferTicket = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { recipientEmail, recipientName } = req.body;
+
+  if (!recipientEmail || typeof recipientEmail !== "string") {
+    return res.status(400).json({ error: "L'adresse e-mail du destinataire est requise." });
+  }
+
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!emailRegex.test(recipientEmail)) {
+    return res.status(400).json({ error: "Le format de l'e-mail du destinataire est invalide." });
+  }
+
+  if (recipientName !== undefined && (typeof recipientName !== "string" || recipientName.length > 100)) {
+    return res.status(400).json({ error: "Le nom du destinataire est invalide." });
+  }
+
+  next();
+};
+
 // Middleware de validation du formulaire de contact public (page /contact, non authentifié).
 const CONTACT_SUBJECTS = new Set([
   "Question générale",
