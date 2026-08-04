@@ -174,7 +174,12 @@ export const validateEvent = (req: express.Request, res: express.Response, next:
 
 // Middleware de validation de commande de billet (Checkout)
 // Une commande (panier) contient un ou plusieurs items, un par type de billet distinct
-// (ex: { tier: "standard", quantity: 2 } + { tier: "vip", quantity: 1 }).
+// (ex: { tier: "standard", quantity: 2 } + { tier: "vip", quantity: 1 }). Un organisateur peut
+// nommer ses types de billets librement (cf. OrganizerDashboard.tsx, champ texte libre) — ce
+// middleware ne connaît pas les tarifs propres à CET événement (il tourne avant tout accès
+// base de données), donc il ne valide que la forme du nom, pas son appartenance à l'événement.
+// La correspondance avec les tarifs réellement définis se fait plus loin dans la route
+// /api/checkout (server/routes/tickets.ts), qui cherche le nom exact parmi event.ticketTypes.
 export const validateCheckout = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const { eventId, buyerId, buyerName, buyerEmail, guestPhone, items, paymentDetails } = req.body;
   const isGuest = !buyerId && !!buyerEmail;
@@ -196,10 +201,10 @@ export const validateCheckout = (req: express.Request, res: express.Response, ne
   let totalQuantity = 0;
 
   for (const item of items) {
-    const normalizedTier = typeof item?.tier === "string" ? item.tier.toLowerCase() : item?.tier;
-    if (normalizedTier !== "standard" && normalizedTier !== "vip") {
-      return res.status(400).json({ error: "Chaque billet doit être de type 'standard' ou 'vip'." });
+    if (typeof item?.tier !== "string" || !item.tier.trim() || item.tier.length > 50) {
+      return res.status(400).json({ error: "Chaque billet doit indiquer un type de tarif valide." });
     }
+    const normalizedTier = item.tier.toLowerCase();
 
     const qtyVal = Number(item?.quantity);
     if (isNaN(qtyVal) || qtyVal < 1 || qtyVal > 20) {

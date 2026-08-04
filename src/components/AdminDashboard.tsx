@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { authFetch } from "../lib/apiClient";
 import { isEventPast } from "../lib/eventStatus";
+import { isVipTier, formatTierLabel } from "../lib/ticketTier";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 import CommissionSheet from "./CommissionSheet";
 
@@ -16,8 +17,8 @@ interface AdminDashboardProps {
 
 interface AdminStats {
   totalRevenue: number; // Gross Vol. Affaires
-  totalPlatformCommission: number; // 10% Platform share
-  totalOrganizerPayout: number; // 90% Net share paid to organizers
+  totalPlatformCommission: number; // Part plateforme (taux effectif, cf. commissionRate)
+  totalOrganizerPayout: number; // Part nette reversée aux organisateurs
   commissionRate: number;
   totalTicketsSold: number;
   totalUsers: number;
@@ -461,7 +462,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
               <p className="mt-3.5 text-xl font-black text-orange-950 font-sans tracking-tight">
                 {(stats.totalPlatformCommission || 0).toLocaleString("fr-FR")} <span className="text-xs text-orange-600">FCFA</span>
               </p>
-              <p className="mt-1 text-[10px] text-orange-500 font-bold uppercase">Revenus Admin (10%)</p>
+              <p className="mt-1 text-[10px] text-orange-500 font-bold uppercase">Revenus Admin ({Math.round((stats.commissionRate || 0) * 100)}%)</p>
             </div>
 
             <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs">
@@ -946,9 +947,9 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                       <td className="py-3 whitespace-nowrap">
                         <span className="font-extrabold font-sans pr-1.5">{tkt.quantity} ticket(s)</span>
                         <span className={`inline-flex rounded-md px-1.5 py-0.5 text-[8px] font-extrabold uppercase ${
-                          tkt.tier === "vip" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"
+                          isVipTier(tkt.tier) ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"
                         }`}>
-                          {tkt.tier === "vip" ? "VIP" : "STD"}
+                          {formatTierLabel(tkt.tier)}
                         </span>
                       </td>
                       <td className="py-3 text-gray-400 font-mono font-semibold">{new Date(tkt.purchaseDate).toLocaleString("fr-FR")}</td>
@@ -981,9 +982,9 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                     <div>
                       <span className="font-extrabold font-sans pr-1.5 text-[11px]">{tkt.quantity} ticket(s)</span>
                       <span className={`inline-flex rounded-md px-1.5 py-0.5 text-[8px] font-extrabold uppercase ${
-                        tkt.tier === "vip" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"
+                        isVipTier(tkt.tier) ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"
                       }`}>
-                        {tkt.tier === "vip" ? "VIP" : "STD"}
+                        {formatTierLabel(tkt.tier)}
                       </span>
                     </div>
                     {ticketStatusAction(tkt)}

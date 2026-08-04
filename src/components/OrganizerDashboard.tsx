@@ -6,6 +6,7 @@ import ResponsiveSheet from "./ResponsiveSheet";
 import { isEventPast } from "../lib/eventStatus";
 import { compressImageToDataUrl } from "../lib/imageCompress";
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
+import { isVipTier, formatTierLabel } from "../lib/ticketTier";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 
 interface OrganizerDashboardProps {
@@ -189,7 +190,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   // Sandbox Simulator States
   const [simSelectedEventId, setSimSelectedEventId] = useState("");
   const [simQuantity, setSimQuantity] = useState("1");
-  const [simTier, setSimTier] = useState<"standard" | "vip">("standard");
+  const [simTier, setSimTier] = useState<string>("standard");
   const [simBuyerName, setSimBuyerName] = useState("Sylla Lansana");
   const [simBuyerEmail, setSimBuyerEmail] = useState("lansana@fofana.ci");
   const [simPaymentMethod, setSimPaymentMethod] = useState("orange_money");
@@ -775,7 +776,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
               {!loadingStats && stats && (
                 <div className="mt-3.5 pt-2.5 border-t border-gray-100 flex items-center justify-between text-[10px] text-gray-400 font-semibold font-sans">
                   <span>Brut total : {(stats.totalGrossRevenue || 0).toLocaleString("fr-FR")} F</span>
-                  <span className="text-orange-600">Com. Plateforme (-10%) : -{(stats.totalCommission || 0).toLocaleString("fr-FR")} F</span>
+                  <span className="text-orange-600">Com. Plateforme (-{Math.round((stats.commissionRate || 0) * 100)}%) : -{(stats.totalCommission || 0).toLocaleString("fr-FR")} F</span>
                 </div>
               )}
             </div>
@@ -883,7 +884,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                       <div className="text-right shrink-0">
                         <span className="text-xs font-extrabold text-orange-600 block">+{sale.amount.toLocaleString("fr-FR")} F</span>
                         <span className="text-[9px] text-gray-400 uppercase font-mono font-semibold">
-                          {sale.tier === "vip" ? "VIP" : "STD"}
+                          {formatTierLabel(sale.tier)}
                         </span>
                       </div>
                     </div>
@@ -1486,11 +1487,20 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                   <label className="text-[10px] font-black uppercase text-gray-400">Catégorie :</label>
                   <select
                     value={simTier}
-                    onChange={(e) => setSimTier(e.target.value as any)}
+                    onChange={(e) => setSimTier(e.target.value)}
                     className="w-full rounded-xl border border-gray-200 p-3 text-xs bg-white text-gray-800 font-bold"
                   >
-                    <option value="standard">Standard</option>
-                    <option value="vip">VIP (+10k CFA)</option>
+                    {(() => {
+                      const simEvent = myEvents.find(e => e.id === simSelectedEventId);
+                      const tierOptions = simEvent?.ticketTypes && simEvent.ticketTypes.length > 0
+                        ? simEvent.ticketTypes
+                        : [{ name: "Standard", price: simEvent?.price ?? 0 }];
+                      return tierOptions.map((t) => (
+                        <option key={t.name} value={t.name.toLowerCase()}>
+                          {t.name} ({t.price.toLocaleString("fr-FR")} F)
+                        </option>
+                      ));
+                    })()}
                   </select>
                 </div>
               </div>
@@ -1603,9 +1613,9 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                         <td className="py-3 leading-tight">
                           <span className="block font-bold text-gray-950">{tkt.buyerName || "Inconnu"}</span>
                           <span className={`inline-flex px-1.5 rounded text-[8px] mt-0.5 font-black uppercase ${
-                            tkt.tier === "vip" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"
+                            isVipTier(tkt.tier) ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"
                           }`}>
-                            {tkt.tier === "vip" ? "VIP" : "STD"}
+                            {formatTierLabel(tkt.tier)}
                           </span>
                         </td>
                         <td className="py-3">
@@ -1990,8 +2000,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             manuelle. Téléchargez-le en PDF pour votre comptabilité.
           </p>
           {(() => {
-            const statements = groupMonthlyStatements(stats?.tickets || [], stats?.commissionRate ?? 0.1);
-            const commissionRatePercent = Math.round((stats?.commissionRate ?? 0.1) * 100);
+            const statements = groupMonthlyStatements(stats?.tickets || [], stats?.commissionRate ?? 0.06);
+            const commissionRatePercent = Math.round((stats?.commissionRate ?? 0.06) * 100);
             return statements.length > 0 ? (
               <div className="space-y-3">
                 {statements.map((s) => (

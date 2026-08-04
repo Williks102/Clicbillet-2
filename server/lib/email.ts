@@ -174,9 +174,13 @@ export async function sendPasswordResetEmail(user: { email: string; name: string
 // on envoie UN SEUL email par commande listant tous les QR codes, plutôt qu'un email par billet.
 export function buildTicketConfirmationHtml(order: { buyerName: string; eventTitle: string; eventDate: string; eventTime: string; eventVenue: string; tickets: { tier: string; qrCodeData: string }[] }): string {
   const qrBlocks = order.tickets.map((t, i) => {
-    const tierLabel = t.tier === "vip" ? "VIP" : "Standard";
-    const pillBg = t.tier === "vip" ? "#fef3c7" : "#dbeafe";
-    const pillColor = t.tier === "vip" ? "#92400e" : "#1e40af";
+    const isVip = t.tier === "vip";
+    // t.tier est le nom du type de billet en minuscules (organisateur libre de le nommer,
+    // cf. OrganizerDashboard.tsx) : on le met simplement en forme plutôt que de supposer
+    // qu'il n'existe que "standard"/"vip".
+    const tierLabel = isVip ? "VIP" : (t.tier || "standard").replace(/\b\w/g, (c) => c.toUpperCase());
+    const pillBg = isVip ? "#fef3c7" : "#dbeafe";
+    const pillColor = isVip ? "#92400e" : "#1e40af";
     return `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb; border-radius:12px; margin-bottom:16px;">
         <tr>
