@@ -3,14 +3,14 @@ import { Event } from "../types";
 
 interface EventCardProps {
   event: Event;
-  onBuyTicket: (event: Event) => void;
-  // Ouvre la page dédiée de l'événement (/e/:id), celle qui porte l'URL partageable.
+  // Ouvre la page dédiée de l'événement (/e/:id) : c'est elle qui porte le choix des tarifs
+  // et l'URL partageable. La carte ne déclenche plus d'achat directement.
   onViewEvent?: (event: Event) => void;
   userRole?: string;
   onViewOrganizer?: (alias: string) => void;
 }
 
-export default function EventCard({ event: evt, onBuyTicket, onViewEvent, userRole, onViewOrganizer }: EventCardProps) {
+export default function EventCard({ event: evt, onViewEvent, userRole, onViewOrganizer }: EventCardProps) {
   const hasTiers = Array.isArray(evt.ticketTypes) && evt.ticketTypes.length > 0 && evt.ticketTypes.some(t => (t.total ?? 0) > 0);
   const tierAvailability = hasTiers
     ? evt.ticketTypes!.map(t => ({
@@ -28,10 +28,9 @@ export default function EventCard({ event: evt, onBuyTicket, onViewEvent, userRo
       id={`event-card-${evt.id}`}
       className="group relative flex flex-col overflow-hidden rounded-2xl bg-white border border-gray-100 shadow-xs transition-all duration-300 hover:-translate-y-1.5 hover:shadow-lg"
     >
-      {/* Event banner illustration, plein cadre sans surcouche.
-          L'affiche et le titre mènent à la page de l'événement ; le bouton d'achat, lui,
-          continue d'ouvrir directement le paiement — on n'allonge pas le parcours de celui
-          qui a déjà décidé d'acheter. */}
+      {/* Event banner illustration, plein cadre sans surcouche. Affiche, titre et bouton
+          mènent tous à la page de l'événement : le choix des tarifs s'y fait désormais, et
+          c'est elle qui porte l'URL partageable. */}
       <button
         type="button"
         onClick={() => onViewEvent?.(evt)}
@@ -142,9 +141,12 @@ export default function EventCard({ event: evt, onBuyTicket, onViewEvent, userRo
             Mode Orga Actif
           </div>
         ) : (
+          /* Mène à la page de l'événement, où se fait le choix des tarifs — et non plus
+             directement au paiement. Le libellé le dit : "Acheter" sur un bouton qui ouvre
+             une page de présentation serait trompeur. */
           <button
             id={`buy-btn-${evt.id}`}
-            onClick={() => onBuyTicket(evt)}
+            onClick={() => onViewEvent?.(evt)}
             disabled={isSoldOut}
             className={`flex w-full items-center justify-center space-x-2 rounded-full py-3 text-sm font-bold transition-all active:scale-95 ${
               isSoldOut
@@ -153,7 +155,7 @@ export default function EventCard({ event: evt, onBuyTicket, onViewEvent, userRo
             }`}
           >
             <Ticket className="h-4 w-4" />
-            <span>Acheter un billet</span>
+            <span>{isSoldOut ? "Complet" : "Voir les billets"}</span>
           </button>
         )}
       </div>

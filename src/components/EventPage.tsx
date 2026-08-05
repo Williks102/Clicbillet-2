@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, Calendar, MapPin, Tag, Users, Share2, Check, Ticket as TicketIcon } from "lucide-react";
+import { ArrowLeft, Calendar, MapPin, Tag, Users, Share2, Check, Minus, Plus, Hourglass, Ticket as TicketIcon } from "lucide-react";
 import { Event } from "../types";
 import { isEventPast } from "../lib/eventStatus";
 import { formatTierLabel } from "../lib/ticketTier";
@@ -12,11 +12,17 @@ import { formatTierLabel } from "../lib/ticketTier";
 // côté serveur (cf. server/lib/socialPreview.ts) : les robots d'aperçu n'exécutent pas le
 // JavaScript et ne verraient jamais ce composant.
 
+// Mêmes plafonds que la modale de paiement, appliqués aussi côté serveur (validateCheckout).
+const MAX_PER_TIER = 10;
+const MAX_TOTAL_PER_ORDER = 20;
+
 interface EventPageProps {
   event: Event | null;
   loading: boolean;
   onBack: () => void;
-  onBuyTicket: (event: Event) => void;
+  // La sélection est faite ici, et transmise telle quelle à la modale de paiement : celle-ci
+  // ne la redemande pas. Sans ce passage, l'acheteur verrait deux fois le même sélecteur.
+  onBuyTicket: (event: Event, quantities: Record<string, number>) => void;
   onViewOrganizer: (alias: string) => void;
 }
 
@@ -28,6 +34,18 @@ function formatFullDate(dateStr: string): string {
 
 export default function EventPage({ event, loading, onBack, onBuyTicket, onViewOrganizer }: EventPageProps) {
   const [shared, setShared] = useState(false);
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
+
+  function adjustQuantity(tierName: string, delta: number, available: number) {
+    setQuantities((prev) => {
+      const current = prev[tierName] || 0;
+      const orderTotal = Object.values(prev).reduce((sum, q) => sum + q, 0);
+      if (delta > 0 && (current >= MAX_PER_TIER || orderTotal >= MAX_TOTAL_PER_ORDER || current >= available)) {
+        return prev;
+      }
+      return { ...prev, [tierName]: Math.max(0, current + delta) };
+    });
+  }
 
   async function handleShare() {
     const url = window.location.href;
@@ -81,9 +99,26 @@ export default function EventPage({ event, loading, onBack, onBuyTicket, onViewO
   const past = isEventPast(event);
   const remaining = Math.max(0, (Number(event.totalTickets) || 0) - (Number(event.ticketsSold) || 0));
   const soldOut = remaining <= 0;
-  const tiers = event.ticketTypes && event.ticketTypes.length > 0
+  const rawTiers = event.ticketTypes && event.ticketTypes.length > 0
     ? event.ticketTypes
     : [{ name: "Standard", price: event.price }];
+
+  // Places restantes par tarif quand l'organisateur a défini des quotas par type ; sinon on
+  // retombe sur la jauge globale de l'événement.
+  const soldByTier = event.ticketsSoldByTier ?? {};
+  const tiers = rawTiers.map((t) => ({
+    ...t,
+    available: t.total != null
+      ? Math.max(0, t.total - (soldByTier[t.name.toLowerCase()] ?? 0))
+      : remaining,
+  }));
+
+  const selected = tiers
+    .map((t) => ({ name: t.name, price: Number(t.price) || 0, qty: quantities[t.name] || 0 }))
+    .filter((item) => item.qty > 0);
+  const totalQuantity = selected.reduce((sum, i) => sum + i.qty, 0);
+  const totalPrice = selected.reduce((sum, i) => sum + i.price * i.qty, 0);
+  const canBuy = !past && !soldOut && totalQuantity > 0;
 
   return (
     <div className="mx-auto max-w-3xl py-6" id="event-page">
@@ -159,39 +194,107 @@ export default function EventPage({ event, loading, onBack, onBuyTicket, onViewO
             <p className="mt-5 text-sm leading-relaxed whitespace-pre-wrap text-gray-600">{event.description}</p>
           )}
 
+          {/* Choix des billets. Il se fait ici, et non dans la fenêtre de paiement : celle-ci
+              part directement au récapitulatif avec la sélection reçue. */}
           <div className="mt-6 border-t border-gray-50 pt-5">
             <h2 className="flex items-center gap-1.5 text-sm font-black text-gray-900">
               <Tag className="h-4 w-4 text-orange-600" />
-              Tarifs
+              Choisissez vos billets
             </h2>
+            <p className="mt-1 text-[10px] font-semibold text-gray-400">
+              Maximum {MAX_PER_TIER} par tarif, {MAX_TOTAL_PER_ORDER} au total par commande.
+            </p>
+
             <div className="mt-3 space-y-2">
-              {tiers.map((tier) => (
-                <div
-                  key={tier.name}
-                  className="flex items-center justify-between rounded-2xl border border-gray-100 px-4 py-3"
-                >
-                  <span className="text-xs font-bold text-gray-800">{formatTierLabel(tier.name)}</span>
-                  <span className="font-mono text-sm font-black text-orange-600">
-                    {Number(tier.price).toLocaleString("fr-FR")} FCFA
-                  </span>
-                </div>
-              ))}
+              {tiers.map((tier) => {
+                const qty = quantities[tier.name] || 0;
+                const tierSoldOut = tier.available <= 0;
+                return (
+                  <div
+                    key={tier.name}
+                    id={`tier-row-${tier.name}`}
+                    className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition-all ${
+                      qty > 0 ? "border-orange-500 bg-orange-50/50 ring-1 ring-orange-500" : "border-gray-100 bg-white"
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className={`text-xs font-black ${qty > 0 ? "text-orange-700" : "text-gray-900"}`}>
+                        {formatTierLabel(tier.name)}
+                      </p>
+                      <p className="mt-0.5 font-mono text-[11px] font-bold text-gray-500">
+                        {Number(tier.price).toLocaleString("fr-FR")} FCFA
+                        {tierSoldOut
+                          ? <span className="ml-2 font-sans font-bold text-red-500">Épuisé</span>
+                          : <span className="ml-2 font-sans font-semibold text-gray-400">{tier.available} place(s)</span>}
+                      </p>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-3">
+                      <button
+                        type="button"
+                        aria-label={`Retirer un billet ${formatTierLabel(tier.name)}`}
+                        onClick={() => adjustQuantity(tier.name, -1, tier.available)}
+                        disabled={qty === 0}
+                        className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-30"
+                      >
+                        <Minus className="h-3.5 w-3.5" />
+                      </button>
+                      <span className="w-5 text-center font-mono text-sm font-black tabular-nums text-gray-900">{qty}</span>
+                      <button
+                        type="button"
+                        aria-label={`Ajouter un billet ${formatTierLabel(tier.name)}`}
+                        onClick={() => adjustQuantity(tier.name, 1, tier.available)}
+                        disabled={tierSoldOut || past}
+                        className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-600 text-white transition-colors hover:bg-orange-700 disabled:bg-gray-200 disabled:text-gray-400"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
+          {/* Prévenir de la file d'attente AVANT le clic : sans ça, l'acheteur choisit ses
+              billets puis découvre qu'il doit patienter, sans que son stock soit réservé. */}
+          {event.waitingRoomEnabled && !past && !soldOut && (
+            <div className="mt-4 flex items-start gap-2.5 rounded-2xl border border-amber-100 bg-amber-50 p-3.5">
+              <Hourglass className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              <p className="text-[11px] leading-relaxed text-amber-800">
+                <strong>Forte affluence attendue.</strong> L'accès au paiement est régulé : vous passerez par une
+                file d'attente après avoir choisi vos billets.
+              </p>
+            </div>
+          )}
+
           <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-gray-50 pt-5">
-            <span className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500">
-              <Users className="h-4 w-4 text-gray-400" />
-              {soldOut ? "Complet" : `${remaining.toLocaleString("fr-FR")} place(s) restante(s)`}
-            </span>
+            <div>
+              <span className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500">
+                <Users className="h-4 w-4 text-gray-400" />
+                {soldOut ? "Complet" : `${remaining.toLocaleString("fr-FR")} place(s) restante(s)`}
+              </span>
+              {totalQuantity > 0 && (
+                <p className="mt-1 text-sm font-black text-gray-900">
+                  {totalQuantity} billet{totalQuantity > 1 ? "s" : ""} ·{" "}
+                  <span className="text-orange-600">{totalPrice.toLocaleString("fr-FR")} FCFA</span>
+                </p>
+              )}
+            </div>
 
             <button
-              onClick={() => onBuyTicket(event)}
-              disabled={past || soldOut}
+              onClick={() => onBuyTicket(event, quantities)}
+              disabled={!canBuy}
               id="event-page-buy-btn"
               className="rounded-xl bg-orange-600 px-6 py-3 text-sm font-black text-white transition-colors hover:bg-orange-700 disabled:bg-gray-300"
             >
-              {past ? "Événement terminé" : soldOut ? "Complet" : "Acheter un billet"}
+              {past
+                ? "Événement terminé"
+                : soldOut
+                  ? "Complet"
+                  : totalQuantity === 0
+                    ? "Choisissez un billet"
+                    : "Acheter"}
             </button>
           </div>
         </div>

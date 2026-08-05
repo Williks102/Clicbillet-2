@@ -8,6 +8,10 @@ interface CheckoutModalProps {
   event: Event;
   user: User | null;
   guestInfo?: GuestInfo;
+  // Billets déjà choisis sur la page de l'événement. Quand cette sélection est fournie, la
+  // modale démarre directement au récapitulatif : redemander le choix des tarifs ici
+  // afficherait deux fois le même sélecteur à l'acheteur.
+  initialQuantities?: Record<string, number>;
   onClose: () => void;
   onSuccess: (tickets: any[]) => void;
   onOpenAuth: () => void;
@@ -16,20 +20,26 @@ interface CheckoutModalProps {
 const MAX_PER_TIER = 10;
 const MAX_TOTAL_PER_ORDER = 20;
 
-export default function CheckoutModal({ event, user, guestInfo, onClose, onSuccess, onOpenAuth }: CheckoutModalProps) {
+export default function CheckoutModal({ event, user, guestInfo, initialQuantities, onClose, onSuccess, onOpenAuth }: CheckoutModalProps) {
   const isGuest = !user && !!guestInfo;
-  const [step, setStep] = useState<"configure" | "details" | "processing" | "success">("configure");
+  // Sélection reçue de la page de l'événement : elle décide du point d'entrée de la modale.
+  const preselected = Object.values(initialQuantities || {}).some((q) => q > 0);
+  const [step, setStep] = useState<"configure" | "details" | "processing" | "success">(
+    preselected ? "details" : "configure"
+  );
   const activeTicketTypes = (event.ticketTypes && event.ticketTypes.length > 0)
     ? event.ticketTypes
     : [{ name: "Standard", price: event.price }, { name: "VIP", price: event.price * 2 }];
 
   // Panier : quantité indépendante par type de billet, plusieurs types peuvent être
   // sélectionnés simultanément dans la même commande (ex: 2 Standard + 1 VIP).
-  const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [quantities, setQuantities] = useState<Record<string, number>>(initialQuantities || {});
   const [method, setMethod] = useState<PaymentMethod>("orange_money");
 
   // Payment details state
-  const [phoneNumber, setPhoneNumber] = useState("");
+  // Pré-rempli avec le numéro donné à l'étape invité : c'est presque toujours le même, et il
+  // devait sinon être ressaisi. Reste modifiable, le numéro Mobile Money pouvant différer.
+  const [phoneNumber, setPhoneNumber] = useState(guestInfo?.phone ?? "");
   const [otp, setOtp] = useState("");
   const [cardName, setCardName] = useState("");
   const [cardNumber, setCardNumber] = useState("");
@@ -505,12 +515,14 @@ export default function CheckoutModal({ event, user, guestInfo, onClose, onSucce
 
               {/* Action buttons triggers */}
               <div className="pt-6 border-t border-gray-100 flex items-center justify-between">
+                {/* Quand la sélection vient de la page de l'événement, "Retour" y ramène :
+                    l'étape de choix des tarifs n'existe pas dans cette modale. */}
                 <button
                   type="button"
-                  onClick={() => setStep("configure")}
+                  onClick={() => (preselected ? onClose() : setStep("configure"))}
                   className="rounded-xl px-4 py-3 text-xs font-bold text-gray-500 hover:text-gray-700"
                 >
-                  Retour
+                  {preselected ? "Modifier ma sélection" : "Retour"}
                 </button>
                 <button
                   type="submit"

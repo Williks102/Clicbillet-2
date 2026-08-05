@@ -14,11 +14,10 @@ interface OrganizerProfile {
 interface OrganizerProfilePageProps {
   alias: string;
   onBack: () => void;
-  onBuyTicket: (event: Event) => void;
   onViewEvent?: (event: Event) => void;
 }
 
-export default function OrganizerProfilePage({ alias, onBack, onBuyTicket, onViewEvent }: OrganizerProfilePageProps) {
+export default function OrganizerProfilePage({ alias, onBack, onViewEvent }: OrganizerProfilePageProps) {
   const [organizer, setOrganizer] = useState<OrganizerProfile | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
@@ -109,7 +108,7 @@ export default function OrganizerProfilePage({ alias, onBack, onBuyTicket, onVie
         {upcomingEvents.length > 0 ? (
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {upcomingEvents.map((evt) => (
-              <EventCard key={evt.id} event={evt} onBuyTicket={onBuyTicket} onViewEvent={onViewEvent} />
+              <EventCard key={evt.id} event={evt} onViewEvent={onViewEvent} />
             ))}
           </div>
         ) : (
