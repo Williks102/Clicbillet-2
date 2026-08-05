@@ -130,7 +130,42 @@ export const isProduction = process.env.NODE_ENV === "production";
 // entièrement contrôlables par l'appelant (un attaquant peut les usurper sans passer par le
 // vrai frontend), ce qui permettrait sinon de faire pointer un email de réinitialisation
 // légitime vers un domaine de phishing tout en gardant un jeton valide.
-export const APP_ORIGIN = (process.env.APP_ORIGIN || (isProduction ? "https://www.clicbillet.com" : `http://localhost:${PORT}`)).trim();
+//
+// Sert désormais aussi à construire les URL des aperçus de partage (og:url, og:image — cf.
+// server/lib/socialPreview.ts) : mal renseignée, elle ne casse plus seulement les emails, elle
+// fait pointer chaque lien partagé sur WhatsApp vers le mauvais domaine.
+//
+// La barre finale éventuelle est retirée : "https://site.ci/" produirait sinon des URL en
+// double barre ("https://site.ci//e/evt-1"), que certains robots d'aperçu refusent.
+const APP_ORIGIN_FROM_ENV = (process.env.APP_ORIGIN || "").trim();
+export const APP_ORIGIN = (APP_ORIGIN_FROM_ENV || (isProduction ? "https://www.clicbillet.com" : `http://localhost:${PORT}`))
+  .trim()
+  .replace(/\/+$/, "");
+
+// Diagnostic au démarrage : une origine erronée est silencieuse — rien ne casse visiblement,
+// mais les liens de réinitialisation de mot de passe, les redirections de confirmation
+// d'email et les aperçus de partage pointent tous vers un domaine qui n'est pas le vôtre.
+// Mieux vaut le dire au démarrage que le découvrir sur un lien envoyé à un client.
+if (isProduction && !APP_ORIGIN_FROM_ENV) {
+  console.error(
+    `[Config] APP_ORIGIN n'est pas définie en production : repli sur "${APP_ORIGIN}". ` +
+    `Si ce n'est pas le domaine réellement servi, les liens de réinitialisation de mot de passe, ` +
+    `les confirmations d'email et les aperçus de partage pointeront tous au mauvais endroit. ` +
+    `Définissez APP_ORIGIN sur l'origine publique exacte (ex: https://www.mondomaine.ci).`
+  );
+}
+
+try {
+  const parsed = new URL(APP_ORIGIN);
+  if (isProduction && parsed.protocol !== "https:") {
+    console.error(`[Config] APP_ORIGIN doit être en https en production (valeur actuelle : ${APP_ORIGIN}).`);
+  }
+  if (parsed.pathname !== "/") {
+    console.error(`[Config] APP_ORIGIN doit être une origine seule, sans chemin (valeur actuelle : ${APP_ORIGIN}).`);
+  }
+} catch {
+  console.error(`[Config] APP_ORIGIN n'est pas une URL valide : "${APP_ORIGIN}". Les liens générés seront inutilisables.`);
+}
 
 export const SUPABASE_HOST = (() => {
   try {
