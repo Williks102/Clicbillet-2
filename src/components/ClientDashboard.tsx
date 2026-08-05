@@ -5,7 +5,7 @@ import { authFetch } from "../lib/apiClient";
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
 import { isPaidTicket } from "../lib/ticketPayment";
-import { isEventPast } from "../lib/eventStatus";
+import { hasEventStarted } from "../lib/eventStatus";
 import ResponsiveSheet from "./ResponsiveSheet";
 import AccountCodeBadge from "./AccountCodeBadge";
 
@@ -698,7 +698,7 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
 
               {/* Transfert officiel du billet : alternative légitime au partage d'une capture
                   d'écran, seulement pour un billet payé, pas encore scanné, événement à venir. */}
-              {selectedTicket.paymentStatus !== "pending" && !selectedTicket.scanned && !isEventPast({ date: selectedTicket.eventDate, time: selectedTicket.eventTime }) && (
+              {selectedTicket.paymentStatus !== "pending" && !selectedTicket.scanned && !hasEventStarted({ date: selectedTicket.eventDate, time: selectedTicket.eventTime }) && (
                 <div className="border-t border-dashed border-gray-200 pt-5 print:hidden" id="ticket-transfer-section">
                   {!transferOpen ? (
                     <button

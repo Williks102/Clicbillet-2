@@ -48,6 +48,21 @@ export const SUPABASE_WEBHOOK_SECRET = (process.env.SUPABASE_WEBHOOK_SECRET || "
 // pour authentifier ses propres appels programmés — cf. /api/cron/expire-pending-tickets.
 export const CRON_SECRET = (process.env.CRON_SECRET || "").trim();
 
+// Contrôle d'accès : bornes de la fenêtre pendant laquelle un billet est scannable.
+//
+// Sans borne haute, /api/verify-ticket validait un billet payé et non scanné indéfiniment —
+// des mois après l'événement. Pour un organisateur récurrent, le billet de la semaine passée
+// ouvrait la porte de la suivante.
+//
+// La borne haute est la fin de l'événement, plus cette marge : un événement déborde presque
+// toujours un peu, et un retardataire ne doit pas être refusé pour dix minutes.
+export const EVENT_SCAN_GRACE_HOURS = Number(process.env.EVENT_SCAN_GRACE_HOURS) || 3;
+
+// Repli pour les événements créés avant l'introduction de la date de fin, qui n'en ont pas :
+// la fenêtre se ferme alors ce nombre d'heures après le DÉBUT. Assez large pour couvrir une
+// nuit entière, sans laisser un billet valide le lendemain.
+export const EVENT_DEFAULT_DURATION_HOURS = Number(process.env.EVENT_DEFAULT_DURATION_HOURS) || 12;
+
 // Délai au-delà duquel un billet resté "PENDING-" (paiement jamais confirmé ni explicitement
 // échoué) est considéré abandonné et annulé automatiquement, libérant l'inventaire réservé.
 export const PENDING_TICKET_EXPIRY_MINUTES = Number(process.env.PENDING_TICKET_EXPIRY_MINUTES) || 30;

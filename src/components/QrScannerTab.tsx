@@ -9,10 +9,20 @@ interface QrScannerTabProps {
   user: User;
 }
 
+function formatEventDay(dateStr: string): string {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+}
+
 export default function QrScannerTab({ user }: QrScannerTabProps) {
   const organizerId = user.id;
   const [scanResult, setScanResult] = useState<any | null>(null);
   const [errorResult, setErrorResult] = useState<string | null>(null);
+  // Un billet refusé parce qu'il est présenté hors de sa fenêtre de validité (trop tôt, ou
+  // événement terminé) n'est pas un faux billet : le contrôleur doit pouvoir faire la
+  // différence à l'entrée, d'où ce marqueur renvoyé par /api/verify-ticket.
+  const [refusedTicket, setRefusedTicket] = useState<any | null>(null);
   const [manualCode, setManualCode] = useState("");
   const [verifying, setVerifying] = useState(false);
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
@@ -126,6 +136,7 @@ export default function QrScannerTab({ user }: QrScannerTabProps) {
     setVerifying(true);
     setScanResult(null);
     setErrorResult(null);
+    setRefusedTicket(null);
 
     try {
       const response = await authFetch("/api/verify-ticket", {
@@ -139,6 +150,7 @@ export default function QrScannerTab({ user }: QrScannerTabProps) {
 
       const data = await response.json();
       if (!response.ok) {
+        if (data.reason === "scan-window") setRefusedTicket(data.ticket || null);
         throw new Error(data.error || "Une erreur est survenue lors de la vérification.");
       }
 
@@ -297,13 +309,27 @@ export default function QrScannerTab({ user }: QrScannerTabProps) {
               /* Custom decryption parse/error indicators */
               <div className="text-center space-y-4 py-6" id="scan-error-card">
                 <AlertTriangle className="mx-auto h-12 w-12 text-amber-500 animate-pulse" />
-                <h4 className="text-sm font-black text-gray-900">Billet ou signature invalide</h4>
+                <h4 className="text-sm font-black text-gray-900">
+                  {refusedTicket ? "Billet hors période de validité" : "Billet ou signature invalide"}
+                </h4>
                 <p className="text-xs text-gray-500 max-w-xs mx-auto leading-relaxed">{errorResult}</p>
+                {/* Le billet existe et il est authentique : on affiche son porteur pour que le
+                    contrôleur puisse trancher sur place (mauvaise date, mauvais événement...). */}
+                {refusedTicket && (
+                  <div className="mx-auto max-w-xs rounded-xl bg-gray-50 px-4 py-3 text-left" id="scan-refused-ticket">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-gray-400">Billet présenté</p>
+                    <p className="mt-1 text-xs font-bold text-gray-900">{refusedTicket.buyerName}</p>
+                    <p className="text-[11px] font-semibold text-gray-500">
+                      {refusedTicket.eventTitle} — {formatEventDay(refusedTicket.eventDate)} à {refusedTicket.eventTime}
+                    </p>
+                  </div>
+                )}
                 <button
                   type="button"
-                  onClick={() => { 
-                    setErrorResult(null); 
-                    isScanningRef.current = true; 
+                  onClick={() => {
+                    setErrorResult(null);
+                    setRefusedTicket(null);
+                    isScanningRef.current = true;
                     if (scannerRef.current) {
                       try { scannerRef.current.resume(); } catch(e) {}
                     }

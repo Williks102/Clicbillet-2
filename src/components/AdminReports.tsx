@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Sparkles, DollarSign, Building2, Ticket as TicketIcon, ScanLine, ShoppingCart } from "lucide-react";
 import { Event, Ticket } from "../types";
 import { isPaidTicket } from "../lib/ticketPayment";
-import { isEventPast } from "../lib/eventStatus";
+import { hasEventStarted } from "../lib/eventStatus";
 import { Granularity, buildTimeBuckets, bucketStart, formatPercent } from "../lib/chartBuckets";
 import StackedRevenueChart, { RevenueBucket, ACCENT_COLOR } from "./StackedRevenueChart";
 
@@ -64,7 +64,7 @@ export default function AdminReports({ events, tickets, commissionRate, loading 
 
     // Un billet non scanné pour un événement à venir n'est pas un absent : le taux d'entrée
     // ne se mesure que sur les événements déjà commencés.
-    const startedEventIds = new Set(events.filter(isEventPast).map((e) => e.id));
+    const startedEventIds = new Set(events.filter(hasEventStarted).map((e) => e.id));
     const scannable = paidTickets.filter((t) => startedEventIds.has(t.eventId));
     const scanned = scannable.filter((t) => t.scanned).length;
     const scanRate = scannable.length > 0 ? scanned / scannable.length : null;

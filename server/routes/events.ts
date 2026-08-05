@@ -89,6 +89,8 @@ router.get("/api/events", async (req: express.Request, res: express.Response) =>
         description: e.description,
         date: e.date,
         time: e.time,
+        endDate: e.end_date ?? null,
+        endTime: e.end_time ?? null,
         price: Number(e.price),
         ticketTypes: e.ticket_types,
         venue: e.venue,
@@ -224,6 +226,8 @@ router.get("/api/organizers/:alias", async (req: express.Request, res: express.R
           description: e.description,
           date: e.date,
           time: e.time,
+          endDate: e.end_date ?? null,
+          endTime: e.end_time ?? null,
           price: Number(e.price),
           ticketTypes: e.ticket_types,
           venue: e.venue,
@@ -273,7 +277,7 @@ router.get("/api/organizers/:alias", async (req: express.Request, res: express.R
 // Create Event Endpoint for Organizers
 router.post("/api/events", requireAuth, requireRole("organizer", "admin"), validateEvent, async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
-  const { title, description, date, time, price, ticketTypes, venue, category, banner, totalTickets, organizerName, waitingRoomEnabled, waitingRoomCapacity } = req.body;
+  const { title, description, date, time, endDate, endTime, price, ticketTypes, venue, category, banner, totalTickets, organizerName, waitingRoomEnabled, waitingRoomCapacity } = req.body;
   // Un organisateur ne peut créer un événement que pour lui-même ; un admin peut le créer
   // au nom d'un organisateur précis (organizerId du body), sinon pour lui-même par défaut.
   const organizerId = authUser.role === "admin" ? (req.body.organizerId || authUser.id) : authUser.id;
@@ -296,6 +300,8 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
           description: description || "Aucune description fournie.",
           date,
           time,
+          end_date: endDate || null,
+          end_time: endTime || null,
           price: Number(price),
           ticket_types: ticketTypes,
           venue,
@@ -312,8 +318,10 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
         .select()
         .single();
         
-      if (error && error.message.includes('status')) {
-        // Fallback for legacy DB missing 'status'
+      // Repli pour les bases antérieures aux migrations : 'status' (section 5) ou
+      // 'end_date'/'end_time' (section 20). On réinsère sans ces colonnes plutôt que
+      // de renvoyer une 500 à l'organisateur.
+      if (error && (error.message.includes('status') || error.message.includes('end_date') || error.message.includes('end_time'))) {
         const fallback = await supabase
           .from("events")
           .insert({
@@ -348,6 +356,8 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
         description: data.description,
         date: data.date,
         time: data.time,
+        endDate: data.end_date ?? null,
+        endTime: data.end_time ?? null,
         price: Number(data.price),
         ticketTypes: data.ticket_types,
         venue: data.venue,
@@ -374,6 +384,8 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
     description: description || "Aucune description fournie.",
     date,
     time,
+    endDate: endDate || null,
+    endTime: endTime || null,
     price: Number(price),
     ticketTypes,
     venue,
@@ -395,7 +407,7 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
 router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), validateEvent, async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
   const { id } = req.params;
-  const { title, description, date, time, price, ticketTypes, venue, category, banner, totalTickets, waitingRoomEnabled, waitingRoomCapacity } = req.body;
+  const { title, description, date, time, endDate, endTime, price, ticketTypes, venue, category, banner, totalTickets, waitingRoomEnabled, waitingRoomCapacity } = req.body;
 
   if (!title || !date || !time || isNaN(price) || !venue || !category || !totalTickets) {
     return res.status(400).json({ error: "Veuillez remplir tous les champs obligatoires correctement." });
@@ -427,6 +439,8 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
           description: description || "Aucune description fournie.",
           date,
           time,
+          end_date: endDate || null,
+          end_time: endTime || null,
           price: Number(price),
           ticket_types: ticketTypes,
           venue,
@@ -463,6 +477,8 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
         description: data.description,
         date: data.date,
         time: data.time,
+        endDate: data.end_date ?? null,
+        endTime: data.end_time ?? null,
         price: Number(data.price),
         ticketTypes: data.ticket_types,
         venue: data.venue,
@@ -498,6 +514,8 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
   event.description = description || "Aucune description fournie.";
   event.date = date;
   event.time = time;
+  event.endDate = endDate || null;
+  event.endTime = endTime || null;
   event.price = Number(price);
   event.ticketTypes = ticketTypes;
   event.venue = venue;

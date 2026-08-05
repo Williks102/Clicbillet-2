@@ -3,7 +3,7 @@ import { Plus, LayoutDashboard, BarChart3, Calendar, MapPin, Tag, Users, DollarS
 import { Event, User, SalesStatus } from "../types";
 import { authFetch } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
-import { isEventPast } from "../lib/eventStatus";
+import { isEventPast, EVENT_SCAN_GRACE_HOURS, EVENT_DEFAULT_DURATION_HOURS } from "../lib/eventStatus";
 import { compressImageToDataUrl } from "../lib/imageCompress";
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
@@ -160,6 +160,9 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [description, setDescription] = useState("");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
+  // Fin de l'événement : facultative, mais c'est elle qui ferme la fenêtre de scan des billets.
+  const [endDate, setEndDate] = useState("");
+  const [endTime, setEndTime] = useState("");
   const [price, setPrice] = useState("");
   const [ticketTypes, setTicketTypes] = useState<{name: string; price: string; total: string}[]>([{ name: 'Standard', price: '', total: '' }]);
   const [venue, setVenue] = useState("");
@@ -180,6 +183,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [editDescription, setEditDescription] = useState("");
   const [editDate, setEditDate] = useState("");
   const [editTime, setEditTime] = useState("");
+  const [editEndDate, setEditEndDate] = useState("");
+  const [editEndTime, setEditEndTime] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [editTicketTypes, setEditTicketTypes] = useState<{name: string; price: string; total: string}[]>([]);
   const [editVenue, setEditVenue] = useState("");
@@ -342,6 +347,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     setEditDescription(evt.description);
     setEditDate(evt.date);
     setEditTime(evt.time);
+    setEditEndDate(evt.endDate || "");
+    setEditEndTime(evt.endTime || "");
     setEditPrice(String(evt.price));
     setEditVenue(evt.venue);
     setEditCategory(evt.category);
@@ -376,6 +383,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       description: editDescription,
       date: editDate,
       time: editTime,
+      endDate: editEndDate || null,
+      endTime: editEndTime || null,
       price: Number(editPrice),
       ticketTypes: cleanedEditTiers,
       venue: editVenue,
@@ -592,6 +601,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       description,
       date,
       time,
+      endDate: endDate || null,
+      endTime: endTime || null,
       price: Number(price),
       ticketTypes: ticketTypes.filter(t => t.name.trim() !== "").map(t => ({ name: t.name, price: Number(t.price), total: Number(t.total) || 0 })),
       venue,
@@ -626,6 +637,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       setDescription("");
       setDate("");
       setTime("");
+      setEndDate("");
+      setEndTime("");
       setPrice("");
       setTicketTypes([{ name: 'Standard', price: '', total: '' }]);
       setVenue("");
@@ -1090,6 +1103,42 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                 className="w-full rounded-xl border border-gray-200 py-3 px-4 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 text-gray-700"
               />
             </div>
+
+            {/* Fin de l'événement : c'est elle qui ferme la fenêtre de scan. La laisser vide
+                revient à accepter la durée forfaitaire par défaut. Si l'organisateur ne saisit
+                qu'une heure de fin, on complète la date par celle du début (cas le plus courant). */}
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-gray-700">
+                Date de fin <span className="font-semibold text-gray-400">(facultatif)</span>
+              </label>
+              <input
+                type="date"
+                min={date || undefined}
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full rounded-xl border border-gray-200 py-3 px-4 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 text-gray-700"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-gray-700">
+                Heure de fin <span className="font-semibold text-gray-400">(facultatif)</span>
+              </label>
+              <input
+                type="time"
+                value={endTime}
+                onChange={(e) => {
+                  setEndTime(e.target.value);
+                  if (e.target.value && !endDate) setEndDate(date);
+                }}
+                className="w-full rounded-xl border border-gray-200 py-3 px-4 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 text-gray-700"
+              />
+            </div>
+
+            <p className="sm:col-span-2 -mt-1 text-[11px] font-medium text-gray-500">
+              Les billets cessent d'être scannables {EVENT_SCAN_GRACE_HOURS} h après la fin.
+              Sans fin renseignée, l'événement est considéré comme durant {EVENT_DEFAULT_DURATION_HOURS} h.
+            </p>
 
             <div className="space-y-1">
               <label className="text-xs font-bold text-gray-700">Prix de base (Franc CFA - XOF)</label>
@@ -1686,6 +1735,39 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                     className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-xs outline-none text-gray-700"
                   />
                 </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-700">
+                    Date de fin <span className="font-semibold text-gray-400">(facultatif)</span>
+                  </label>
+                  <input
+                    type="date"
+                    min={editDate || undefined}
+                    value={editEndDate}
+                    onChange={(e) => setEditEndDate(e.target.value)}
+                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-xs outline-none text-gray-700"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-700">
+                    Heure de fin <span className="font-semibold text-gray-400">(facultatif)</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={editEndTime}
+                    onChange={(e) => {
+                      setEditEndTime(e.target.value);
+                      if (e.target.value && !editEndDate) setEditEndDate(editDate);
+                    }}
+                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-xs outline-none text-gray-700"
+                  />
+                </div>
+
+                <p className="sm:col-span-2 -mt-1 text-[11px] font-medium text-gray-500">
+                  Les billets cessent d'être scannables {EVENT_SCAN_GRACE_HOURS} h après la fin.
+                  Sans fin renseignée, l'événement est considéré comme durant {EVENT_DEFAULT_DURATION_HOURS} h.
+                </p>
 
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-700">Prix de base (XOF)</label>

@@ -4,7 +4,7 @@ import { isSupabaseEnabled, supabase, isProduction } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { requireAuth, requireRole, optionalAuth } from "../lib/auth.js";
 import { validateCheckout, validateVerifyTicket, validateTransferTicket } from "../lib/validators.js";
-import { runInBackground, isEventPast, isQrUnlocked, getQrUnlockTime, generateTicketQrCode } from "../lib/utils.js";
+import { runInBackground, isEventPast, hasEventStarted, isQrUnlocked, getQrUnlockTime, generateTicketQrCode, getScanWindow, getScanWindowState, EventSchedule } from "../lib/utils.js";
 import { sendOrganizerSaleEmail, sendTicketEmail, sendReservationExpiredEmail, sendTicketTransferredEmail, sendTicketTransferConfirmationEmail } from "../lib/email.js";
 import { verifyPaystackSignature } from "../lib/security.js";
 import { checkoutRateLimiter, transferTicketRateLimiter } from "../lib/rateLimiters.js";
@@ -133,8 +133,8 @@ router.post("/api/tickets/:id/transfer", transferTicketRateLimiter, requireAuth,
       if (ref.startsWith("PENDING-") || ref.startsWith("FAILED-") || ref.startsWith("EXPIRED-")) {
         return res.status(400).json({ error: "Ce billet n'est pas payé, il ne peut pas être transféré." });
       }
-      if (isEventPast({ date: ticket.event_date, time: ticket.event_time })) {
-        return res.status(400).json({ error: "Cet événement est déjà passé." });
+      if (hasEventStarted({ date: ticket.event_date, time: ticket.event_time })) {
+        return res.status(400).json({ error: "Cet événement a déjà commencé, le billet n'est plus transférable." });
       }
 
       const { data: existingAccount } = await supabase.from("users").select("id, name").eq("email", recipientEmail).maybeSingle();
@@ -213,8 +213,8 @@ router.post("/api/tickets/:id/transfer", transferTicketRateLimiter, requireAuth,
   if (ref.startsWith("PENDING-") || ref.startsWith("FAILED-") || ref.startsWith("EXPIRED-")) {
     return res.status(400).json({ error: "Ce billet n'est pas payé, il ne peut pas être transféré." });
   }
-  if (isEventPast({ date: ticket.eventDate, time: ticket.eventTime })) {
-    return res.status(400).json({ error: "Cet événement est déjà passé." });
+  if (hasEventStarted({ date: ticket.eventDate, time: ticket.eventTime })) {
+    return res.status(400).json({ error: "Cet événement a déjà commencé, le billet n'est plus transférable." });
   }
 
   const existingAccount = db.users.find((u: any) => u.email.toLowerCase() === recipientEmail);
@@ -431,7 +431,7 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
         return res.status(404).json({ error: "Événement introuvable." });
       }
 
-      if (isEventPast({ date: event.date, time: event.time })) {
+      if (isEventPast({ date: event.date, time: event.time, endDate: event.end_date, endTime: event.end_time })) {
         return res.status(400).json({ error: "Cet événement est terminé, l'achat de billets n'est plus possible." });
       }
 
@@ -655,7 +655,7 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
     return res.status(404).json({ error: "Événement introuvable." });
   }
 
-  if (isEventPast({ date: event.date, time: event.time })) {
+  if (isEventPast({ date: event.date, time: event.time, endDate: event.endDate, endTime: event.endTime })) {
     return res.status(400).json({ error: "Cet événement est terminé, l'achat de billets n'est plus possible." });
   }
 
@@ -1037,6 +1037,22 @@ router.post("/api/dev/simulate-payment", async (req: express.Request, res: expre
 });
 
 // Ticket Verification Endpoint (QR Scanning Verification)
+// Message de refus quand le billet est présenté hors de la fenêtre de validité de son
+// événement, ou null si le scan est autorisé. Le message distingue les deux bornes : refuser
+// un billet trop tôt et refuser un billet périmé n'appellent pas la même réaction du
+// contrôleur à l'entrée.
+function describeScanWindowRefusal(evt: EventSchedule): string | null {
+  const state = getScanWindowState(evt);
+  if (state === "open") return null;
+
+  const { opensAt, closesAt } = getScanWindow(evt);
+  const format = (d: Date) => d.toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short" });
+
+  return state === "too-early"
+    ? `Trop tôt : ce billet ne sera valide qu'à partir du ${format(opensAt)}.`
+    : `Événement terminé : ce billet n'est plus valide depuis le ${format(closesAt)}.`;
+}
+
 router.post("/api/verify-ticket", requireAuth, requireRole("organizer", "admin"), validateVerifyTicket, async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
   const { qrCodeData } = req.body;
@@ -1062,19 +1078,23 @@ router.post("/api/verify-ticket", requireAuth, requireRole("organizer", "admin")
         return res.status(404).json({ error: "Billet introuvable dans notre système de sécurité." });
       }
 
+      // L'événement est désormais chargé pour TOUT scan, et non plus seulement pour le
+      // contrôle de propriété : sa fenêtre de validité en dépend.
+      const { data: ticketEvent } = await supabase
+        .from("events")
+        .select("organizer_id, date, time, end_date, end_time")
+        .eq("id", ticket.event_id)
+        .maybeSingle();
+
       // Un organisateur ne doit pouvoir scanner que les billets de SES PROPRES événements —
       // sans ce contrôle, n'importe quel compte organisateur pouvait scanner/consommer les
       // billets d'un événement appartenant à un autre organisateur.
       if (authUser.role !== "admin") {
-        const { data: ticketEvent } = await supabase
-          .from("events")
-          .select("organizer_id")
-          .eq("id", ticket.event_id)
-          .maybeSingle();
         if (!ticketEvent || ticketEvent.organizer_id !== authUser.id) {
           return res.status(403).json({ error: "Ce billet n'appartient pas à l'un de vos événements." });
         }
       }
+
 
       const mappedTicket = {
         id: ticket.id,
@@ -1116,6 +1136,21 @@ router.post("/api/verify-ticket", requireAuth, requireRole("organizer", "admin")
         });
       }
 
+      // Fenêtre de validité : dernier refus avant de consommer le billet, pour que
+      // "déjà utilisé" et "paiement non confirmé" — plus actionnables à l'entrée — soient
+      // annoncés en priorité.
+      if (ticketEvent) {
+        const windowRefusal = describeScanWindowRefusal({
+          date: ticketEvent.date,
+          time: ticketEvent.time,
+          endDate: ticketEvent.end_date,
+          endTime: ticketEvent.end_time,
+        });
+        if (windowRefusal) {
+          return res.status(409).json({ success: false, reason: "scan-window", error: windowRefusal, ticket: mappedTicket });
+        }
+      }
+
       // Mark as verified
       const verifiedAt = new Date().toISOString();
       const { error: updateError } = await supabase
@@ -1148,13 +1183,15 @@ router.post("/api/verify-ticket", requireAuth, requireRole("organizer", "admin")
     return res.status(404).json({ error: "Billet introuvable dans notre système de sécurité." });
   }
 
+  const ticketEvent = db.events.find((e: any) => e.id === ticket.eventId) as any;
+
   // Un organisateur ne doit pouvoir scanner que les billets de SES PROPRES événements.
   if (authUser.role !== "admin") {
-    const ticketEvent = db.events.find((e: any) => e.id === ticket.eventId);
     if (!ticketEvent || ticketEvent.organizerId !== authUser.id) {
       return res.status(403).json({ error: "Ce billet n'appartient pas à l'un de vos événements." });
     }
   }
+
 
   if (ticket.scanned) {
     return res.status(200).json({
@@ -1174,6 +1211,13 @@ router.post("/api/verify-ticket", requireAuth, requireRole("organizer", "admin")
       error: "Paiement non confirmé pour ce billet : entrée refusée.",
       ticket
     });
+  }
+
+  if (ticketEvent) {
+    const windowRefusal = describeScanWindowRefusal(ticketEvent);
+    if (windowRefusal) {
+      return res.status(409).json({ success: false, reason: "scan-window", error: windowRefusal, ticket });
+    }
   }
 
   // Mark as verified

@@ -116,6 +116,7 @@ export const validateResetPassword = async (req: express.Request, res: express.R
 // Middleware de validation pour la création / modification d'événements
 export const validateEvent = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const { title, description, date, time, price, venue, category, banner, totalTickets, organizerId } = req.body;
+  let { endDate, endTime } = req.body;
 
   if (!title || !date || !time || !venue || !category || !organizerId) {
     return res.status(400).json({ error: "Veuillez remplir tous les champs obligatoires correctement." });
@@ -164,6 +165,45 @@ export const validateEvent = (req: express.Request, res: express.Response, next:
   if (!timeRegex.test(time)) {
     return res.status(400).json({ error: "Le format de l'heure doit être HH:MM." });
   }
+
+  // Fin d'événement (facultative). Elle borne la fenêtre de scan : sans elle, on retombe
+  // sur une durée par défaut (EVENT_DEFAULT_DURATION_HOURS). Une heure de fin seule signifie
+  // « le même jour » — c'est le cas courant, on complète la date plutôt que de refuser.
+  endDate = endDate || "";
+  endTime = endTime || "";
+
+  if (endTime && !endDate) {
+    endDate = date;
+  }
+  if (endDate && !endTime) {
+    return res.status(400).json({ error: "Veuillez préciser l'heure de fin de l'événement." });
+  }
+
+  if (endDate) {
+    if (!dateRegex.test(endDate)) {
+      return res.status(400).json({ error: "Le format de la date de fin doit être YYYY-MM-DD." });
+    }
+    if (!timeRegex.test(endTime)) {
+      return res.status(400).json({ error: "Le format de l'heure de fin doit être HH:MM." });
+    }
+
+    const start = new Date(`${date}T${time}`);
+    const end = new Date(`${endDate}T${endTime}`);
+    if (isNaN(end.getTime())) {
+      return res.status(400).json({ error: "La date de fin de l'événement est invalide." });
+    }
+    if (end.getTime() <= start.getTime()) {
+      return res.status(400).json({ error: "La fin de l'événement doit être postérieure à son début." });
+    }
+    // Garde-fou : au-delà d'un mois, c'est presque toujours une faute de saisie (année erronée),
+    // et la fenêtre de scan resterait ouverte des semaines durant.
+    if (end.getTime() - start.getTime() > 31 * 24 * 60 * 60 * 1000) {
+      return res.status(400).json({ error: "La durée de l'événement ne peut pas dépasser 31 jours." });
+    }
+  }
+
+  req.body.endDate = endDate || null;
+  req.body.endTime = endTime || null;
 
   if (banner && !banner.startsWith("http://") && !banner.startsWith("https://") && !banner.startsWith("data:image/")) {
     return res.status(400).json({ error: "L'URL de l'image de couverture est invalide (doit commencer par http://, https:// ou être une image uploadée)." });

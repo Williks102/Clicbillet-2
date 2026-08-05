@@ -44,6 +44,8 @@ router.get("/api/admin/stats", async (req: express.Request, res: express.Respons
         description: e.description,
         date: e.date,
         time: e.time,
+        endDate: e.end_date ?? null,
+        endTime: e.end_time ?? null,
         price: Number(e.price),
         venue: e.venue,
         category: e.category,
