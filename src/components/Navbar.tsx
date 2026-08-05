@@ -62,6 +62,7 @@ export default function Navbar({ user, onLogout, activeTab, setActiveTab, onOpen
               <>
                 {/* User Dashboard Tab Selector */}
                 {user.role === "admin" ? (
+                  <>
                   <button
                     id="tab-admin-dashboard-btn"
                     onClick={() => setActiveTab("admin-dashboard")}
@@ -74,6 +75,19 @@ export default function Navbar({ user, onLogout, activeTab, setActiveTab, onOpen
                     <ShieldCheck className="h-4 w-4 text-orange-600" />
                     <span>Supervision</span>
                   </button>
+                  <button
+                    id="tab-admin-scanner-btn"
+                    onClick={() => setActiveTab("scanner")}
+                    className={`flex items-center space-x-1.5 rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
+                      activeTab === "scanner"
+                        ? "bg-green-50 text-green-600"
+                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    }`}
+                  >
+                    <Camera className="h-4 w-4" />
+                    <span>Scanner</span>
+                  </button>
+                  </>
                 ) : user.role === "client" ? (
                   <button
                     id="tab-client-dashboard-btn"

@@ -24,7 +24,7 @@
         "X-Frame-Options": "DENY",
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "strict-origin-when-cross-origin",
-        "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(self)",
+        "Permissions-Policy": "camera=(self), microphone=(), geolocation=(), payment=(self)",
         "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
         "Content-Security-Policy": "default-src 'self'; script-src 'self' https://js.paystack.co; connect-src 'self' https://www.clicbillet.com https://js.paystack.co https://api.paystack.co https://checkout.paystack.com https://standard.paystack.co https://satvespjethrqgiwsfov.supabase.co wss://satvespjethrqgiwsfov.supabase.co; style-src 'self' https: 'unsafe-inline'; img-src 'self' https: data:; font-src 'self' https: data:; object-src 'none'; frame-src 'self' https://www.clicbillet.com https://js.paystack.co https://api.paystack.co https://checkout.paystack.com https://standard.paystack.co; frame-ancestors 'self'; base-uri 'self'; form-action 'self' https://www.clicbillet.com https://js.paystack.co https://api.paystack.co https://checkout.paystack.com https://standard.paystack.co; upgrade-insecure-requests"
       },
