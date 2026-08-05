@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { TrendingUp, Table2 } from "lucide-react";
+import { isPaidTicket } from "../lib/ticketPayment";
 
 // Ventes brutes par jour sur les 7 derniers jours.
 //
@@ -9,8 +10,12 @@ import { TrendingUp, Table2 } from "lucide-react";
 //
 // Le montant retenu est le PRIX BRUT (avant commission plateforme), même définition que
 // "Brut total" dans la tuile de solde juste au-dessus : les deux doivent se réconcilier.
+//
+// Seuls les billets réellement encaissés sont comptés (cf. src/lib/ticketPayment.ts) : une
+// réservation non payée est annulée par le cron au bout de quelques minutes, la porter sur la
+// courbe ferait apparaître une vente qui s'effacerait ensuite toute seule.
 interface WeeklySalesChartProps {
-  tickets?: { pricePaid: number; purchaseDate: string }[];
+  tickets?: { pricePaid: number; purchaseDate: string; transactionRef?: string | null }[];
   loading?: boolean;
 }
 
@@ -62,6 +67,7 @@ function buildBuckets(tickets: WeeklySalesChartProps["tickets"]): DayBucket[] {
   }
 
   for (const ticket of tickets || []) {
+    if (!isPaidTicket(ticket)) continue;
     const purchased = new Date(ticket.purchaseDate);
     if (isNaN(purchased.getTime())) continue;
     const bucket = byKey.get(startOfDay(purchased).toDateString());

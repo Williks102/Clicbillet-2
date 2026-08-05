@@ -6,6 +6,7 @@ import { requireRole } from "../lib/auth.js";
 import { runInBackground } from "../lib/utils.js";
 import { sendAdminPayoutRequestEmail } from "../lib/email.js";
 import { getDefaultCommissionRate, computeCommissionBreakdown } from "../lib/commission.js";
+import { isPaidTicket } from "../lib/ticketPayment.js";
 import { validateOrganizerAlias, MAX_ORGANIZER_BIO_LENGTH } from "../lib/organizerAlias.js";
 import { encryptPayoutDetails } from "../lib/payoutEncryption.js";
 
@@ -135,7 +136,9 @@ router.get("/api/organizer/stats", requireRole("organizer", "admin"), async (req
       const eventCommissionRateById = new Map((organizerEvents || []).map((e: any) => [e.id, e.commission_rate != null ? Number(e.commission_rate) : null]));
       const { totalGrossRevenue, totalCommission, totalRevenue, effectiveCommissionRate: commissionRate } = computeCommissionBreakdown(matchedTickets, eventCommissionRateById, defaultCommissionRate);
 
-      const ticketsSold = matchedTickets.reduce((sum: number, t: any) => sum + Number(t.quantity || 1), 0);
+      // Même définition que le chiffre d'affaires ci-dessus : un billet réservé mais jamais
+      // payé n'est pas vendu — il sera annulé par le cron et son stock rendu à l'événement.
+      const ticketsSold = matchedTickets.filter(isPaidTicket).reduce((sum: number, t: any) => sum + Number(t.quantity || 1), 0);
       const activeEvents = (organizerEvents || []).length;
 
       const recentSales = matchedTickets.slice(0, 10).map((t: any) => ({
@@ -189,7 +192,7 @@ router.get("/api/organizer/stats", requireRole("organizer", "admin"), async (req
   const eventCommissionRateById = new Map<string, number | null>(organizerEvents.map((e: any) => [e.id, e.commissionRate != null ? Number(e.commissionRate) : null]));
   const { totalGrossRevenue, totalCommission, totalRevenue, effectiveCommissionRate: commissionRate } = computeCommissionBreakdown(matchedTickets, eventCommissionRateById, defaultCommissionRate);
 
-  const ticketsSold = matchedTickets.reduce((sum: number, t: any) => sum + t.quantity, 0);
+  const ticketsSold = matchedTickets.filter(isPaidTicket).reduce((sum: number, t: any) => sum + t.quantity, 0);
   const activeEvents = organizerEvents.length;
 
   const recentSales = matchedTickets.slice(0, 10).map((t: any) => ({
@@ -230,7 +233,10 @@ async function getOrganizerAvailableBalance(organizerId: string): Promise<number
 
   let matchedTickets: any[] = [];
   if (eventIds.length > 0) {
-    const { data: tkts } = await supabase.from("tickets").select("price_paid, event_id").in("event_id", eventIds);
+    // transaction_ref est indispensable ici : computeCommissionBreakdown s'en sert pour
+    // écarter les billets non encaissés (PENDING-/EXPIRED-/FAILED-). Sans cette colonne,
+    // aucun billet ne serait reconnu comme payé et le solde disponible tomberait à zéro.
+    const { data: tkts } = await supabase.from("tickets").select("price_paid, event_id, transaction_ref").in("event_id", eventIds);
     matchedTickets = tkts || [];
   }
 

@@ -7,6 +7,7 @@ import { isEventPast } from "../lib/eventStatus";
 import { compressImageToDataUrl } from "../lib/imageCompress";
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
+import { isPaidTicket } from "../lib/ticketPayment";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 import AccountCodeBadge from "./AccountCodeBadge";
 import WeeklySalesChart from "./WeeklySalesChart";
@@ -83,8 +84,7 @@ interface MonthlyStatement {
 function groupMonthlyStatements(tickets: SalesStatus["tickets"], commissionRate: number): MonthlyStatement[] {
   const groups = new Map<string, SalesStatus["tickets"]>();
   for (const t of tickets) {
-    const ref = t.transactionRef || "";
-    if (!ref.startsWith("PAID-") && !ref.startsWith("FREE-")) continue;
+    if (!isPaidTicket(t)) continue;
     const d = new Date(t.purchaseDate);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     if (!groups.has(key)) groups.set(key, []);
