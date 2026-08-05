@@ -27,6 +27,8 @@ function mapEvent(e: any, tierSoldByEvent: Record<string, Record<string, number>
     description: e.description,
     date: e.date,
     time: e.time,
+    endDate: e.end_date ?? null,
+    endTime: e.end_time ?? null,
     price: Number(e.price),
     ticketTypes: e.ticket_types,
     venue: e.venue,

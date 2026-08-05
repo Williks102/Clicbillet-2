@@ -591,7 +591,16 @@ ALTER TABLE public.events ADD COLUMN IF NOT EXISTS end_time TEXT;
 
 -- La vue publique doit exposer ces colonnes, sans quoi le catalogue lu directement par le
 -- frontend (cf. section 15) ne saurait pas quand un événement se termine réellement.
-CREATE OR REPLACE VIEW public.events_public
+--
+-- DROP puis CREATE, et non CREATE OR REPLACE : PostgreSQL n'autorise le remplacement d'une vue
+-- que si les colonnes existantes gardent le même nom, le même type ET le même rang. Insérer
+-- end_date/end_time après "time" décale toutes les suivantes, ce que le moteur interprète
+-- comme un renommage de colonne et refuse (ERROR 42P16). Le DROP est volontairement sans
+-- CASCADE : si un objet dépendait de cette vue, mieux vaut une erreur explicite que sa
+-- suppression silencieuse. Le GRANT ci-dessous est indispensable — il disparaît avec la vue.
+DROP VIEW IF EXISTS public.events_public;
+
+CREATE VIEW public.events_public
 WITH (security_invoker = true) AS
 SELECT
   id, title, description, date, time, end_date, end_time, price, ticket_types, venue, category,
