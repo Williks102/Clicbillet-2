@@ -16,9 +16,13 @@ export const PAYSTACK_SECRET_KEY = (process.env.PAYSTACK_SECRET_KEY || "").trim(
 // traité ou perdu (cf. server/routes/tickets.ts, /api/webhooks/paystack).
 export const PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL = (process.env.PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL || "").trim();
 export const RESEND_API_KEY = (process.env.RESEND_API_KEY || "").trim();
-// Domaine d'envoi/réception distinct du domaine web (clicbillet.com, sans www, appartient à
-// une autre application (Laravel) — pas celle-ci) : on garde monticket.online ici tant que
-// clicbillet.com n'est pas vérifié (SPF/DKIM) côté Resend, pour ne pas casser l'envoi d'emails.
+// Domaine d'envoi encore distinct du domaine web. clicbillet.com était auparavant partagé avec
+// une autre application (Laravel) ; ce n'est plus le cas — il ne dessert plus que cette app.
+// Le repli reste néanmoins monticket.online tant que clicbillet.com n'est pas vérifié
+// (SPF/DKIM) côté Resend : basculer l'expéditeur avant cette vérification ferait rejeter tous
+// les emails transactionnels — billets, réinitialisation de mot de passe, notifications.
+// Seul l'EXPÉDITEUR est concerné ; le destinataire (ADMIN_NOTIFICATION_EMAIL ci-dessous) peut
+// être sur n'importe quel domaine.
 export const RESEND_FROM_EMAIL = (process.env.RESEND_FROM_EMAIL || "ClicBillet <no-reply@monticket.online>").trim();
 // ADMIN_EMAIL est accepté comme alias : c'est le nom réellement utilisé dans la configuration
 // Vercel du projet. Sans cet alias, la variable définie là-bas était purement ignorée et
