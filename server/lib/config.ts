@@ -137,8 +137,14 @@ export const isProduction = process.env.NODE_ENV === "production";
 //
 // La barre finale éventuelle est retirée : "https://site.ci/" produirait sinon des URL en
 // double barre ("https://site.ci//e/evt-1"), que certains robots d'aperçu refusent.
+// Domaine canonique retenu pour la plateforme : https://www.clicbillet.com. C'est aussi le
+// repli en production, de sorte qu'une variable oubliée donne quand même la bonne origine —
+// mais la définir explicitement reste préférable (cf. .env.example), le repli n'ayant aucun
+// moyen de suivre un changement de domaine.
+const CANONICAL_PRODUCTION_ORIGIN = "https://www.clicbillet.com";
+
 const APP_ORIGIN_FROM_ENV = (process.env.APP_ORIGIN || "").trim();
-export const APP_ORIGIN = (APP_ORIGIN_FROM_ENV || (isProduction ? "https://www.clicbillet.com" : `http://localhost:${PORT}`))
+export const APP_ORIGIN = (APP_ORIGIN_FROM_ENV || (isProduction ? CANONICAL_PRODUCTION_ORIGIN : `http://localhost:${PORT}`))
   .trim()
   .replace(/\/+$/, "");
 
@@ -146,12 +152,16 @@ export const APP_ORIGIN = (APP_ORIGIN_FROM_ENV || (isProduction ? "https://www.c
 // mais les liens de réinitialisation de mot de passe, les redirections de confirmation
 // d'email et les aperçus de partage pointent tous vers un domaine qui n'est pas le vôtre.
 // Mieux vaut le dire au démarrage que le découvrir sur un lien envoyé à un client.
+// Volontairement en warn et non en error : le repli vaut le domaine canonique, donc une
+// variable non définie donne quand même la bonne origine. Un console.error partirait à chaque
+// démarrage vers Sentry (captureConsoleIntegration, cf. server/lib/observability.ts) pour une
+// situation qui fonctionne — exactement le genre d'alerte non actionnable qui noie les vraies.
 if (isProduction && !APP_ORIGIN_FROM_ENV) {
-  console.error(
-    `[Config] APP_ORIGIN n'est pas définie en production : repli sur "${APP_ORIGIN}". ` +
-    `Si ce n'est pas le domaine réellement servi, les liens de réinitialisation de mot de passe, ` +
-    `les confirmations d'email et les aperçus de partage pointeront tous au mauvais endroit. ` +
-    `Définissez APP_ORIGIN sur l'origine publique exacte (ex: https://www.mondomaine.ci).`
+  console.warn(
+    `[Config] APP_ORIGIN n'est pas définie : repli sur le domaine canonique "${APP_ORIGIN}". ` +
+    `Définissez-la explicitement si le domaine servi change, sans quoi les liens de ` +
+    `réinitialisation de mot de passe, les confirmations d'email et les aperçus de partage ` +
+    `continueront de pointer vers ce domaine.`
   );
 }
 
