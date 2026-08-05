@@ -4,6 +4,7 @@ import { Ticket, TicketTransfer, User } from "../types";
 import { authFetch } from "../lib/apiClient";
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
+import { isPaidTicket } from "../lib/ticketPayment";
 import { isEventPast } from "../lib/eventStatus";
 import ResponsiveSheet from "./ResponsiveSheet";
 import AccountCodeBadge from "./AccountCodeBadge";
@@ -25,8 +26,8 @@ interface BuyerOrder {
 function groupPaidOrders(tickets: Ticket[]): BuyerOrder[] {
   const groups = new Map<string, Ticket[]>();
   for (const t of tickets) {
+    if (!isPaidTicket(t)) continue;
     const ref = t.transactionRef || "";
-    if (!ref.startsWith("PAID-") && !ref.startsWith("FREE-")) continue;
     if (!groups.has(ref)) groups.set(ref, []);
     groups.get(ref)!.push(t);
   }

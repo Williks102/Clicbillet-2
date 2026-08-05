@@ -6,6 +6,7 @@ import { requireAuth, requireRole } from "../lib/auth.js";
 import { runInBackground } from "../lib/utils.js";
 import { sendOrganizerPayoutStatusEmail } from "../lib/email.js";
 import { getDefaultCommissionRate, computeCommissionBreakdown } from "../lib/commission.js";
+import { isPaidTicket } from "../lib/ticketPayment.js";
 import { findTicketsByReference, confirmPaymentForTickets } from "../lib/paymentConfirmation.js";
 import { decryptPayoutDetails } from "../lib/payoutEncryption.js";
 
@@ -30,7 +31,9 @@ router.get("/api/admin/stats", async (req: express.Request, res: express.Respons
       const { totalGrossRevenue: totalRevenue, totalCommission: totalPlatformCommission, effectiveCommissionRate: commissionRate } = computeCommissionBreakdown(matchedTickets, eventCommissionRateById, defaultCommissionRate);
       const totalOrganizerPayout = totalRevenue - totalPlatformCommission;
 
-      const totalTicketsSold = matchedTickets.reduce((sum: number, t: any) => sum + Number(t.quantity || 1), 0);
+      // Cf. server/lib/ticketPayment.ts : seuls les billets encaissés comptent comme vendus,
+      // au même titre que le chiffre d'affaires calculé juste au-dessus.
+      const totalTicketsSold = matchedTickets.filter(isPaidTicket).reduce((sum: number, t: any) => sum + Number(t.quantity || 1), 0);
       const totalUsers = (users || []).length;
       const totalEvents = (events || []).length;
 
@@ -98,7 +101,7 @@ router.get("/api/admin/stats", async (req: express.Request, res: express.Respons
   const { totalGrossRevenue: totalRevenue, totalCommission: totalPlatformCommission, effectiveCommissionRate: commissionRate } = computeCommissionBreakdown(db.tickets, eventCommissionRateById, defaultCommissionRate);
   const totalOrganizerPayout = totalRevenue - totalPlatformCommission;
   
-  const totalTicketsSold = db.tickets.reduce((sum: number, t: any) => sum + t.quantity, 0);
+  const totalTicketsSold = db.tickets.filter(isPaidTicket).reduce((sum: number, t: any) => sum + t.quantity, 0);
   const totalUsers = db.users.length;
   const totalEvents = db.events.length;
 
