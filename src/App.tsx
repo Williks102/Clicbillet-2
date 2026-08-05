@@ -75,6 +75,10 @@ export default function App() {
   const [authModalVisible, setAuthModalVisible] = useState(false);
   const [guestChoiceEvent, setGuestChoiceEvent] = useState<Event | null>(null);
   const [guestInfo, setGuestInfo] = useState<GuestInfo | null>(null);
+  // Billets choisis sur la page de l'événement. Conservés pendant les détours possibles
+  // (choix compte/invité, connexion, file d'attente) pour que la modale de paiement les
+  // retrouve intacts et n'ait pas à les redemander.
+  const [pendingQuantities, setPendingQuantities] = useState<Record<string, number>>({});
   const [resetToken, setResetToken] = useState<string | null>(null);
   const [systemAlert, setSystemAlert] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -309,7 +313,8 @@ export default function App() {
     }
   }
 
-  function handleBuyTicketTrigger(event: Event) {
+  function handleBuyTicketTrigger(event: Event, quantities: Record<string, number> = {}) {
+    setPendingQuantities(quantities);
     if (!user) {
       setGuestChoiceEvent(event);
     } else {
@@ -425,7 +430,6 @@ export default function App() {
                 ) : (
                   <LandingPage
                     events={events}
-                    onBuyTicket={handleBuyTicketTrigger}
                     onViewEvent={handleViewEvent}
                     userRole={user?.role}
                     onViewOrganizer={handleViewOrganizer}
@@ -450,7 +454,6 @@ export default function App() {
               <OrganizerProfilePage
                 alias={viewingOrganizerAlias}
                 onBack={handleBackFromOrganizerProfile}
-                onBuyTicket={handleBuyTicketTrigger}
                 onViewEvent={handleViewEvent}
               />
             )}
@@ -531,6 +534,7 @@ export default function App() {
           event={checkoutEvent}
           user={user}
           guestInfo={guestInfo ?? undefined}
+          initialQuantities={pendingQuantities}
           onClose={() => { setCheckoutEvent(null); setGuestInfo(null); }}
           onSuccess={handleCheckoutSuccess}
           onOpenAuth={() => {
