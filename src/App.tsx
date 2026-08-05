@@ -1,23 +1,40 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import Navbar from "./components/Navbar";
 import LandingPage from "./components/LandingPage";
 import AuthPage from "./components/AuthPage";
-import ClientDashboard from "./components/ClientDashboard";
-import OrganizerDashboard from "./components/OrganizerDashboard";
-import QrScannerTab from "./components/QrScannerTab";
 import CheckoutModal from "./components/CheckoutModal";
-import AdminDashboard from "./components/AdminDashboard";
 import WaitingRoom from "./components/WaitingRoom";
 import GuestOrAuthModal, { GuestInfo } from "./components/GuestOrAuthModal";
 import ToastStack, { ToastItem } from "./components/ToastStack";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
-import TermsPage from "./components/legal/TermsPage";
-import PrivacyPage from "./components/legal/PrivacyPage";
-import PricingPage from "./components/PricingPage";
-import ContactPage from "./components/ContactPage";
-import ProfilePage from "./components/ProfilePage";
 import OrganizerProfilePage from "./components/OrganizerProfilePage";
 import BottomTabBar from "./components/native/BottomTabBar";
+
+// Écrans chargés à la demande. Tout partait auparavant dans un fichier unique de 1,4 Mo :
+// un acheteur venu prendre un billet téléchargeait la supervision, le tableau de bord
+// organisateur, les rapports et la bibliothèque de scan de QR codes avant de voir quoi que ce
+// soit. Ces écrans-là ne concernent qu'une fraction des visiteurs, et jamais au premier
+// affichage — d'où le découpage. L'accueil, l'authentification et le paiement restent, eux,
+// dans le bundle principal : ce sont eux le chemin critique.
+const ClientDashboard = lazy(() => import("./components/ClientDashboard"));
+const OrganizerDashboard = lazy(() => import("./components/OrganizerDashboard"));
+const AdminDashboard = lazy(() => import("./components/AdminDashboard"));
+const QrScannerTab = lazy(() => import("./components/QrScannerTab"));
+const TermsPage = lazy(() => import("./components/legal/TermsPage"));
+const PrivacyPage = lazy(() => import("./components/legal/PrivacyPage"));
+const PricingPage = lazy(() => import("./components/PricingPage"));
+const ContactPage = lazy(() => import("./components/ContactPage"));
+const ProfilePage = lazy(() => import("./components/ProfilePage"));
+
+// Repli affiché le temps de récupérer le morceau de code d'un écran. Volontairement discret :
+// sur une connexion correcte il n'apparaît qu'une fraction de seconde.
+function ScreenLoader() {
+  return (
+    <div className="flex min-h-[50vh] items-center justify-center" id="screen-loader">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-orange-200 border-t-orange-600" />
+    </div>
+  );
+}
 import { User, Event } from "./types";
 import { Calendar, Compass, ShieldAlert, Sparkles } from "lucide-react";
 import { supabaseClient } from "./lib/supabaseClient";
@@ -412,47 +429,51 @@ export default function App() {
               />
             )}
 
-            {activeTab === "client-dashboard" && user && (
-              <ClientDashboard user={user} />
-            )}
+            {/* Un seul Suspense pour tous les écrans chargés à la demande : un seul est monté
+                à la fois, et le repli occupe de toute façon la même zone. */}
+            <Suspense fallback={<ScreenLoader />}>
+              {activeTab === "client-dashboard" && user && (
+                <ClientDashboard user={user} />
+              )}
 
-            {activeTab === "organizer-dashboard" && user && user.role === "organizer" && (
-              <OrganizerDashboard
-                user={user}
-                events={events}
-                onEventCreated={() => fetchEvents(true)}
-                setActiveTab={setActiveTab}
-              />
-            )}
+              {activeTab === "organizer-dashboard" && user && user.role === "organizer" && (
+                <OrganizerDashboard
+                  user={user}
+                  events={events}
+                  onEventCreated={() => fetchEvents(true)}
+                  setActiveTab={setActiveTab}
+                />
+              )}
 
-            {activeTab === "admin-dashboard" && user && user.role === "admin" && (
-              <AdminDashboard user={user} />
-            )}
+              {activeTab === "admin-dashboard" && user && user.role === "admin" && (
+                <AdminDashboard user={user} />
+              )}
 
-            {/* L'admin a aussi accès au contrôle d'accès : POST /api/verify-ticket l'autorise
-                explicitement (requireRole("organizer", "admin")), mais l'interface le lui
-                refusait — il ne pouvait donc pas dépanner une entrée sur place. */}
-            {activeTab === "scanner" && user && (user.role === "organizer" || user.role === "admin") && (
-              <QrScannerTab user={user} />
-            )}
+              {/* L'admin a aussi accès au contrôle d'accès : POST /api/verify-ticket l'autorise
+                  explicitement (requireRole("organizer", "admin")), mais l'interface le lui
+                  refusait — il ne pouvait donc pas dépanner une entrée sur place. */}
+              {activeTab === "scanner" && user && (user.role === "organizer" || user.role === "admin") && (
+                <QrScannerTab user={user} />
+              )}
 
-            {activeTab === "terms" && <TermsPage onBack={() => setActiveTab("home")} />}
+              {activeTab === "terms" && <TermsPage onBack={() => setActiveTab("home")} />}
 
-            {activeTab === "privacy" && <PrivacyPage onBack={() => setActiveTab("home")} />}
+              {activeTab === "privacy" && <PrivacyPage onBack={() => setActiveTab("home")} />}
 
-            {activeTab === "pricing" && (
-              <PricingPage
-                onBack={() => setActiveTab("home")}
-                onCreateAccount={() => setAuthModalVisible(true)}
-                onContact={() => setActiveTab("contact")}
-              />
-            )}
+              {activeTab === "pricing" && (
+                <PricingPage
+                  onBack={() => setActiveTab("home")}
+                  onCreateAccount={() => setAuthModalVisible(true)}
+                  onContact={() => setActiveTab("contact")}
+                />
+              )}
 
-            {activeTab === "contact" && <ContactPage onBack={() => setActiveTab("pricing")} />}
+              {activeTab === "contact" && <ContactPage onBack={() => setActiveTab("pricing")} />}
 
-            {activeTab === "profile" && user && (
-              <ProfilePage user={user} onLogout={handleLogout} setActiveTab={setActiveTab} />
-            )}
+              {activeTab === "profile" && user && (
+                <ProfilePage user={user} onLogout={handleLogout} setActiveTab={setActiveTab} />
+              )}
+            </Suspense>
           </>
         )}
       </main>
