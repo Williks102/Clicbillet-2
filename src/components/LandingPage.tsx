@@ -7,6 +7,7 @@ import EventCard from "./EventCard";
 interface LandingPageProps {
   events: Event[];
   onBuyTicket: (event: Event) => void;
+  onViewEvent?: (event: Event) => void;
   userRole?: string;
   onViewOrganizer?: (alias: string) => void;
 }
@@ -19,7 +20,7 @@ const CATEGORIES = [
   { label: "Sport", icon: Trophy }
 ];
 
-export default function LandingPage({ events, onBuyTicket, userRole, onViewOrganizer }: LandingPageProps) {
+export default function LandingPage({ events, onBuyTicket, onViewEvent, userRole, onViewOrganizer }: LandingPageProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Tous");
   const categoriesScrollRef = useRef<HTMLDivElement>(null);
@@ -122,6 +123,7 @@ export default function LandingPage({ events, onBuyTicket, userRole, onViewOrgan
                 key={evt.id}
                 event={evt}
                 onBuyTicket={onBuyTicket}
+                onViewEvent={onViewEvent}
                 userRole={userRole}
                 onViewOrganizer={onViewOrganizer}
               />

@@ -16,11 +16,32 @@ export const PAYSTACK_SECRET_KEY = (process.env.PAYSTACK_SECRET_KEY || "").trim(
 // traité ou perdu (cf. server/routes/tickets.ts, /api/webhooks/paystack).
 export const PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL = (process.env.PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL || "").trim();
 export const RESEND_API_KEY = (process.env.RESEND_API_KEY || "").trim();
-// Domaine d'envoi/réception distinct du domaine web (clicbillet.com, sans www, appartient à
-// une autre application (Laravel) — pas celle-ci) : on garde monticket.online ici tant que
-// clicbillet.com n'est pas vérifié (SPF/DKIM) côté Resend, pour ne pas casser l'envoi d'emails.
+// Domaine d'envoi encore distinct du domaine web. clicbillet.com était auparavant partagé avec
+// une autre application (Laravel) ; ce n'est plus le cas — il ne dessert plus que cette app.
+// Le repli reste néanmoins monticket.online tant que clicbillet.com n'est pas vérifié
+// (SPF/DKIM) côté Resend : basculer l'expéditeur avant cette vérification ferait rejeter tous
+// les emails transactionnels — billets, réinitialisation de mot de passe, notifications.
+// Seul l'EXPÉDITEUR est concerné ; le destinataire (ADMIN_NOTIFICATION_EMAIL ci-dessous) peut
+// être sur n'importe quel domaine.
 export const RESEND_FROM_EMAIL = (process.env.RESEND_FROM_EMAIL || "ClicBillet <no-reply@monticket.online>").trim();
-export const ADMIN_NOTIFICATION_EMAIL = (process.env.ADMIN_NOTIFICATION_EMAIL || "admin@monticket.online").trim();
+// ADMIN_EMAIL est accepté comme alias : c'est le nom réellement utilisé dans la configuration
+// Vercel du projet. Sans cet alias, la variable définie là-bas était purement ignorée et
+// TOUTES les notifications administratives (nouvel organisateur, demande de retrait, message
+// de contact, demande d'accès organisateur) repartaient en silence vers l'adresse de repli
+// ci-dessous — aucune erreur, aucun symptôme, juste des emails qui n'arrivent pas.
+// Même principe que SUPABASE_URL / VITE_SUPABASE_URL plus haut.
+const ADMIN_NOTIFICATION_EMAIL_FROM_ENV = (process.env.ADMIN_NOTIFICATION_EMAIL || process.env.ADMIN_EMAIL || "").trim();
+export const ADMIN_NOTIFICATION_EMAIL = ADMIN_NOTIFICATION_EMAIL_FROM_ENV || "admin@monticket.online";
+
+// isProduction n'est déclarée que plus bas dans ce fichier : on teste NODE_ENV directement,
+// comme les autres contrôles de démarrage situés avant elle.
+if (process.env.NODE_ENV === "production" && !ADMIN_NOTIFICATION_EMAIL_FROM_ENV) {
+  console.warn(
+    `[Config] Ni ADMIN_NOTIFICATION_EMAIL ni ADMIN_EMAIL ne sont définies : les notifications ` +
+    `administratives partent vers l'adresse de repli "${ADMIN_NOTIFICATION_EMAIL}". Les demandes ` +
+    `de retrait et les demandes d'accès organisateur y arriveront — vérifiez que cette boîte est relevée.`
+  );
+}
 export const SUPABASE_WEBHOOK_SECRET = (process.env.SUPABASE_WEBHOOK_SECRET || "").trim();
 
 // Secret injecté automatiquement par Vercel Cron dans le header Authorization ("Bearer <secret>")
@@ -130,7 +151,52 @@ export const isProduction = process.env.NODE_ENV === "production";
 // entièrement contrôlables par l'appelant (un attaquant peut les usurper sans passer par le
 // vrai frontend), ce qui permettrait sinon de faire pointer un email de réinitialisation
 // légitime vers un domaine de phishing tout en gardant un jeton valide.
-export const APP_ORIGIN = (process.env.APP_ORIGIN || (isProduction ? "https://www.clicbillet.com" : `http://localhost:${PORT}`)).trim();
+//
+// Sert désormais aussi à construire les URL des aperçus de partage (og:url, og:image — cf.
+// server/lib/socialPreview.ts) : mal renseignée, elle ne casse plus seulement les emails, elle
+// fait pointer chaque lien partagé sur WhatsApp vers le mauvais domaine.
+//
+// La barre finale éventuelle est retirée : "https://site.ci/" produirait sinon des URL en
+// double barre ("https://site.ci//e/evt-1"), que certains robots d'aperçu refusent.
+// Domaine canonique retenu pour la plateforme : https://www.clicbillet.com. C'est aussi le
+// repli en production, de sorte qu'une variable oubliée donne quand même la bonne origine —
+// mais la définir explicitement reste préférable (cf. .env.example), le repli n'ayant aucun
+// moyen de suivre un changement de domaine.
+const CANONICAL_PRODUCTION_ORIGIN = "https://www.clicbillet.com";
+
+const APP_ORIGIN_FROM_ENV = (process.env.APP_ORIGIN || "").trim();
+export const APP_ORIGIN = (APP_ORIGIN_FROM_ENV || (isProduction ? CANONICAL_PRODUCTION_ORIGIN : `http://localhost:${PORT}`))
+  .trim()
+  .replace(/\/+$/, "");
+
+// Diagnostic au démarrage : une origine erronée est silencieuse — rien ne casse visiblement,
+// mais les liens de réinitialisation de mot de passe, les redirections de confirmation
+// d'email et les aperçus de partage pointent tous vers un domaine qui n'est pas le vôtre.
+// Mieux vaut le dire au démarrage que le découvrir sur un lien envoyé à un client.
+// Volontairement en warn et non en error : le repli vaut le domaine canonique, donc une
+// variable non définie donne quand même la bonne origine. Un console.error partirait à chaque
+// démarrage vers Sentry (captureConsoleIntegration, cf. server/lib/observability.ts) pour une
+// situation qui fonctionne — exactement le genre d'alerte non actionnable qui noie les vraies.
+if (isProduction && !APP_ORIGIN_FROM_ENV) {
+  console.warn(
+    `[Config] APP_ORIGIN n'est pas définie : repli sur le domaine canonique "${APP_ORIGIN}". ` +
+    `Définissez-la explicitement si le domaine servi change, sans quoi les liens de ` +
+    `réinitialisation de mot de passe, les confirmations d'email et les aperçus de partage ` +
+    `continueront de pointer vers ce domaine.`
+  );
+}
+
+try {
+  const parsed = new URL(APP_ORIGIN);
+  if (isProduction && parsed.protocol !== "https:") {
+    console.error(`[Config] APP_ORIGIN doit être en https en production (valeur actuelle : ${APP_ORIGIN}).`);
+  }
+  if (parsed.pathname !== "/") {
+    console.error(`[Config] APP_ORIGIN doit être une origine seule, sans chemin (valeur actuelle : ${APP_ORIGIN}).`);
+  }
+} catch {
+  console.error(`[Config] APP_ORIGIN n'est pas une URL valide : "${APP_ORIGIN}". Les liens générés seront inutilisables.`);
+}
 
 export const SUPABASE_HOST = (() => {
   try {

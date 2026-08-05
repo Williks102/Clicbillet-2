@@ -1,41 +1,56 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import Navbar from "./components/Navbar";
 import LandingPage from "./components/LandingPage";
 import AuthPage from "./components/AuthPage";
-import ClientDashboard from "./components/ClientDashboard";
-import OrganizerDashboard from "./components/OrganizerDashboard";
-import QrScannerTab from "./components/QrScannerTab";
 import CheckoutModal from "./components/CheckoutModal";
-import AdminDashboard from "./components/AdminDashboard";
 import WaitingRoom from "./components/WaitingRoom";
 import GuestOrAuthModal, { GuestInfo } from "./components/GuestOrAuthModal";
 import ToastStack, { ToastItem } from "./components/ToastStack";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
-import TermsPage from "./components/legal/TermsPage";
-import PrivacyPage from "./components/legal/PrivacyPage";
-import PricingPage from "./components/PricingPage";
-import ContactPage from "./components/ContactPage";
-import ProfilePage from "./components/ProfilePage";
 import OrganizerProfilePage from "./components/OrganizerProfilePage";
 import BottomTabBar from "./components/native/BottomTabBar";
+
+// Écrans chargés à la demande. Tout partait auparavant dans un fichier unique de 1,4 Mo :
+// un acheteur venu prendre un billet téléchargeait la supervision, le tableau de bord
+// organisateur, les rapports et la bibliothèque de scan de QR codes avant de voir quoi que ce
+// soit. Ces écrans-là ne concernent qu'une fraction des visiteurs, et jamais au premier
+// affichage — d'où le découpage. L'accueil, l'authentification et le paiement restent, eux,
+// dans le bundle principal : ce sont eux le chemin critique.
+const ClientDashboard = lazy(() => import("./components/ClientDashboard"));
+const OrganizerDashboard = lazy(() => import("./components/OrganizerDashboard"));
+const AdminDashboard = lazy(() => import("./components/AdminDashboard"));
+const QrScannerTab = lazy(() => import("./components/QrScannerTab"));
+const TermsPage = lazy(() => import("./components/legal/TermsPage"));
+const PrivacyPage = lazy(() => import("./components/legal/PrivacyPage"));
+const PricingPage = lazy(() => import("./components/PricingPage"));
+const ContactPage = lazy(() => import("./components/ContactPage"));
+const ProfilePage = lazy(() => import("./components/ProfilePage"));
+const EventPage = lazy(() => import("./components/EventPage"));
+
+// Repli affiché le temps de récupérer le morceau de code d'un écran. Volontairement discret :
+// sur une connexion correcte il n'apparaît qu'une fraction de seconde.
+function ScreenLoader() {
+  return (
+    <div className="flex min-h-[50vh] items-center justify-center" id="screen-loader">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-orange-200 border-t-orange-600" />
+    </div>
+  );
+}
 import { User, Event } from "./types";
 import { Calendar, Compass, ShieldAlert, Sparkles } from "lucide-react";
 import { supabaseClient } from "./lib/supabaseClient";
 import { fetchPublicEvents } from "./lib/publicEvents";
 import { isNativeApp } from "./lib/platform";
+import { matchPath, pathForTab } from "./lib/appRoutes";
 import { authFetch } from "./lib/apiClient";
 
 // Calculée une seule fois : Capacitor.isNativePlatform() ne change jamais pendant la vie de l'app.
 const nativeApp = isNativeApp();
 
-// Page publique organisateur (/o/:alias) : cette app n'a pas de routing par URL (tout est
-// géré par activeTab), donc pour qu'un lien direct partageable fonctionne à froid (ouvert
-// depuis Instagram par ex., pas seulement en cliquant depuis l'accueil), on lit le pathname
-// une seule fois au montage — même principe que le token de reset de mot de passe plus bas.
-function extractOrganizerAliasFromPath(): string | null {
-  const match = /^\/o\/([a-z0-9-]+)\/?$/.exec(window.location.pathname);
-  return match ? match[1] : null;
-}
+// Écran demandé par l'URL d'ouverture. Lu une seule fois : c'est le point d'entrée "à froid"
+// (lien reçu par message, favori, résultat de recherche), par opposition à la navigation
+// interne qui passe ensuite par setActiveTab.
+const initialRoute = matchPath(window.location.pathname);
 
 export default function App() {
   // La session vit désormais dans un cookie httpOnly (jamais lisible par du JS, cf.
@@ -46,8 +61,12 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
 
-  const [viewingOrganizerAlias, setViewingOrganizerAlias] = useState<string | null>(extractOrganizerAliasFromPath);
-  const [activeTab, setActiveTab] = useState<string>(() => extractOrganizerAliasFromPath() ? "organizer-profile" : "home");
+  const [viewingOrganizerAlias, setViewingOrganizerAlias] = useState<string | null>(initialRoute.organizerAlias);
+  const [viewingEventId, setViewingEventId] = useState<string | null>(initialRoute.eventId);
+  const [activeTab, setActiveTab] = useState<string>(initialRoute.tab);
+  // Posé le temps d'appliquer un changement venu des boutons précédent/suivant : sans lui,
+  // l'effet de synchronisation ci-dessous réempilerait aussitôt l'entrée qu'on vient de quitter.
+  const skipUrlSync = useRef(false);
   const [events, setEvents] = useState<Event[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [checkoutEvent, setCheckoutEvent] = useState<Event | null>(null);
@@ -118,10 +137,10 @@ export default function App() {
         if (res.ok) {
           const profile: User = await res.json();
           setUser(profile);
-          // Dynamic tab routing après restauration de session — sauf si l'app vient d'être
-          // ouverte sur un lien direct /o/:alias (cf. extractOrganizerAliasFromPath), qu'on ne
-          // veut jamais écraser par le tableau de bord habituel du rôle connecté.
-          if (activeTab !== "organizer-profile") {
+          // Atterrissage par défaut sur le tableau de bord du rôle — uniquement si l'app a été
+          // ouverte sur l'accueil. Un lien direct (tarifs, page organisateur, CGV...) doit
+          // rester sur l'écran demandé : c'est tout l'intérêt de l'avoir partagé.
+          if (initialRoute.tab === "home") {
             if (profile.role === "admin") setActiveTab("admin-dashboard");
             else if (profile.role === "organizer") setActiveTab("organizer-dashboard");
           }
@@ -135,45 +154,54 @@ export default function App() {
     return () => { cancelled = true; };
   }, []);
 
-  // Navigation vers la page publique d'un organisateur (depuis une fiche événement, ou
-  // au chargement initial si l'URL est /o/:alias). Met à jour l'URL pour que le lien reste
-  // partageable même si on y arrive en cliquant depuis l'intérieur de l'app.
+  // Navigation vers la page publique d'un organisateur. L'URL est posée par l'effet de
+  // synchronisation ci-dessous, comme pour tous les autres écrans.
   function handleViewOrganizer(alias: string) {
     setViewingOrganizerAlias(alias);
     setActiveTab("organizer-profile");
-    window.history.pushState({}, "", `/o/${alias}`);
   }
 
   function handleBackFromOrganizerProfile() {
     setViewingOrganizerAlias(null);
     setActiveTab("home");
-    window.history.pushState({}, "", "/");
   }
 
-  // Synchronise l'onglet affiché avec les boutons précédent/suivant du navigateur.
+  // Boutons précédent/suivant du navigateur : l'URL fait foi, on réaligne l'écran dessus.
   useEffect(() => {
     function handlePopState() {
-      const alias = extractOrganizerAliasFromPath();
-      if (alias) {
-        setViewingOrganizerAlias(alias);
-        setActiveTab("organizer-profile");
-      } else {
-        setViewingOrganizerAlias(null);
-        setActiveTab("home");
-      }
+      const route = matchPath(window.location.pathname);
+      skipUrlSync.current = true;
+      setViewingOrganizerAlias(route.organizerAlias);
+      setViewingEventId(route.eventId);
+      setActiveTab(route.tab);
     }
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  // Filet de sécurité : si on quitte la page organisateur par un autre chemin que
-  // handleBackFromOrganizerProfile (logo, barre d'onglets native, etc.), on remet quand
-  // même l'URL sur "/" pour qu'elle ne reste jamais désynchronisée de l'écran affiché.
+  // Synchronisation écran -> URL, en un seul endroit : chaque changement d'onglet laisse une
+  // entrée d'historique, donc "précédent" revient à l'écran précédent au lieu de quitter
+  // l'application, et l'adresse affichée reste toujours celle de l'écran visible — donc
+  // copiable et partageable telle quelle.
   useEffect(() => {
-    if (activeTab !== "organizer-profile" && window.location.pathname.startsWith("/o/")) {
-      window.history.replaceState({}, "", "/");
+    if (skipUrlSync.current) {
+      skipUrlSync.current = false;
+      return;
     }
-  }, [activeTab]);
+    const nextPath = pathForTab(activeTab, viewingOrganizerAlias, viewingEventId);
+    if (nextPath !== window.location.pathname) {
+      window.history.pushState({}, "", nextPath);
+    }
+  }, [activeTab, viewingOrganizerAlias, viewingEventId]);
+
+  // Ouverture de la page d'un événement. C'est désormais ce que fait un clic sur une affiche,
+  // à la place de l'ouverture directe de la fenêtre de paiement : sans écran intermédiaire,
+  // un événement n'avait aucune URL propre, donc rien à partager.
+  function handleViewEvent(event: Event) {
+    setViewingEventId(event.id);
+    setActiveTab("event");
+    window.scrollTo({ top: 0 });
+  }
 
   // Confirmation de paiement instantanée : on s'abonne aux changements de SES PROPRES
   // tickets via Supabase Realtime (policy "tickets_select_own", scoped à buyer_id = auth.uid()).
@@ -398,6 +426,7 @@ export default function App() {
                   <LandingPage
                     events={events}
                     onBuyTicket={handleBuyTicketTrigger}
+                    onViewEvent={handleViewEvent}
                     userRole={user?.role}
                     onViewOrganizer={handleViewOrganizer}
                   />
@@ -405,55 +434,72 @@ export default function App() {
               </>
             )}
 
+            {activeTab === "event" && (
+              <Suspense fallback={<ScreenLoader />}>
+                <EventPage
+                  event={events.find((e) => e.id === viewingEventId) || null}
+                  loading={loadingEvents}
+                  onBack={() => setActiveTab("home")}
+                  onBuyTicket={handleBuyTicketTrigger}
+                  onViewOrganizer={handleViewOrganizer}
+                />
+              </Suspense>
+            )}
+
             {activeTab === "organizer-profile" && viewingOrganizerAlias && (
               <OrganizerProfilePage
                 alias={viewingOrganizerAlias}
                 onBack={handleBackFromOrganizerProfile}
                 onBuyTicket={handleBuyTicketTrigger}
+                onViewEvent={handleViewEvent}
               />
             )}
 
-            {activeTab === "client-dashboard" && user && (
-              <ClientDashboard user={user} />
-            )}
+            {/* Un seul Suspense pour tous les écrans chargés à la demande : un seul est monté
+                à la fois, et le repli occupe de toute façon la même zone. */}
+            <Suspense fallback={<ScreenLoader />}>
+              {activeTab === "client-dashboard" && user && (
+                <ClientDashboard user={user} />
+              )}
 
-            {activeTab === "organizer-dashboard" && user && user.role === "organizer" && (
-              <OrganizerDashboard
-                user={user}
-                events={events}
-                onEventCreated={() => fetchEvents(true)}
-                setActiveTab={setActiveTab}
-              />
-            )}
+              {activeTab === "organizer-dashboard" && user && user.role === "organizer" && (
+                <OrganizerDashboard
+                  user={user}
+                  events={events}
+                  onEventCreated={() => fetchEvents(true)}
+                  setActiveTab={setActiveTab}
+                />
+              )}
 
-            {activeTab === "admin-dashboard" && user && user.role === "admin" && (
-              <AdminDashboard user={user} />
-            )}
+              {activeTab === "admin-dashboard" && user && user.role === "admin" && (
+                <AdminDashboard user={user} />
+              )}
 
-            {/* L'admin a aussi accès au contrôle d'accès : POST /api/verify-ticket l'autorise
-                explicitement (requireRole("organizer", "admin")), mais l'interface le lui
-                refusait — il ne pouvait donc pas dépanner une entrée sur place. */}
-            {activeTab === "scanner" && user && (user.role === "organizer" || user.role === "admin") && (
-              <QrScannerTab user={user} />
-            )}
+              {/* L'admin a aussi accès au contrôle d'accès : POST /api/verify-ticket l'autorise
+                  explicitement (requireRole("organizer", "admin")), mais l'interface le lui
+                  refusait — il ne pouvait donc pas dépanner une entrée sur place. */}
+              {activeTab === "scanner" && user && (user.role === "organizer" || user.role === "admin") && (
+                <QrScannerTab user={user} />
+              )}
 
-            {activeTab === "terms" && <TermsPage onBack={() => setActiveTab("home")} />}
+              {activeTab === "terms" && <TermsPage onBack={() => setActiveTab("home")} />}
 
-            {activeTab === "privacy" && <PrivacyPage onBack={() => setActiveTab("home")} />}
+              {activeTab === "privacy" && <PrivacyPage onBack={() => setActiveTab("home")} />}
 
-            {activeTab === "pricing" && (
-              <PricingPage
-                onBack={() => setActiveTab("home")}
-                onCreateAccount={() => setAuthModalVisible(true)}
-                onContact={() => setActiveTab("contact")}
-              />
-            )}
+              {activeTab === "pricing" && (
+                <PricingPage
+                  onBack={() => setActiveTab("home")}
+                  onCreateAccount={() => setAuthModalVisible(true)}
+                  onContact={() => setActiveTab("contact")}
+                />
+              )}
 
-            {activeTab === "contact" && <ContactPage onBack={() => setActiveTab("pricing")} />}
+              {activeTab === "contact" && <ContactPage onBack={() => setActiveTab("pricing")} />}
 
-            {activeTab === "profile" && user && (
-              <ProfilePage user={user} onLogout={handleLogout} setActiveTab={setActiveTab} />
-            )}
+              {activeTab === "profile" && user && (
+                <ProfilePage user={user} onLogout={handleLogout} setActiveTab={setActiveTab} />
+              )}
+            </Suspense>
           </>
         )}
       </main>

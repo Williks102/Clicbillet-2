@@ -19,6 +19,10 @@
       "dest": "server.ts"
     },
     {
+      "src": "/e/([^/]+)",
+      "dest": "server.ts"
+    },
+    {
       "src": "/(.*)",
       "headers": {
         "X-Frame-Options": "DENY",
