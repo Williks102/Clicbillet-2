@@ -199,6 +199,14 @@
   que `/api/*` — la page statique servie par Vercel ne passait jamais par Express. Vérifié en direct
   sur `www.monticket.online` : tous les headers sont présents.
 
+  ⚠️ `Permissions-Policy` était posé avec `camera=()`, soit une liste d'autorisation **vide** :
+  elle bloque la caméra pour toute origine, y compris le site lui-même. Le scanner de QR codes
+  (contrôle d'accès à l'entrée des événements) ne pouvait donc jamais obtenir la caméra en
+  production, alors qu'il fonctionnait en développement — `helmet` ne pose pas cet en-tête,
+  et le serveur local n'était donc pas concerné. Corrigé en `camera=(self)` : la caméra reste
+  refusée à toute origine tierce embarquée, et autorisée à l'application elle-même. `microphone`
+  et `geolocation` restent sur une liste vide, aucune fonctionnalité ne les utilisant.
+
 - [ ] **E5 — Pas de `dangerouslySetInnerHTML` ni d'injection DOM.** 🟠
   `rg -n "dangerouslySetInnerHTML|innerHTML|eval\\(|new Function" src/`
   **PASS** : aucun, ou strictement contrôlé.

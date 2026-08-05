@@ -95,16 +95,28 @@ export default function MobileNavDrawer({ user, activeTab, setActiveTab, onLogou
           {user && (
             <>
               {user.role === "admin" ? (
-                <button
-                  id="mobile-nav-admin-btn"
-                  onClick={() => go("admin-dashboard")}
-                  className={`flex w-full items-center space-x-3 rounded-xl px-3 py-3 text-sm font-bold transition-colors ${
-                    activeTab === "admin-dashboard" ? "bg-slate-100 text-slate-900" : "text-gray-600 hover:bg-gray-50"
-                  }`}
-                >
-                  <ShieldCheck className="h-4.5 w-4.5 text-orange-600" />
-                  <span>Supervision</span>
-                </button>
+                <>
+                  <button
+                    id="mobile-nav-admin-btn"
+                    onClick={() => go("admin-dashboard")}
+                    className={`flex w-full items-center space-x-3 rounded-xl px-3 py-3 text-sm font-bold transition-colors ${
+                      activeTab === "admin-dashboard" ? "bg-slate-100 text-slate-900" : "text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    <ShieldCheck className="h-4.5 w-4.5 text-orange-600" />
+                    <span>Supervision</span>
+                  </button>
+                  <button
+                    id="mobile-nav-admin-scanner-btn"
+                    onClick={() => go("scanner")}
+                    className={`flex w-full items-center space-x-3 rounded-xl px-3 py-3 text-sm font-bold transition-colors ${
+                      activeTab === "scanner" ? "bg-green-50 text-green-600" : "text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    <Camera className="h-4.5 w-4.5" />
+                    <span>Scanner</span>
+                  </button>
+                </>
               ) : user.role === "client" ? (
                 <button
                   id="mobile-nav-client-btn"

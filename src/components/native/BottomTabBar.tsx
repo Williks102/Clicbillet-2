@@ -33,6 +33,10 @@ export default function BottomTabBar({ user, activeTab, setActiveTab, onFocusSea
       key: "admin-dashboard", label: "Supervision", icon: ShieldCheck,
       onSelect: () => setActiveTab("admin-dashboard"), isActive: activeTab === "admin-dashboard",
     });
+    tabs.push({
+      key: "scanner", label: "Scanner", icon: Camera,
+      onSelect: () => setActiveTab("scanner"), isActive: activeTab === "scanner",
+    });
   } else if (user.role === "organizer") {
     tabs.push({
       key: "organizer-dashboard", label: "Tableau de bord", icon: LayoutDashboard,

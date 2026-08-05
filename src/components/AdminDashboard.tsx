@@ -3,13 +3,14 @@ import { User, Event, Ticket, OrganizerRequest } from "../types";
 import {
   Building2, Users, Calendar, DollarSign, Trash2, ShieldCheck,
   Search, ShieldAlert, Sparkles, Ticket as TicketIcon, TrendingUp, Filter, Percent,
-  Image as ImageIcon, RefreshCw, Store, ArrowUpCircle, ArrowDownCircle
+  Image as ImageIcon, RefreshCw, Store, ArrowUpCircle, ArrowDownCircle, BarChart3
 } from "lucide-react";
 import { authFetch } from "../lib/apiClient";
 import { isEventPast } from "../lib/eventStatus";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 import CommissionSheet from "./CommissionSheet";
+import AdminReports from "./AdminReports";
 
 interface AdminDashboardProps {
   user: User;
@@ -28,12 +29,13 @@ interface AdminStats {
   tickets: Ticket[];
 }
 
-type AdminSubTab = "overview" | "events" | "users" | "organizer-requests" | "tickets" | "payouts" | "transactions";
+type AdminSubTab = "overview" | "reports" | "events" | "users" | "organizer-requests" | "tickets" | "payouts" | "transactions";
 
-const ADMIN_SUB_TABS: AdminSubTab[] = ["overview", "events", "users", "organizer-requests", "tickets", "payouts", "transactions"];
+const ADMIN_SUB_TABS: AdminSubTab[] = ["overview", "reports", "events", "users", "organizer-requests", "tickets", "payouts", "transactions"];
 
 const ADMIN_SUB_TAB_LABELS: Record<AdminSubTab, string> = {
   overview: "Tableau de Bord",
+  reports: "Rapports",
   events: "Événements & Modération",
   users: "Membres & Rôles",
   "organizer-requests": "Demandes Organisateur",
@@ -44,6 +46,7 @@ const ADMIN_SUB_TAB_LABELS: Record<AdminSubTab, string> = {
 
 const ADMIN_SUB_TAB_ICONS: Record<AdminSubTab, React.ReactNode> = {
   overview: <Sparkles className="h-4 w-4" />,
+  reports: <BarChart3 className="h-4 w-4" />,
   events: <Calendar className="h-4 w-4" />,
   users: <Users className="h-4 w-4" />,
   "organizer-requests": <Store className="h-4 w-4" />,
@@ -577,7 +580,11 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
               <p className="mt-3.5 text-xl font-black text-slate-900 font-sans tracking-tight">
                 {(stats.totalOrganizerPayout || 0).toLocaleString("fr-FR")} <span className="text-xs text-indigo-600">FCFA</span>
               </p>
-              <p className="mt-1 text-[10px] text-gray-400 font-bold uppercase">Part Organisateur (90%)</p>
+              {/* Le pourcentage était écrit "90%" en dur : il ne suit pas le taux de commission
+                  réellement appliqué, configurable et négociable événement par événement. */}
+              <p className="mt-1 text-[10px] text-gray-400 font-bold uppercase">
+                Part Organisateur ({100 - Math.round((stats.commissionRate || 0) * 100)}%)
+              </p>
             </div>
 
             <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-xs">
@@ -1004,6 +1011,15 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
             </div>
             </>}
           </div>
+        )}
+
+        {activeSubTab === "reports" && stats && (
+          <AdminReports
+            events={stats.events}
+            tickets={stats.tickets}
+            commissionRate={stats.commissionRate || 0}
+            loading={loading}
+          />
         )}
 
         {/* DEMANDES DE PASSAGE ACHETEUR -> ORGANISATEUR */}

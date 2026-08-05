@@ -17,9 +17,61 @@ export default function QrScannerTab({ user }: QrScannerTabProps) {
   const [verifying, setVerifying] = useState(false);
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const isScanningRef = useRef<boolean>(true);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  // "checking" tant que l'autorisation n'est pas tranchée : le scanner n'est instancié qu'une
+  // fois la caméra confirmée disponible, pour que la sonde ci-dessous et html5-qrcode ne se
+  // disputent jamais le périphérique (une caméra déjà ouverte fait échouer l'autre).
+  const [cameraState, setCameraState] = useState<"checking" | "ready" | "error">("checking");
+
+  function failCamera(message: string) {
+    setCameraError(message);
+    setCameraState("error");
+  }
+
+  // Diagnostic caméra, posé avant même d'instancier le scanner : sans lui, un refus d'accès
+  // laissait simplement un viseur noir, sans un mot d'explication ni indication que la saisie
+  // manuelle prend le relais — le contrôleur à l'entrée d'un événement restait bloqué là.
+  useEffect(() => {
+    if (!window.isSecureContext) {
+      failCamera("La caméra n'est accessible qu'en HTTPS. Ouvrez ClicBillet via une adresse sécurisée, ou utilisez la saisie manuelle ci-dessous.");
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      failCamera("Ce navigateur ne donne pas accès à la caméra. Essayez Chrome ou Safari à jour, ou utilisez la saisie manuelle ci-dessous.");
+      return;
+    }
+
+    let cancelled = false;
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: "environment" } })
+      .then((stream) => {
+        // Le flux n'est demandé que pour connaître l'état de l'autorisation : on le referme
+        // aussitôt, sinon la caméra reste occupée et html5-qrcode ne peut plus l'ouvrir.
+        stream.getTracks().forEach((track) => track.stop());
+        if (!cancelled) setCameraState("ready");
+      })
+      .catch((err: any) => {
+        if (cancelled) return;
+        const name = err?.name || "";
+        if (name === "NotAllowedError" || name === "SecurityError") {
+          // Un refus au niveau du navigateur et un blocage par en-tête Permissions-Policy
+          // remontent la même erreur : le message couvre donc les deux cas.
+          failCamera("L'accès à la caméra a été refusé. Autorisez-le dans les réglages du navigateur (icône à gauche de la barre d'adresse), puis rechargez la page. La saisie manuelle ci-dessous reste disponible.");
+        } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+          failCamera("Aucune caméra détectée sur cet appareil. Utilisez la saisie manuelle ci-dessous.");
+        } else if (name === "NotReadableError") {
+          failCamera("La caméra est déjà utilisée par une autre application. Fermez-la puis rechargez la page.");
+        } else {
+          failCamera("La caméra n'a pas pu être démarrée. Utilisez la saisie manuelle ci-dessous.");
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, []);
 
   // Initialize camera scanner on mounting
   useEffect(() => {
+    if (cameraState !== "ready") return;
     // We delay slightly to let the mounting render cycle settle
     const timer = setTimeout(() => {
       try {
@@ -66,7 +118,7 @@ export default function QrScannerTab({ user }: QrScannerTabProps) {
         });
       }
     };
-  }, []);
+  }, [cameraState]);
 
   // Post verification token code to backend API
   async function handleVerifyTicket(token: string) {
@@ -139,12 +191,27 @@ export default function QrScannerTab({ user }: QrScannerTabProps) {
           </h3>
 
           {/* HTML5 Qrcode mounting element */}
-          <div className="relative overflow-hidden rounded-2xl border border-gray-100 bg-gray-950 p-1 flex items-center justify-center aspect-square shadow-inner">
-            <div id="qr-reader-container" className="w-full h-full text-xs text-white" />
-          </div>
+          {cameraError ? (
+            <div
+              id="scanner-camera-error"
+              className="flex aspect-square flex-col items-center justify-center rounded-2xl border-2 border-dashed border-amber-200 bg-amber-50 p-6 text-center"
+            >
+              <AlertTriangle className="h-10 w-10 text-amber-500" />
+              <h4 className="mt-3 text-sm font-black text-amber-900">Caméra indisponible</h4>
+              <p className="mt-2 text-[11px] leading-relaxed text-amber-800">{cameraError}</p>
+            </div>
+          ) : (
+            <div className="relative overflow-hidden rounded-2xl border border-gray-100 bg-gray-950 p-1 flex items-center justify-center aspect-square shadow-inner">
+              <div id="qr-reader-container" className="w-full h-full text-xs text-white" />
+            </div>
+          )}
 
           <p className="text-[10px] text-gray-400 text-center font-semibold uppercase">
-            Placez le code QR au centre du viseur.
+            {cameraState === "error"
+              ? "Utilisez la saisie manuelle ci-contre."
+              : cameraState === "checking"
+                ? "Vérification de l'accès à la caméra..."
+                : "Placez le code QR au centre du viseur."}
           </p>
         </div>
 

@@ -430,7 +430,10 @@ export default function App() {
               <AdminDashboard user={user} />
             )}
 
-            {activeTab === "scanner" && user && user.role === "organizer" && (
+            {/* L'admin a aussi accès au contrôle d'accès : POST /api/verify-ticket l'autorise
+                explicitement (requireRole("organizer", "admin")), mais l'interface le lui
+                refusait — il ne pouvait donc pas dépanner une entrée sur place. */}
+            {activeTab === "scanner" && user && (user.role === "organizer" || user.role === "admin") && (
               <QrScannerTab user={user} />
             )}
 
