@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Plus, LayoutDashboard, Calendar, MapPin, Tag, TrendingUp, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X, AtSign, CheckCircle2, AlertCircle, Receipt, Download } from "lucide-react";
+import { Plus, LayoutDashboard, Calendar, MapPin, Tag, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X, AtSign, CheckCircle2, AlertCircle, Receipt, Download } from "lucide-react";
 import { Event, User, SalesStatus } from "../types";
 import { authFetch } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
@@ -9,6 +9,7 @@ import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 import AccountCodeBadge from "./AccountCodeBadge";
+import WeeklySalesChart from "./WeeklySalesChart";
 
 interface OrganizerDashboardProps {
   user: User;
@@ -810,64 +811,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
 
           {/* Aesthetic Sales Graph & Recent Sales Table Grid */}
           <div className="grid gap-6 lg:grid-cols-5">
-            {/* Custom SVG line Chart */}
-            <div className="rounded-2xl border border-gray-100 bg-white p-5 lg:col-span-3">
-              <div className="flex items-center justify-between pb-4 border-b border-gray-50 mb-4">
-                <h4 className="text-sm font-black text-gray-900 flex items-center space-x-1.5">
-                  <TrendingUp className="h-4 w-4 text-orange-600" />
-                  <span>Performance Hebdomadaire des ventes (XOF)</span>
-                </h4>
-              </div>
-
-              {/* Handcrafted animated line graphs */}
-              <div className="relative h-48 w-full mt-4 flex items-end">
-                <svg className="h-full w-full" viewBox="0 0 400 150">
-                  {/* Grid Lines */}
-                  <line x1="10" y1="30" x2="390" y2="30" stroke="#f3f4f6" strokeWidth="1" />
-                  <line x1="10" y1="75" x2="390" y2="75" stroke="#f3f4f6" strokeWidth="1" />
-                  <line x1="10" y1="120" x2="390" y2="120" stroke="#f3f4f6" strokeWidth="1" />
-
-                  {/* Bezier Line Chart for simulated sales distribution */}
-                  <path
-                    d="M 20,130 C 50,110 80,120 110,80 C 140,40 170,95 200,60 C 230,25 260,115 290,40 C 320,-10 350,55 380,15"
-                    fill="none"
-                    stroke="url(#orange-gradient)"
-                    strokeWidth="3.5"
-                    strokeLinecap="round"
-                    className="animate-pulse"
-                  />
-
-                  {/* Interactive node indicator points */}
-                  <circle cx="110" cy="80" r="5" fill="#f97316" stroke="#ffffff" strokeWidth="1.5" />
-                  <circle cx="200" cy="60" r="5" fill="#f97316" stroke="#ffffff" strokeWidth="1.5" />
-                  <circle cx="290" cy="40" r="5" fill="#f97316" stroke="#ffffff" strokeWidth="1.5" />
-                  <circle cx="380" cy="15" r="5.5" fill="#f97316" stroke="#ffffff" strokeWidth="1.5" />
-
-                  {/* SVG gradients */}
-                  <defs>
-                    <linearGradient id="orange-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#f3f4f6" />
-                      <stop offset="50%" stopColor="#f97316" />
-                      <stop offset="100%" stopColor="#fbbf24" />
-                    </linearGradient>
-                  </defs>
-                </svg>
-
-                {/* Simulated tooltips floating inside line graph containers */}
-                <div className="absolute top-2 right-4 bg-orange-600 px-2 py-0.5 rounded-md text-[9px] font-bold text-white shadow-md">
-                  Ventes maximum aujourd'hui (+240%)
-                </div>
-              </div>
-              <div className="flex justify-between items-center text-[10px] text-gray-400 font-mono mt-3 px-2">
-                <span>Lundi</span>
-                <span>Mardi</span>
-                <span>Mercredi</span>
-                <span>Jeudi</span>
-                <span>Vendredi</span>
-                <span>Samedi</span>
-                <span>Dimanche</span>
-              </div>
-            </div>
+            <WeeklySalesChart tickets={stats?.tickets} loading={loadingStats} />
 
             {/* Recent purchasing activities logs */}
             <div className="rounded-2xl border border-gray-100 bg-white p-5 lg:col-span-2">
