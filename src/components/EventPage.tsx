@@ -103,13 +103,19 @@ export default function EventPage({ event, loading, onBack, onBuyTicket, onViewO
     ? event.ticketTypes
     : [{ name: "Standard", price: event.price }];
 
-  // Places restantes par tarif quand l'organisateur a défini des quotas par type ; sinon on
-  // retombe sur la jauge globale de l'événement.
+  // Quotas par tarif : un tarif laissé sans quota est enregistré à 0, pas à null
+  // (cf. OrganizerDashboard, `Number(t.total) || 0`). Tester la seule présence de la valeur
+  // ferait donc passer pour "épuisé" tout tarif sans quota, et bloquerait sa sélection.
+  //
+  // On reprend la règle exacte de la carte du catalogue : les quotas par tarif ne font foi
+  // que si AU MOINS UN tarif en déclare un ; sinon, tous se partagent la jauge globale de
+  // l'événement. Les deux écrans doivent annoncer les mêmes disponibilités.
   const soldByTier = event.ticketsSoldByTier ?? {};
+  const hasTierQuotas = rawTiers.some((t) => (t.total ?? 0) > 0);
   const tiers = rawTiers.map((t) => ({
     ...t,
-    available: t.total != null
-      ? Math.max(0, t.total - (soldByTier[t.name.toLowerCase()] ?? 0))
+    available: hasTierQuotas
+      ? Math.max(0, (t.total ?? 0) - (soldByTier[t.name.toLowerCase()] ?? 0))
       : remaining,
   }));
 
