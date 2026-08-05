@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Plus, LayoutDashboard, Calendar, MapPin, Tag, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X, AtSign, CheckCircle2, AlertCircle, Receipt, Download } from "lucide-react";
+import { Plus, LayoutDashboard, BarChart3, Calendar, MapPin, Tag, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X, AtSign, CheckCircle2, AlertCircle, Receipt, Download } from "lucide-react";
 import { Event, User, SalesStatus } from "../types";
 import { authFetch } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
@@ -11,6 +11,7 @@ import { isPaidTicket } from "../lib/ticketPayment";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 import AccountCodeBadge from "./AccountCodeBadge";
 import WeeklySalesChart from "./WeeklySalesChart";
+import OrganizerReports from "./OrganizerReports";
 
 interface OrganizerDashboardProps {
   user: User;
@@ -19,10 +20,11 @@ interface OrganizerDashboardProps {
   setActiveTab: (tab: string) => void;
 }
 
-type OrganizerSubTab = "dashboard" | "create" | "simulator" | "payouts" | "invoices";
+type OrganizerSubTab = "dashboard" | "reports" | "create" | "simulator" | "payouts" | "invoices";
 
 const ORGANIZER_SUB_TAB_LABELS: Record<OrganizerSubTab, string> = {
   dashboard: "Suivi des Ventes",
+  reports: "Rapports",
   create: "Créer un Événement",
   simulator: "Simulateur Sandbox",
   payouts: "Retraits & Soldes",
@@ -31,6 +33,7 @@ const ORGANIZER_SUB_TAB_LABELS: Record<OrganizerSubTab, string> = {
 
 const ORGANIZER_SUB_TAB_ICONS: Record<OrganizerSubTab, React.ReactNode> = {
   dashboard: <LayoutDashboard className="h-4 w-4" />,
+  reports: <BarChart3 className="h-4 w-4" />,
   create: <Plus className="h-4 w-4" />,
   simulator: <Hammer className="h-4 w-4" />,
   payouts: <DollarSign className="h-4 w-4" />,
@@ -687,6 +690,18 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             Suivi des Ventes
           </button>
           <button
+            id="orga-reports-view-tab"
+            onClick={() => setSubTab("reports")}
+            className={`flex items-center space-x-1 rounded-xl px-4 py-2.5 text-xs font-black transition-all active:scale-95 ${
+              subTab === "reports"
+                ? "bg-slate-950 text-white shadow-md"
+                : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-100"
+            }`}
+          >
+            <BarChart3 className="h-4 w-4" />
+            <span>Rapports</span>
+          </button>
+          <button
             id="orga-create-view-tab"
             onClick={() => setSubTab("create")}
             className={`flex items-center space-x-1 rounded-xl px-4 py-2.5 text-xs font-black transition-all active:scale-95 ${
@@ -1002,6 +1017,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
             </button>
           </div>
         </div>
+      ) : subTab === "reports" ? (
+        <OrganizerReports stats={stats} events={myEvents} loading={loadingStats} />
       ) : subTab === "create" ? (
         /* Create New Event Form Layout */
         <form onSubmit={handleCreateEvent} className="min-w-0 rounded-2xl border border-gray-100/70 bg-white p-4 space-y-5 sm:p-6 sm:space-y-6" id="orga-create-form-view">
