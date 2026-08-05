@@ -8,6 +8,7 @@ import { runInBackground } from "../lib/utils.js";
 import { sendOrganizerEventStatusEmail, sendAdminContactMessageEmail } from "../lib/email.js";
 import { getDefaultCommissionRate } from "../lib/commission.js";
 import { contactRateLimiter } from "../lib/rateLimiters.js";
+import { findPublicEventById } from "../lib/socialPreview.js";
 
 const router = express.Router();
 
@@ -133,6 +134,38 @@ router.get("/api/events", async (req: express.Request, res: express.Response) =>
       ticketsSoldByTier: tierSoldLocal[e.id] || {}
     };
   }));
+});
+
+// Affiche d'un événement servie comme une vraie image, pour l'aperçu de partage.
+//
+// Les bannières uploadées sont stockées en data: URI base64 (cf. src/lib/imageCompress.ts).
+// Les robots d'aperçu (WhatsApp, Facebook...) refusent une image en data: URI dans og:image :
+// il leur faut une URL http(s) qu'ils puissent aller chercher. Cet endpoint la leur fournit.
+//
+// Public et en lecture seule, comme le catalogue : il ne sert que des événements approuvés.
+router.get("/api/events/:id/banner", async (req: express.Request, res: express.Response) => {
+  const event = await findPublicEventById(String(req.params.id || ""));
+  if (!event || !event.banner) {
+    return res.status(404).json({ error: "Affiche introuvable." });
+  }
+
+  // Bannière déjà hébergée ailleurs : on renvoie le robot vers l'original plutôt que de
+  // faire transiter l'image par nos serveurs.
+  if (/^https?:\/\//i.test(event.banner)) {
+    return res.redirect(302, event.banner);
+  }
+
+  const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(event.banner);
+  if (!match) {
+    return res.status(404).json({ error: "Format d'affiche non pris en charge." });
+  }
+
+  const [, contentType, base64] = match;
+  const buffer = Buffer.from(base64, "base64");
+  res.set("Content-Type", contentType);
+  // Une affiche ne change quasiment jamais, et les robots la retéléchargent à chaque partage.
+  res.set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+  res.send(buffer);
 });
 
 // Page publique organisateur (/o/:alias côté frontend) : nom, alias, bio, et ses

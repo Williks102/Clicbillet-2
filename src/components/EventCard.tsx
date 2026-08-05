@@ -4,11 +4,13 @@ import { Event } from "../types";
 interface EventCardProps {
   event: Event;
   onBuyTicket: (event: Event) => void;
+  // Ouvre la page dédiée de l'événement (/e/:id), celle qui porte l'URL partageable.
+  onViewEvent?: (event: Event) => void;
   userRole?: string;
   onViewOrganizer?: (alias: string) => void;
 }
 
-export default function EventCard({ event: evt, onBuyTicket, userRole, onViewOrganizer }: EventCardProps) {
+export default function EventCard({ event: evt, onBuyTicket, onViewEvent, userRole, onViewOrganizer }: EventCardProps) {
   const hasTiers = Array.isArray(evt.ticketTypes) && evt.ticketTypes.length > 0 && evt.ticketTypes.some(t => (t.total ?? 0) > 0);
   const tierAvailability = hasTiers
     ? evt.ticketTypes!.map(t => ({
@@ -26,8 +28,16 @@ export default function EventCard({ event: evt, onBuyTicket, userRole, onViewOrg
       id={`event-card-${evt.id}`}
       className="group relative flex flex-col overflow-hidden rounded-2xl bg-white border border-gray-100 shadow-xs transition-all duration-300 hover:-translate-y-1.5 hover:shadow-lg"
     >
-      {/* Event banner illustration, plein cadre sans surcouche */}
-      <div className="h-48 w-full overflow-hidden bg-gray-100">
+      {/* Event banner illustration, plein cadre sans surcouche.
+          L'affiche et le titre mènent à la page de l'événement ; le bouton d'achat, lui,
+          continue d'ouvrir directement le paiement — on n'allonge pas le parcours de celui
+          qui a déjà décidé d'acheter. */}
+      <button
+        type="button"
+        onClick={() => onViewEvent?.(evt)}
+        aria-label={`Voir la page de ${evt.title}`}
+        className="h-48 w-full overflow-hidden bg-gray-100 text-left"
+      >
         <img
           src={evt.banner}
           alt={evt.title}
@@ -36,7 +46,7 @@ export default function EventCard({ event: evt, onBuyTicket, userRole, onViewOrg
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
           referrerPolicy="no-referrer"
         />
-      </div>
+      </button>
 
       {/* Card Description Elements */}
       <div className="flex flex-1 flex-col p-5 space-y-3">
@@ -44,7 +54,10 @@ export default function EventCard({ event: evt, onBuyTicket, userRole, onViewOrg
           {evt.category}
         </span>
 
-        <h3 className="line-clamp-1 text-lg font-black text-gray-900 group-hover:text-orange-600 transition-colors">
+        <h3
+          onClick={() => onViewEvent?.(evt)}
+          className="line-clamp-1 cursor-pointer text-lg font-black text-gray-900 transition-colors group-hover:text-orange-600"
+        >
           {evt.title}
         </h3>
 

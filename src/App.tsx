@@ -25,6 +25,7 @@ const PrivacyPage = lazy(() => import("./components/legal/PrivacyPage"));
 const PricingPage = lazy(() => import("./components/PricingPage"));
 const ContactPage = lazy(() => import("./components/ContactPage"));
 const ProfilePage = lazy(() => import("./components/ProfilePage"));
+const EventPage = lazy(() => import("./components/EventPage"));
 
 // Repli affiché le temps de récupérer le morceau de code d'un écran. Volontairement discret :
 // sur une connexion correcte il n'apparaît qu'une fraction de seconde.
@@ -61,6 +62,7 @@ export default function App() {
   const [sessionLoading, setSessionLoading] = useState(true);
 
   const [viewingOrganizerAlias, setViewingOrganizerAlias] = useState<string | null>(initialRoute.organizerAlias);
+  const [viewingEventId, setViewingEventId] = useState<string | null>(initialRoute.eventId);
   const [activeTab, setActiveTab] = useState<string>(initialRoute.tab);
   // Posé le temps d'appliquer un changement venu des boutons précédent/suivant : sans lui,
   // l'effet de synchronisation ci-dessous réempilerait aussitôt l'entrée qu'on vient de quitter.
@@ -170,6 +172,7 @@ export default function App() {
       const route = matchPath(window.location.pathname);
       skipUrlSync.current = true;
       setViewingOrganizerAlias(route.organizerAlias);
+      setViewingEventId(route.eventId);
       setActiveTab(route.tab);
     }
     window.addEventListener("popstate", handlePopState);
@@ -185,11 +188,20 @@ export default function App() {
       skipUrlSync.current = false;
       return;
     }
-    const nextPath = pathForTab(activeTab, viewingOrganizerAlias);
+    const nextPath = pathForTab(activeTab, viewingOrganizerAlias, viewingEventId);
     if (nextPath !== window.location.pathname) {
       window.history.pushState({}, "", nextPath);
     }
-  }, [activeTab, viewingOrganizerAlias]);
+  }, [activeTab, viewingOrganizerAlias, viewingEventId]);
+
+  // Ouverture de la page d'un événement. C'est désormais ce que fait un clic sur une affiche,
+  // à la place de l'ouverture directe de la fenêtre de paiement : sans écran intermédiaire,
+  // un événement n'avait aucune URL propre, donc rien à partager.
+  function handleViewEvent(event: Event) {
+    setViewingEventId(event.id);
+    setActiveTab("event");
+    window.scrollTo({ top: 0 });
+  }
 
   // Confirmation de paiement instantanée : on s'abonne aux changements de SES PROPRES
   // tickets via Supabase Realtime (policy "tickets_select_own", scoped à buyer_id = auth.uid()).
@@ -414,6 +426,7 @@ export default function App() {
                   <LandingPage
                     events={events}
                     onBuyTicket={handleBuyTicketTrigger}
+                    onViewEvent={handleViewEvent}
                     userRole={user?.role}
                     onViewOrganizer={handleViewOrganizer}
                   />
@@ -421,11 +434,24 @@ export default function App() {
               </>
             )}
 
+            {activeTab === "event" && (
+              <Suspense fallback={<ScreenLoader />}>
+                <EventPage
+                  event={events.find((e) => e.id === viewingEventId) || null}
+                  loading={loadingEvents}
+                  onBack={() => setActiveTab("home")}
+                  onBuyTicket={handleBuyTicketTrigger}
+                  onViewOrganizer={handleViewOrganizer}
+                />
+              </Suspense>
+            )}
+
             {activeTab === "organizer-profile" && viewingOrganizerAlias && (
               <OrganizerProfilePage
                 alias={viewingOrganizerAlias}
                 onBack={handleBackFromOrganizerProfile}
                 onBuyTicket={handleBuyTicketTrigger}
+                onViewEvent={handleViewEvent}
               />
             )}
 

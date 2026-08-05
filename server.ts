@@ -3,6 +3,7 @@
 import { setupSentryExpressErrorHandler } from "./server/lib/observability.js";
 
 import express from "express";
+import fs from "fs";
 import path from "path";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
@@ -11,6 +12,7 @@ import { PORT, HMR_PORT, PAYMENT_GATEWAY_ORIGINS, SUPABASE_REALTIME_ORIGINS, isP
 import { apiGeneralRateLimiter } from "./server/lib/rateLimiters.js";
 import { requireAuth, requireRole } from "./server/lib/auth.js";
 import { sanitizeObject } from "./server/lib/security.js";
+import { findPublicEventById, buildEventPreviewTags, injectPreviewTags } from "./server/lib/socialPreview.js";
 
 import eventsRouter from "./server/routes/events.js";
 import authRouter from "./server/routes/auth.js";
@@ -114,6 +116,33 @@ app.use(adminRouter);
 // à Sentry avant la réponse d'erreur générique. No-op si SENTRY_DSN n'est pas définie.
 setupSentryExpressErrorHandler(app);
 
+// Page d'un événement : c'est la SEULE route servie avec un HTML personnalisé, parce que
+// c'est la seule destinée à être partagée dans une conversation. Les robots d'aperçu
+// (WhatsApp, Facebook, X) n'exécutent pas le JavaScript : les balises Open Graph doivent être
+// présentes dans le HTML livré, sinon un lien partagé n'affiche ni affiche ni titre.
+//
+// Le reste de l'application continue d'être servi tel quel : aucun rendu serveur ailleurs.
+function registerEventPreviewRoute(app: express.Express, loadTemplate: () => Promise<string>) {
+  app.get("/e/:id", async (req: express.Request, res: express.Response) => {
+    try {
+      const template = await loadTemplate();
+      const event = await findPublicEventById(String(req.params.id || ""));
+
+      // Événement inconnu, non approuvé, ou lecture impossible : on sert l'application
+      // normale, sans aperçu. Le frontend affichera son propre message d'introuvable —
+      // mieux vaut ça qu'une page d'erreur brute sur un lien partagé.
+      if (!event) {
+        return res.status(404).type("html").send(template);
+      }
+
+      res.type("html").send(injectPreviewTags(template, buildEventPreviewTags(event)));
+    } catch (err: any) {
+      console.error("[Aperçu de partage] Rendu de /e/:id impossible :", err.message);
+      res.redirect(302, "/");
+    }
+  });
+}
+
 // Configure Vite middleware and static serving as requested
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
@@ -129,9 +158,17 @@ async function startServer() {
       },
       appType: "spa",
     });
+    // Enregistrée AVANT le middleware Vite, qui répondrait sinon avec l'index.html brut.
+    // transformIndexHtml applique les transformations de Vite (injection du client HMR,
+    // réécriture des modules) pour que la page reste fonctionnelle en développement.
+    registerEventPreviewRoute(app, async () => {
+      const raw = await fs.promises.readFile(path.join(process.cwd(), "index.html"), "utf8");
+      return vite.transformIndexHtml("/", raw);
+    });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
+    registerEventPreviewRoute(app, () => fs.promises.readFile(path.join(distPath, "index.html"), "utf8"));
     app.use(express.static(distPath));
     app.get("*", (req: express.Request, res: express.Response) => {
       res.sendFile(path.join(distPath, "index.html"));
