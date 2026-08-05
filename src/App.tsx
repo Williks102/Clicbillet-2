@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Navbar from "./components/Navbar";
 import LandingPage from "./components/LandingPage";
 import AuthPage from "./components/AuthPage";
@@ -23,19 +23,16 @@ import { Calendar, Compass, ShieldAlert, Sparkles } from "lucide-react";
 import { supabaseClient } from "./lib/supabaseClient";
 import { fetchPublicEvents } from "./lib/publicEvents";
 import { isNativeApp } from "./lib/platform";
+import { matchPath, pathForTab } from "./lib/appRoutes";
 import { authFetch } from "./lib/apiClient";
 
 // Calculée une seule fois : Capacitor.isNativePlatform() ne change jamais pendant la vie de l'app.
 const nativeApp = isNativeApp();
 
-// Page publique organisateur (/o/:alias) : cette app n'a pas de routing par URL (tout est
-// géré par activeTab), donc pour qu'un lien direct partageable fonctionne à froid (ouvert
-// depuis Instagram par ex., pas seulement en cliquant depuis l'accueil), on lit le pathname
-// une seule fois au montage — même principe que le token de reset de mot de passe plus bas.
-function extractOrganizerAliasFromPath(): string | null {
-  const match = /^\/o\/([a-z0-9-]+)\/?$/.exec(window.location.pathname);
-  return match ? match[1] : null;
-}
+// Écran demandé par l'URL d'ouverture. Lu une seule fois : c'est le point d'entrée "à froid"
+// (lien reçu par message, favori, résultat de recherche), par opposition à la navigation
+// interne qui passe ensuite par setActiveTab.
+const initialRoute = matchPath(window.location.pathname);
 
 export default function App() {
   // La session vit désormais dans un cookie httpOnly (jamais lisible par du JS, cf.
@@ -46,8 +43,11 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
 
-  const [viewingOrganizerAlias, setViewingOrganizerAlias] = useState<string | null>(extractOrganizerAliasFromPath);
-  const [activeTab, setActiveTab] = useState<string>(() => extractOrganizerAliasFromPath() ? "organizer-profile" : "home");
+  const [viewingOrganizerAlias, setViewingOrganizerAlias] = useState<string | null>(initialRoute.organizerAlias);
+  const [activeTab, setActiveTab] = useState<string>(initialRoute.tab);
+  // Posé le temps d'appliquer un changement venu des boutons précédent/suivant : sans lui,
+  // l'effet de synchronisation ci-dessous réempilerait aussitôt l'entrée qu'on vient de quitter.
+  const skipUrlSync = useRef(false);
   const [events, setEvents] = useState<Event[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [checkoutEvent, setCheckoutEvent] = useState<Event | null>(null);
@@ -118,10 +118,10 @@ export default function App() {
         if (res.ok) {
           const profile: User = await res.json();
           setUser(profile);
-          // Dynamic tab routing après restauration de session — sauf si l'app vient d'être
-          // ouverte sur un lien direct /o/:alias (cf. extractOrganizerAliasFromPath), qu'on ne
-          // veut jamais écraser par le tableau de bord habituel du rôle connecté.
-          if (activeTab !== "organizer-profile") {
+          // Atterrissage par défaut sur le tableau de bord du rôle — uniquement si l'app a été
+          // ouverte sur l'accueil. Un lien direct (tarifs, page organisateur, CGV...) doit
+          // rester sur l'écran demandé : c'est tout l'intérêt de l'avoir partagé.
+          if (initialRoute.tab === "home") {
             if (profile.role === "admin") setActiveTab("admin-dashboard");
             else if (profile.role === "organizer") setActiveTab("organizer-dashboard");
           }
@@ -135,45 +135,44 @@ export default function App() {
     return () => { cancelled = true; };
   }, []);
 
-  // Navigation vers la page publique d'un organisateur (depuis une fiche événement, ou
-  // au chargement initial si l'URL est /o/:alias). Met à jour l'URL pour que le lien reste
-  // partageable même si on y arrive en cliquant depuis l'intérieur de l'app.
+  // Navigation vers la page publique d'un organisateur. L'URL est posée par l'effet de
+  // synchronisation ci-dessous, comme pour tous les autres écrans.
   function handleViewOrganizer(alias: string) {
     setViewingOrganizerAlias(alias);
     setActiveTab("organizer-profile");
-    window.history.pushState({}, "", `/o/${alias}`);
   }
 
   function handleBackFromOrganizerProfile() {
     setViewingOrganizerAlias(null);
     setActiveTab("home");
-    window.history.pushState({}, "", "/");
   }
 
-  // Synchronise l'onglet affiché avec les boutons précédent/suivant du navigateur.
+  // Boutons précédent/suivant du navigateur : l'URL fait foi, on réaligne l'écran dessus.
   useEffect(() => {
     function handlePopState() {
-      const alias = extractOrganizerAliasFromPath();
-      if (alias) {
-        setViewingOrganizerAlias(alias);
-        setActiveTab("organizer-profile");
-      } else {
-        setViewingOrganizerAlias(null);
-        setActiveTab("home");
-      }
+      const route = matchPath(window.location.pathname);
+      skipUrlSync.current = true;
+      setViewingOrganizerAlias(route.organizerAlias);
+      setActiveTab(route.tab);
     }
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  // Filet de sécurité : si on quitte la page organisateur par un autre chemin que
-  // handleBackFromOrganizerProfile (logo, barre d'onglets native, etc.), on remet quand
-  // même l'URL sur "/" pour qu'elle ne reste jamais désynchronisée de l'écran affiché.
+  // Synchronisation écran -> URL, en un seul endroit : chaque changement d'onglet laisse une
+  // entrée d'historique, donc "précédent" revient à l'écran précédent au lieu de quitter
+  // l'application, et l'adresse affichée reste toujours celle de l'écran visible — donc
+  // copiable et partageable telle quelle.
   useEffect(() => {
-    if (activeTab !== "organizer-profile" && window.location.pathname.startsWith("/o/")) {
-      window.history.replaceState({}, "", "/");
+    if (skipUrlSync.current) {
+      skipUrlSync.current = false;
+      return;
     }
-  }, [activeTab]);
+    const nextPath = pathForTab(activeTab, viewingOrganizerAlias);
+    if (nextPath !== window.location.pathname) {
+      window.history.pushState({}, "", nextPath);
+    }
+  }, [activeTab, viewingOrganizerAlias]);
 
   // Confirmation de paiement instantanée : on s'abonne aux changements de SES PROPRES
   // tickets via Supabase Realtime (policy "tickets_select_own", scoped à buyer_id = auth.uid()).
