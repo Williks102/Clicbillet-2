@@ -20,7 +20,24 @@ export const RESEND_API_KEY = (process.env.RESEND_API_KEY || "").trim();
 // une autre application (Laravel) — pas celle-ci) : on garde monticket.online ici tant que
 // clicbillet.com n'est pas vérifié (SPF/DKIM) côté Resend, pour ne pas casser l'envoi d'emails.
 export const RESEND_FROM_EMAIL = (process.env.RESEND_FROM_EMAIL || "ClicBillet <no-reply@monticket.online>").trim();
-export const ADMIN_NOTIFICATION_EMAIL = (process.env.ADMIN_NOTIFICATION_EMAIL || "admin@monticket.online").trim();
+// ADMIN_EMAIL est accepté comme alias : c'est le nom réellement utilisé dans la configuration
+// Vercel du projet. Sans cet alias, la variable définie là-bas était purement ignorée et
+// TOUTES les notifications administratives (nouvel organisateur, demande de retrait, message
+// de contact, demande d'accès organisateur) repartaient en silence vers l'adresse de repli
+// ci-dessous — aucune erreur, aucun symptôme, juste des emails qui n'arrivent pas.
+// Même principe que SUPABASE_URL / VITE_SUPABASE_URL plus haut.
+const ADMIN_NOTIFICATION_EMAIL_FROM_ENV = (process.env.ADMIN_NOTIFICATION_EMAIL || process.env.ADMIN_EMAIL || "").trim();
+export const ADMIN_NOTIFICATION_EMAIL = ADMIN_NOTIFICATION_EMAIL_FROM_ENV || "admin@monticket.online";
+
+// isProduction n'est déclarée que plus bas dans ce fichier : on teste NODE_ENV directement,
+// comme les autres contrôles de démarrage situés avant elle.
+if (process.env.NODE_ENV === "production" && !ADMIN_NOTIFICATION_EMAIL_FROM_ENV) {
+  console.warn(
+    `[Config] Ni ADMIN_NOTIFICATION_EMAIL ni ADMIN_EMAIL ne sont définies : les notifications ` +
+    `administratives partent vers l'adresse de repli "${ADMIN_NOTIFICATION_EMAIL}". Les demandes ` +
+    `de retrait et les demandes d'accès organisateur y arriveront — vérifiez que cette boîte est relevée.`
+  );
+}
 export const SUPABASE_WEBHOOK_SECRET = (process.env.SUPABASE_WEBHOOK_SECRET || "").trim();
 
 // Secret injecté automatiquement par Vercel Cron dans le header Authorization ("Bearer <secret>")
