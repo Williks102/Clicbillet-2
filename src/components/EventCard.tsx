@@ -26,7 +26,10 @@ export default function EventCard({ event: evt, onViewEvent, userRole, onViewOrg
   return (
     <div
       id={`event-card-${evt.id}`}
-      className="group relative flex flex-col overflow-hidden rounded-2xl bg-white border border-gray-100 shadow-xs transition-all duration-300 hover:-translate-y-1.5 hover:shadow-lg"
+      // h-full : la carte n'est plus l'élément direct de la grille (elle est enveloppée pour
+      // l'apparition au défilement), elle doit donc remplir la hauteur que la grille donne à son
+      // conteneur, sans quoi les cartes d'une même rangée perdent leur hauteur commune.
+      className="group relative flex h-full flex-col overflow-hidden rounded-2xl bg-white border border-gray-100 shadow-xs transition-all duration-300 hover:-translate-y-1.5 hover:shadow-lg"
     >
       {/* Event banner illustration, plein cadre sans surcouche. Affiche, titre et bouton
           mènent tous à la page de l'événement : le choix des tarifs s'y fait désormais, et

@@ -3,6 +3,7 @@ import { Search, Tag, LayoutGrid, Music, PartyPopper, Drama, Trophy } from "luci
 import { Event } from "../types";
 import { isEventPast } from "../lib/eventStatus";
 import EventCard from "./EventCard";
+import Reveal from "./Reveal";
 
 interface LandingPageProps {
   events: Event[];
@@ -113,18 +114,30 @@ export default function LandingPage({ events, onViewEvent, userRole, onViewOrgan
         </div>
       </section>
 
-      {/* Events Listings grid layout */}
+      {/* Events Listings grid layout.
+          La recherche et les catégories au-dessus ne sont volontairement pas animées : ce sont
+          les premiers éléments manipulés à l'arrivée, les faire apparaître retarderait la saisie.
+
+          Le décalage se calcule sur la colonne (i % 3) et non sur le rang global : une rangée
+          entre dans l'écran d'un seul tenant, l'apparition la balaie donc de gauche à droite,
+          là où un décalage cumulé sur toute la liste ferait attendre plus d'une seconde la
+          dernière carte. Sur une colonne (mobile), chaque carte a de toute façon son propre
+          déclenchement au défilement, et le décalage résiduel reste imperceptible.
+
+          Les cartes conservées d'un filtrage à l'autre gardent leur clé, donc leur état : seules
+          les nouvelles apparaissent, la grille ne rejoue pas l'animation à chaque frappe. */}
       <section id="events-grid-section">
         {filteredEvents.length > 0 ? (
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredEvents.map((evt) => (
-              <EventCard
-                key={evt.id}
-                event={evt}
-                onViewEvent={onViewEvent}
-                userRole={userRole}
-                onViewOrganizer={onViewOrganizer}
-              />
+            {filteredEvents.map((evt, i) => (
+              <Reveal key={evt.id} delay={(i % 3) * 80}>
+                <EventCard
+                  event={evt}
+                  onViewEvent={onViewEvent}
+                  userRole={userRole}
+                  onViewOrganizer={onViewOrganizer}
+                />
+              </Reveal>
             ))}
           </div>
         ) : (
