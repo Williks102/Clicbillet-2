@@ -23,13 +23,16 @@ const ARGUMENTS = [
 export default function JoinPromoterCta({ onJoin, isSignedIn }: JoinPromoterCtaProps) {
   return (
     <section className="mx-auto w-full max-w-7xl px-3 pb-10 sm:px-6" id="join-promoter-cta">
-      <Reveal className="overflow-hidden rounded-3xl bg-gradient-to-br from-orange-600 via-orange-500 to-amber-500 px-6 py-10 text-white shadow-xl sm:px-12 sm:py-12">
+      {/* Gris 70 % (#4d4d4d) : le texte blanc y garde un contraste de 8,4:1, très au-delà du
+          minimum exigé (4,5:1). L'orange n'est pas perdu pour autant — il se concentre sur le
+          bouton, seul élément à cliquer, qui ressort d'autant mieux sur un fond neutre. */}
+      <Reveal className="overflow-hidden rounded-3xl bg-[#4d4d4d] px-6 py-10 text-white shadow-xl sm:px-12 sm:py-12">
         <div className="mx-auto max-w-3xl text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-white/15">
             <Store className="h-6 w-6" />
           </div>
           <h2 className="text-2xl font-black tracking-tight sm:text-3xl">Nous rejoindre</h2>
-          <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-orange-50">
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-gray-200">
             Vous organisez des concerts, des soirées, des matchs ou des spectacles ? Vendez vos billets sur
             ClicBillet et suivez vos recettes depuis votre téléphone.
           </p>
@@ -39,7 +42,7 @@ export default function JoinPromoterCta({ onJoin, isSignedIn }: JoinPromoterCtaP
               <div key={title} className="rounded-2xl bg-white/10 p-4">
                 <Icon className="h-5 w-5" />
                 <h3 className="mt-2.5 text-sm font-black">{title}</h3>
-                <p className="mt-1 text-xs leading-relaxed text-orange-50">{text}</p>
+                <p className="mt-1 text-xs leading-relaxed text-gray-200">{text}</p>
               </div>
             ))}
           </div>
@@ -47,12 +50,15 @@ export default function JoinPromoterCta({ onJoin, isSignedIn }: JoinPromoterCtaP
           <button
             id="join-promoter-btn"
             onClick={onJoin}
-            className="mx-auto mt-8 flex items-center gap-2 rounded-xl bg-white px-6 py-3.5 text-sm font-black text-orange-600 transition hover:bg-orange-50 active:scale-95"
+            // orange-700 et non orange-600 : sur fond blanc, le 600 ne donne que 3,6:1, sous le
+            // minimum de 4,5:1 pour un texte de cette taille. Le 700 monte à 5,2:1 pour une
+            // différence de teinte à peine perceptible.
+            className="mx-auto mt-8 flex items-center gap-2 rounded-xl bg-white px-6 py-3.5 text-sm font-black text-orange-700 transition hover:bg-orange-50 active:scale-95"
           >
             <span>{isSignedIn ? "Devenir promoteur" : "Créer mon compte promoteur"}</span>
             <ArrowRight className="h-4 w-4" />
           </button>
-          <p className="mt-3 text-[11px] font-semibold text-orange-50">
+          <p className="mt-3 text-[11px] font-semibold text-gray-300">
             Chaque demande est vérifiée par l'équipe avant l'ouverture de la vente.
           </p>
         </div>
