@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ArrowLeft
 } from "lucide-react";
+import Reveal from "./Reveal";
 
 const COMMISSION_RATE = 0.06;
 
@@ -119,24 +120,25 @@ export default function PricingPage({ onBack, onCreateAccount, onContact }: { on
         </div>
       </section>
 
-      {/* Commission highlight */}
-      <div className="relative z-10 -mt-8 mx-auto max-w-md rounded-2xl border border-gray-100 bg-white p-8 text-center shadow-lg">
+      {/* Commission highlight. Le hero au-dessus n'est volontairement pas animé : il est déjà
+          dans l'écran au chargement, l'y faire apparaître retarderait la première lecture. */}
+      <Reveal className="relative z-10 -mt-8 mx-auto max-w-md rounded-2xl border border-gray-100 bg-white p-8 text-center shadow-lg">
         <div className="text-6xl font-black text-orange-600">
           {Math.round(COMMISSION_RATE * 100)}
           <span className="text-3xl">%</span>
         </div>
         <p className="mt-1 text-lg font-bold text-gray-900">Et puis c'est tout !</p>
         <p className="mt-2 text-sm text-gray-500">Vendez les billets de votre événement sur ClicBillet</p>
-      </div>
+      </Reveal>
 
-      <p className="mx-auto mt-8 max-w-2xl text-center text-sm leading-relaxed text-gray-600">
+      <Reveal as="p" delay={80} className="mx-auto mt-8 max-w-2xl text-center text-sm leading-relaxed text-gray-600">
         Avec notre plateforme, les frais ne sont que de <strong className="text-gray-900">{Math.round(COMMISSION_RATE * 100)}%</strong> du
         prix du billet. Profitez d'une place de marché 24/7 et de milliers de participants potentiels — vous ne
         trouverez pas meilleur service pour vendre vos billets en Côte d'Ivoire.
-      </p>
+      </Reveal>
 
       {/* Calculateur */}
-      <section className="mt-10 rounded-3xl bg-gray-50 p-6 sm:p-10">
+      <Reveal as="section" className="mt-10 rounded-3xl bg-gray-50 p-6 sm:p-10">
         <h2 className="text-center text-xl font-black text-gray-900">Comprenez nos frais en un coup d'œil</h2>
         <p className="mx-auto mt-2 max-w-md text-center text-xs text-gray-500">
           Entrez le prix d'un billet et laissez-nous calculer le reste.
@@ -181,26 +183,31 @@ export default function PricingPage({ onBack, onCreateAccount, onContact }: { on
             supplémentaire.
           </p>
         </div>
-      </section>
+      </Reveal>
 
-      {/* Avantages */}
+      {/* Avantages. Les cartes apparaissent en cascade : ici l'apparition porte sur chaque carte
+          et non sur la section entière, sinon deux animations s'imbriqueraient. La carte reste
+          dans un conteneur pour que son effet de survol (translation) ne soit pas ralenti par
+          la durée de l'apparition, et h-full préserve la hauteur égale des cartes de la grille. */}
       <section className="mt-14">
-        <h2 className="text-center text-xl font-black text-gray-900">Pourquoi organiser votre événement sur ClicBillet ?</h2>
+        <Reveal as="h2" className="text-center text-xl font-black text-gray-900">Pourquoi organiser votre événement sur ClicBillet ?</Reveal>
         <div className="mt-8 grid gap-5 sm:grid-cols-2">
-          {FEATURES.map(({ icon: Icon, title, text }) => (
-            <div key={title} className="rounded-2xl border border-gray-100 bg-white p-6 shadow-xs transition-all hover:-translate-y-1 hover:shadow-md">
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-orange-600 to-orange-500 text-white">
-                <Icon className="h-5 w-5" />
+          {FEATURES.map(({ icon: Icon, title, text }, i) => (
+            <Reveal key={title} delay={i * 70}>
+              <div className="h-full rounded-2xl border border-gray-100 bg-white p-6 shadow-xs transition-all hover:-translate-y-1 hover:shadow-md">
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-orange-600 to-orange-500 text-white">
+                  <Icon className="h-5 w-5" />
+                </div>
+                <h3 className="mb-2 text-sm font-black text-gray-900">{title}</h3>
+                <p className="text-xs leading-relaxed text-gray-500">{text}</p>
               </div>
-              <h3 className="mb-2 text-sm font-black text-gray-900">{title}</h3>
-              <p className="text-xs leading-relaxed text-gray-500">{text}</p>
-            </div>
+            </Reveal>
           ))}
         </div>
       </section>
 
       {/* Workflow */}
-      <section className="mt-14 rounded-3xl border border-gray-100 bg-white p-6 shadow-xs sm:p-10">
+      <Reveal as="section" className="mt-14 rounded-3xl border border-gray-100 bg-white p-6 shadow-xs sm:p-10">
         <h2 className="flex items-center justify-center gap-2 text-center text-xl font-black text-gray-900">
           <Route className="h-5 w-5 text-orange-600" />
           <span>Comment ça marche en 4 étapes</span>
@@ -218,27 +225,29 @@ export default function PricingPage({ onBack, onCreateAccount, onContact }: { on
             </div>
           ))}
         </div>
-      </section>
+      </Reveal>
 
       {/* Moyens de paiement */}
       <section className="mt-14">
-        <h2 className="text-center text-xl font-black text-gray-900">Moyens de paiement acceptés</h2>
+        <Reveal as="h2" className="text-center text-xl font-black text-gray-900">Moyens de paiement acceptés</Reveal>
         <div className="mt-8 grid gap-5 sm:grid-cols-3">
-          {PAYMENT_METHODS.map(({ icon: Icon, title, text, note }) => (
-            <div key={title} className="rounded-2xl border border-gray-100 bg-white p-6 text-center shadow-xs">
-              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-orange-600 to-orange-500 text-white">
-                <Icon className="h-5 w-5" />
+          {PAYMENT_METHODS.map(({ icon: Icon, title, text, note }, i) => (
+            <Reveal key={title} delay={i * 70}>
+              <div className="h-full rounded-2xl border border-gray-100 bg-white p-6 text-center shadow-xs">
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-orange-600 to-orange-500 text-white">
+                  <Icon className="h-5 w-5" />
+                </div>
+                <h3 className="text-sm font-black text-gray-900">{title}</h3>
+                <p className="mt-1 text-xs text-gray-500">{text}</p>
+                <p className="mt-1 text-[10px] font-semibold text-gray-400">{note}</p>
               </div>
-              <h3 className="text-sm font-black text-gray-900">{title}</h3>
-              <p className="mt-1 text-xs text-gray-500">{text}</p>
-              <p className="mt-1 text-[10px] font-semibold text-gray-400">{note}</p>
-            </div>
+            </Reveal>
           ))}
         </div>
       </section>
 
       {/* FAQ */}
-      <section className="mt-14">
+      <Reveal as="section" className="mt-14">
         <h2 className="text-center text-xl font-black text-gray-900">Questions fréquentes</h2>
         <div className="mx-auto mt-8 max-w-2xl space-y-3">
           {FAQ.map((item, i) => (
@@ -259,10 +268,10 @@ export default function PricingPage({ onBack, onCreateAccount, onContact }: { on
             </div>
           ))}
         </div>
-      </section>
+      </Reveal>
 
       {/* CTA final */}
-      <section className="my-14 rounded-3xl bg-gradient-to-br from-orange-600 via-orange-500 to-amber-500 p-8 text-center text-white shadow-xl sm:p-12">
+      <Reveal as="section" className="my-14 rounded-3xl bg-gradient-to-br from-orange-600 via-orange-500 to-amber-500 p-8 text-center text-white shadow-xl sm:p-12">
         <h3 className="text-2xl font-black">Prêt à créer votre premier événement ?</h3>
         <p className="mx-auto mt-3 max-w-md text-sm text-orange-50">
           Rejoignez des centaines d'organisateurs qui nous font confiance en Côte d'Ivoire
@@ -283,7 +292,7 @@ export default function PricingPage({ onBack, onCreateAccount, onContact }: { on
             <span>Parler à un conseiller</span>
           </button>
         </div>
-      </section>
+      </Reveal>
     </div>
   );
 }
