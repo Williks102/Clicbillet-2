@@ -20,7 +20,7 @@ interface RevealProps {
   children: ReactNode;
   className?: string;
   // Décalage en millisecondes, pour faire apparaître une grille de cartes en cascade plutôt
-  // que d'un bloc. À garder court : au-delà de ~100 ms par carte, l'attente devient perceptible.
+  // que d'un bloc.
   delay?: number;
   as?: "div" | "section" | "p" | "h2";
 }
@@ -46,7 +46,7 @@ export default function Reveal({ children, className = "", delay = 0, as: Tag = 
       // La marge négative retarde le déclenchement jusqu'à ce que le bloc soit franchement
       // entré dans l'écran : sinon l'apparition se joue sur la toute dernière ligne de pixels,
       // hors du regard, et le bloc paraît déjà là quand on arrive dessus.
-      { rootMargin: "0px 0px -8% 0px" }
+      { rootMargin: "0px 0px -15% 0px" }
     );
 
     observer.observe(node);
@@ -57,8 +57,15 @@ export default function Reveal({ children, className = "", delay = 0, as: Tag = 
     <Tag
       ref={ref as React.Ref<any>}
       style={delay ? { transitionDelay: `${delay}ms` } : undefined}
-      className={`${className} transition-[opacity,transform] duration-700 ease-out motion-reduce:transition-none ${
-        visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
+      // La liste des propriétés animées nomme "translate" et "scale", et non "transform" :
+      // Tailwind v4 pose translate-y-* et scale-* sur ces propriétés CSS individuelles, si bien
+      // qu'une transition sur "transform" ne les couvre pas — le bloc se remettait alors en place
+      // d'un coup et seule l'opacité était perçue.
+      //
+      // La courbe est une décélération franche (départ rapide, arrivée longue) plutôt qu'un
+      // ease-out standard : c'est ce qui rend le mouvement lisible au lieu d'un simple fondu.
+      className={`${className} transition-[opacity,translate,scale] duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none ${
+        visible ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-14 scale-[0.96]"
       }`}
     >
       {children}

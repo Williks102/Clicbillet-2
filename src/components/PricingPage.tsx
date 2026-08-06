@@ -193,7 +193,7 @@ export default function PricingPage({ onBack, onCreateAccount, onContact }: { on
         <Reveal as="h2" className="text-center text-xl font-black text-gray-900">Pourquoi organiser votre événement sur ClicBillet ?</Reveal>
         <div className="mt-8 grid gap-5 sm:grid-cols-2">
           {FEATURES.map(({ icon: Icon, title, text }, i) => (
-            <Reveal key={title} delay={i * 70}>
+            <Reveal key={title} delay={i * 120}>
               <div className="h-full rounded-2xl border border-gray-100 bg-white p-6 shadow-xs transition-all hover:-translate-y-1 hover:shadow-md">
                 <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-orange-600 to-orange-500 text-white">
                   <Icon className="h-5 w-5" />
@@ -232,7 +232,7 @@ export default function PricingPage({ onBack, onCreateAccount, onContact }: { on
         <Reveal as="h2" className="text-center text-xl font-black text-gray-900">Moyens de paiement acceptés</Reveal>
         <div className="mt-8 grid gap-5 sm:grid-cols-3">
           {PAYMENT_METHODS.map(({ icon: Icon, title, text, note }, i) => (
-            <Reveal key={title} delay={i * 70}>
+            <Reveal key={title} delay={i * 120}>
               <div className="h-full rounded-2xl border border-gray-100 bg-white p-6 text-center shadow-xs">
                 <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-orange-600 to-orange-500 text-white">
                   <Icon className="h-5 w-5" />
