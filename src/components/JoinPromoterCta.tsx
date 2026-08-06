@@ -23,10 +23,12 @@ const ARGUMENTS = [
 export default function JoinPromoterCta({ onJoin, isSignedIn }: JoinPromoterCtaProps) {
   return (
     <section className="mx-auto w-full max-w-7xl px-3 pb-10 sm:px-6" id="join-promoter-cta">
-      {/* Gris 70 % (#4d4d4d) : le texte blanc y garde un contraste de 8,4:1, très au-delà du
-          minimum exigé (4,5:1). L'orange n'est pas perdu pour autant — il se concentre sur le
-          bouton, seul élément à cliquer, qui ressort d'autant mieux sur un fond neutre. */}
-      <Reveal className="overflow-hidden rounded-3xl bg-[#4d4d4d] px-6 py-10 text-white shadow-xl sm:px-12 sm:py-12">
+      {/* #1a252f : la teinte du pied de page de l'ancienne plateforme (dépôt billeteries,
+          resources/views/layouts/app.blade.php), reprise à l'identique pour que les deux sites
+          se répondent. Le texte blanc y atteint 15,6:1, très au-delà du minimum de 4,5:1.
+          L'orange n'est pas perdu pour autant — il se concentre sur le bouton, seul élément à
+          cliquer, qui ressort d'autant mieux sur un fond sombre et neutre. */}
+      <Reveal className="overflow-hidden rounded-3xl bg-[#1a252f] px-6 py-10 text-white shadow-xl sm:px-12 sm:py-12">
         <div className="mx-auto max-w-3xl text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-white/15">
             <Store className="h-6 w-6" />
