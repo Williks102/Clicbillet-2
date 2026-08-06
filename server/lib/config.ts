@@ -180,9 +180,30 @@ export const isProduction = process.env.NODE_ENV === "production";
 const CANONICAL_PRODUCTION_ORIGIN = "https://www.clicbillet.com";
 
 const APP_ORIGIN_FROM_ENV = (process.env.APP_ORIGIN || "").trim();
-export const APP_ORIGIN = (APP_ORIGIN_FROM_ENV || (isProduction ? CANONICAL_PRODUCTION_ORIGIN : `http://localhost:${PORT}`))
-  .trim()
-  .replace(/\/+$/, "");
+const APP_ORIGIN_FALLBACK = isProduction ? CANONICAL_PRODUCTION_ORIGIN : `http://localhost:${PORT}`;
+
+// Raison pour laquelle une valeur ne peut pas produire de lien cliquable, ou null si elle convient.
+// L'espace mérite son propre test, avant même l'analyse d'URL : "https://pas www.clicbillet.com"
+// s'analyse sans erreur (le nom d'hôte devient "pas%20www.clicbillet.com" une fois encodé par le
+// client mail), et le destinataire tombe sur un domaine inexistant. C'est arrivé en production
+// sur les liens de réinitialisation de mot de passe.
+function appOriginRejection(value: string): string | null {
+  if (/\s/.test(value)) return "elle contient une espace";
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return "ce n'est pas une URL valide (le schéma https:// est-il présent ?)";
+  }
+
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return `le schéma "${parsed.protocol}" ne produit pas un lien web`;
+  }
+  if (isProduction && parsed.protocol !== "https:") return "elle doit être en https en production";
+  if (parsed.pathname !== "/" || parsed.search || parsed.hash) return "elle doit être une origine seule, sans chemin ni paramètre";
+  return null;
+}
 
 // Diagnostic au démarrage : une origine erronée est silencieuse — rien ne casse visiblement,
 // mais les liens de réinitialisation de mot de passe, les redirections de confirmation
@@ -194,24 +215,29 @@ export const APP_ORIGIN = (APP_ORIGIN_FROM_ENV || (isProduction ? CANONICAL_PROD
 // situation qui fonctionne — exactement le genre d'alerte non actionnable qui noie les vraies.
 if (isProduction && !APP_ORIGIN_FROM_ENV) {
   console.warn(
-    `[Config] APP_ORIGIN n'est pas définie : repli sur le domaine canonique "${APP_ORIGIN}". ` +
+    `[Config] APP_ORIGIN n'est pas définie : repli sur le domaine canonique "${APP_ORIGIN_FALLBACK}". ` +
     `Définissez-la explicitement si le domaine servi change, sans quoi les liens de ` +
     `réinitialisation de mot de passe, les confirmations d'email et les aperçus de partage ` +
     `continueront de pointer vers ce domaine.`
   );
 }
 
-try {
-  const parsed = new URL(APP_ORIGIN);
-  if (isProduction && parsed.protocol !== "https:") {
-    console.error(`[Config] APP_ORIGIN doit être en https en production (valeur actuelle : ${APP_ORIGIN}).`);
-  }
-  if (parsed.pathname !== "/") {
-    console.error(`[Config] APP_ORIGIN doit être une origine seule, sans chemin (valeur actuelle : ${APP_ORIGIN}).`);
-  }
-} catch {
-  console.error(`[Config] APP_ORIGIN n'est pas une URL valide : "${APP_ORIGIN}". Les liens générés seront inutilisables.`);
+// Une valeur inexploitable est ÉCARTÉE, et non seulement signalée : la version précédente
+// journalisait « les liens générés seront inutilisables » puis s'en servait quand même, si bien
+// qu'un e-mail de réinitialisation partait malgré tout avec une adresse morte. Le repli sur le
+// domaine canonique laisse au moins l'utilisateur atteindre le site ; l'erreur reste bruyante
+// (donc visible dans Sentry) pour que la variable soit corrigée.
+const APP_ORIGIN_REJECTION = APP_ORIGIN_FROM_ENV ? appOriginRejection(APP_ORIGIN_FROM_ENV) : null;
+if (APP_ORIGIN_REJECTION) {
+  console.error(
+    `[Config] APP_ORIGIN inutilisable : "${APP_ORIGIN_FROM_ENV}" — ${APP_ORIGIN_REJECTION}. ` +
+    `Repli sur "${APP_ORIGIN_FALLBACK}". Corrigez la variable d'environnement : elle doit valoir ` +
+    `exactement l'origine du site, par exemple "${CANONICAL_PRODUCTION_ORIGIN}".`
+  );
 }
+
+export const APP_ORIGIN = (APP_ORIGIN_REJECTION || !APP_ORIGIN_FROM_ENV ? APP_ORIGIN_FALLBACK : APP_ORIGIN_FROM_ENV)
+  .replace(/\/+$/, "");
 
 export const SUPABASE_HOST = (() => {
   try {

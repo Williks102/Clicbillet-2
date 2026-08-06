@@ -7,6 +7,7 @@ import WaitingRoom from "./components/WaitingRoom";
 import GuestOrAuthModal, { GuestInfo } from "./components/GuestOrAuthModal";
 import ToastStack, { ToastItem } from "./components/ToastStack";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
+import JoinPromoterCta from "./components/JoinPromoterCta";
 import OrganizerProfilePage from "./components/OrganizerProfilePage";
 import BottomTabBar from "./components/native/BottomTabBar";
 
@@ -73,6 +74,10 @@ export default function App() {
   const [waitingRoomEvent, setWaitingRoomEvent] = useState<Event | null>(null);
   const [pendingEvent, setPendingEvent] = useState<Event | null>(null);
   const [authModalVisible, setAuthModalVisible] = useState(false);
+  // Pourquoi l'écran d'authentification a été ouvert : "promoter" le fait démarrer sur
+  // l'inscription avec le type de compte adéquat. Remis à null à la fermeture, sans quoi une
+  // ouverture ultérieure par « Se Connecter » afficherait encore l'inscription.
+  const [authIntent, setAuthIntent] = useState<"promoter" | null>(null);
   const [guestChoiceEvent, setGuestChoiceEvent] = useState<Event | null>(null);
   const [guestInfo, setGuestInfo] = useState<GuestInfo | null>(null);
   // Billets choisis sur la page de l'événement. Conservés pendant les détours possibles
@@ -207,6 +212,34 @@ export default function App() {
     window.scrollTo({ top: 0 });
   }
 
+  // « Devenir promoteur » : la destination dépend de l'état de connexion, car le formulaire de
+  // demande exige un compte (l'administrateur doit savoir qui rappeler avant d'ouvrir la vente).
+  // Un visiteur crée donc d'abord son compte ; un acheteur déjà connecté va droit à son profil,
+  // seul endroit où vit le formulaire. Un organisateur ou un administrateur n'arrive jamais ici :
+  // le bouton et la bande d'appel à l'action leur sont masqués.
+  function handleBecomePromoter() {
+    window.scrollTo({ top: 0 });
+    if (!user) {
+      setCheckoutEvent(null);
+      // Sur l'inscription, et non la connexion : quelqu'un qui clique « Devenir promoteur »
+      // n'a par définition pas encore de compte. Le type de compte est présélectionné pour la
+      // même raison — il vient d'exprimer son intention, la lui redemander serait redondant.
+      setAuthIntent("promoter");
+      setAuthModalVisible(true);
+      return;
+    }
+    setActiveTab("profile");
+  }
+
+  // La bande « Nous rejoindre » n'a de sens que sur les pages de navigation publique, pour
+  // quelqu'un qui n'est pas déjà promoteur. Elle est écartée de la page Tarifs, qui se termine
+  // déjà par son propre appel à l'action — deux bandes successives se dévalueraient l'une l'autre.
+  const showJoinCta =
+    !nativeApp &&
+    !authModalVisible &&
+    (!user || user.role === "client") &&
+    ["home", "event", "organizer-profile"].includes(activeTab);
+
   // Confirmation de paiement instantanée : on s'abonne aux changements de SES PROPRES
   // tickets via Supabase Realtime (policy "tickets_select_own", scoped à buyer_id = auth.uid()).
   // Dès qu'un ticket passe de PENDING- à PAID- (confirmé par le webhook Paystack côté
@@ -261,6 +294,7 @@ export default function App() {
   function handleLoginSuccess(loggedInUser: User) {
     setUser(loggedInUser);
     setAuthModalVisible(false);
+    setAuthIntent(null);
 
     // Dynamic redirect based on user role
     if (loggedInUser.role === "admin") {
@@ -387,8 +421,10 @@ export default function App() {
           setActiveTab={setActiveTab}
           onOpenAuth={() => {
             setCheckoutEvent(null);
+            setAuthIntent(null);
             setAuthModalVisible(true);
           }}
+          onBecomePromoter={handleBecomePromoter}
         />
       )}
 
@@ -411,8 +447,11 @@ export default function App() {
           <AuthPage
             onSuccess={handleLoginSuccess}
             initialResetToken={resetToken}
+            initialMode={authIntent === "promoter" ? "register" : undefined}
+            initialRole={authIntent === "promoter" ? "organizer" : undefined}
             onCancel={() => {
               setAuthModalVisible(false);
+              setAuthIntent(null);
               setResetToken(null);
               setCheckoutEvent(null);
               setPendingEvent(null);
@@ -542,6 +581,8 @@ export default function App() {
           }}
         />
       )}
+
+      {showJoinCta && <JoinPromoterCta onJoin={handleBecomePromoter} isSignedIn={Boolean(user)} />}
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
       <PwaInstallPrompt />

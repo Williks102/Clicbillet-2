@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { Ticket, LogOut, User as UserIcon, LayoutDashboard, Camera, ShieldCheck, X, Home, Tag, Mail } from "lucide-react";
+import { Ticket, LogOut, User as UserIcon, LayoutDashboard, Camera, ShieldCheck, X, Home, Tag, Mail, Store } from "lucide-react";
 import { User } from "../types";
 
 interface MobileNavDrawerProps {
@@ -8,6 +8,7 @@ interface MobileNavDrawerProps {
   setActiveTab: (tab: string) => void;
   onLogout: () => void;
   onOpenAuth: () => void;
+  onBecomePromoter: () => void;
   onClose: () => void;
 }
 
@@ -16,7 +17,7 @@ interface MobileNavDrawerProps {
  * Navbar. Reprend les mêmes destinations que la nav desktop, mais avec libellés complets
  * (la nav desktop ne montre que des icônes sur petit écran).
  */
-export default function MobileNavDrawer({ user, activeTab, setActiveTab, onLogout, onOpenAuth, onClose }: MobileNavDrawerProps) {
+export default function MobileNavDrawer({ user, activeTab, setActiveTab, onLogout, onOpenAuth, onBecomePromoter, onClose }: MobileNavDrawerProps) {
   function go(tab: string) {
     setActiveTab(tab);
     onClose();
@@ -91,6 +92,18 @@ export default function MobileNavDrawer({ user, activeTab, setActiveTab, onLogou
             <Mail className="h-4.5 w-4.5" />
             <span>Contact</span>
           </button>
+
+          {/* Cf. Navbar : rien à proposer à qui vend déjà des billets. */}
+          {(!user || user.role === "client") && (
+            <button
+              id="mobile-nav-become-promoter-btn"
+              onClick={() => { onBecomePromoter(); onClose(); }}
+              className="flex w-full items-center space-x-3 rounded-xl border border-orange-200 bg-orange-50/60 px-3 py-3 text-sm font-bold text-orange-700 transition-colors hover:bg-orange-100"
+            >
+              <Store className="h-4.5 w-4.5" />
+              <span>Devenir promoteur</span>
+            </button>
+          )}
 
           {user && (
             <>
