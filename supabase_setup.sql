@@ -574,3 +574,38 @@ CREATE UNIQUE INDEX IF NOT EXISTS organizer_requests_one_pending_per_user
 
 ALTER TABLE public.organizer_requests ENABLE ROW LEVEL SECURITY;
 -- Pas de policy anon/authenticated : accès exclusif via la clé service_role (server.ts).
+
+-- ==========================================
+-- 20. DATE ET HEURE DE FIN D'ÉVÉNEMENT
+-- ==========================================
+-- events.date/time désignent le DÉBUT. Sans borne de fin, rien ne permettait de dire quand un
+-- billet cesse d'être valide : GET /api/verify-ticket acceptait un billet payé et non scanné
+-- indéfiniment, y compris des mois après l'événement. Sur un organisateur récurrent (soirée
+-- hebdomadaire), le billet de la semaine passée ouvrait donc la porte de la suivante.
+--
+-- Ces colonnes restent NULLABLES : les événements créés avant cette migration n'en ont pas, et
+-- retombent sur une durée forfaitaire (cf. EVENT_DEFAULT_DURATION_HOURS, server/lib/config.ts)
+-- plutôt que de devenir non scannables du jour au lendemain.
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS end_date TEXT;
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS end_time TEXT;
+
+-- La vue publique doit exposer ces colonnes, sans quoi le catalogue lu directement par le
+-- frontend (cf. section 15) ne saurait pas quand un événement se termine réellement.
+--
+-- DROP puis CREATE, et non CREATE OR REPLACE : PostgreSQL n'autorise le remplacement d'une vue
+-- que si les colonnes existantes gardent le même nom, le même type ET le même rang. Insérer
+-- end_date/end_time après "time" décale toutes les suivantes, ce que le moteur interprète
+-- comme un renommage de colonne et refuse (ERROR 42P16). Le DROP est volontairement sans
+-- CASCADE : si un objet dépendait de cette vue, mieux vaut une erreur explicite que sa
+-- suppression silencieuse. Le GRANT ci-dessous est indispensable — il disparaît avec la vue.
+DROP VIEW IF EXISTS public.events_public;
+
+CREATE VIEW public.events_public
+WITH (security_invoker = true) AS
+SELECT
+  id, title, description, date, time, end_date, end_time, price, ticket_types, venue, category,
+  banner, tickets_sold, total_tickets, organizer_id, organizer_name, status, created_at,
+  waiting_room_enabled, waiting_room_capacity
+FROM public.events;
+
+GRANT SELECT ON public.events_public TO anon, authenticated;

@@ -32,6 +32,18 @@ function formatFullDate(dateStr: string): string {
   return d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 }
 
+// Trois formulations selon ce que l'organisateur a renseigné : sans fin, fin le même jour
+// ("de 20:00 à 23:30"), ou fin un autre jour — fréquent pour les soirées qui finissent au
+// petit matin, où répéter la date évite de faire croire à une erreur de saisie.
+function formatSchedule(evt: { date: string; time: string; endDate?: string | null; endTime?: string | null }): string {
+  const start = `${formatFullDate(evt.date)} à ${evt.time}`;
+  if (!evt.endDate || !evt.endTime) return start;
+  if (evt.endDate === evt.date) {
+    return `${formatFullDate(evt.date)} de ${evt.time} à ${evt.endTime}`;
+  }
+  return `du ${formatFullDate(evt.date)} à ${evt.time} au ${formatFullDate(evt.endDate)} à ${evt.endTime}`;
+}
+
 export default function EventPage({ event, loading, onBack, onBuyTicket, onViewOrganizer }: EventPageProps) {
   const [shared, setShared] = useState(false);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
@@ -183,7 +195,7 @@ export default function EventPage({ event, loading, onBack, onBuyTicket, onViewO
               <div>
                 <p className="text-[10px] font-black uppercase tracking-wider text-gray-400">Date</p>
                 <p className="text-xs font-bold text-gray-900 first-letter:uppercase">
-                  {formatFullDate(event.date)} à {event.time}
+                  {formatSchedule(event)}
                 </p>
               </div>
             </div>

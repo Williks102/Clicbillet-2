@@ -36,6 +36,10 @@ export interface Event {
   description: string;
   date: string;
   time: string;
+  // Fin de l'événement (facultative). Elle borne la fenêtre de scan des billets et détermine
+  // à partir de quand l'événement est considéré comme passé. Absente = durée par défaut.
+  endDate?: string | null;
+  endTime?: string | null;
   price: number; // Base price in XOF
   ticketTypes?: { name: string; price: number; total?: number }[]; // Custom ticket types (e.g. VIP, Standard)
   ticketsSoldByTier?: Record<string, number>; // Sold count per tier name (computed server-side)

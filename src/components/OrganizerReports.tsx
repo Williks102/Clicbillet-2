@@ -3,7 +3,7 @@ import { TrendingUp, Users, Ticket as TicketIcon, ScanLine, Wallet, ShoppingCart
 import { Event, SalesStatus } from "../types";
 import { isPaidTicket } from "../lib/ticketPayment";
 import { formatTierLabel } from "../lib/ticketTier";
-import { isEventPast } from "../lib/eventStatus";
+import { hasEventStarted } from "../lib/eventStatus";
 import { Granularity, buildTimeBuckets, bucketStart, formatPercent } from "../lib/chartBuckets";
 import StackedRevenueChart, { RevenueBucket, ACCENT_COLOR } from "./StackedRevenueChart";
 
@@ -69,7 +69,7 @@ export default function OrganizerReports({ stats, events, loading = false }: Org
 
     // Le taux d'entrée ne se mesure que sur les événements déjà commencés : un billet non
     // scanné pour un concert de le mois prochain n'est pas un absent, juste un futur entrant.
-    const startedEventIds = new Set(events.filter(isEventPast).map((e) => e.id));
+    const startedEventIds = new Set(events.filter(hasEventStarted).map((e) => e.id));
     const scannableTickets = paidTickets.filter((t) => startedEventIds.has(t.eventId));
     const scannedCount = scannableTickets.filter((t) => t.scanned).length;
     const scanRate = scannableTickets.length > 0 ? scannedCount / scannableTickets.length : null;
@@ -122,7 +122,7 @@ export default function OrganizerReports({ stats, events, loading = false }: Org
         const sold = evtTickets.reduce((sum, t) => sum + (Number(t.quantity) || 1), 0);
         const gross = evtTickets.reduce((sum, t) => sum + (Number(t.pricePaid) || 0), 0);
         const rate = evt.commissionRate ?? commissionRate;
-        const started = isEventPast(evt);
+        const started = hasEventStarted(evt);
         const scanned = evtTickets.filter((t) => t.scanned).length;
         return {
           id: evt.id,
