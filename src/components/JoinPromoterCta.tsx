@@ -60,8 +60,13 @@ export default function JoinPromoterCta({ onJoin, isSignedIn }: JoinPromoterCtaP
             <span>{isSignedIn ? "Devenir promoteur" : "Créer mon compte promoteur"}</span>
             <ArrowRight className="h-4 w-4" />
           </button>
+          {/* « Chaque événement » et non « chaque demande » : les deux parcours ne passent pas
+              par la même vérification — un visiteur crée directement son compte promoteur, un
+              acheteur déjà inscrit dépose une demande soumise à l'administrateur. Ce qui est
+              vrai des deux côtés, c'est que l'événement naît en attente d'approbation
+              (cf. status 'pending' à la création, server/routes/events.ts). */}
           <p className="mt-3 text-[11px] font-semibold text-gray-300">
-            Chaque demande est vérifiée par l'équipe avant l'ouverture de la vente.
+            Chaque événement est vérifié par l'équipe avant sa mise en vente.
           </p>
         </div>
       </Reveal>

@@ -9,15 +9,24 @@ interface AuthPageProps {
   onCancel: () => void;
   /** Présent quand l'utilisateur arrive depuis le lien de réinitialisation reçu par e-mail. */
   initialResetToken?: string | null;
+  /**
+   * Écran affiché en premier. Par défaut la connexion, qui convient à qui vient s'identifier ;
+   * un visiteur arrivé par « Devenir promoteur » n'a en revanche pas encore de compte et doit
+   * tomber directement sur l'inscription, sans avoir à repérer le lien qui l'y mène.
+   */
+  initialMode?: "login" | "register";
+  /** Type de compte présélectionné à l'inscription (cf. initialMode). */
+  initialRole?: UserRole;
 }
 
-export default function AuthPage({ onSuccess, onCancel, initialResetToken }: AuthPageProps) {
-  const [mode, setMode] = useState<AuthMode>(initialResetToken ? "reset" : "login");
+export default function AuthPage({ onSuccess, onCancel, initialResetToken, initialMode, initialRole }: AuthPageProps) {
+  // Le jeton de réinitialisation prime : il vient d'un lien e-mail, l'intention y est explicite.
+  const [mode, setMode] = useState<AuthMode>(initialResetToken ? "reset" : initialMode || "login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
-  const [role, setRole] = useState<UserRole>("client");
+  const [role, setRole] = useState<UserRole>(initialRole || "client");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [forgotPasswordSent, setForgotPasswordSent] = useState(false);
