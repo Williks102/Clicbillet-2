@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Ticket, LogOut, User as UserIcon, LayoutDashboard, Calendar, Camera, ShieldCheck, Menu, Tag, Mail } from "lucide-react";
+import { Ticket, LogOut, User as UserIcon, LayoutDashboard, Calendar, Camera, ShieldCheck, Menu, Tag, Mail, Store } from "lucide-react";
 import { User } from "../types";
 import MobileNavDrawer from "./MobileNavDrawer";
 
@@ -9,10 +9,15 @@ interface NavbarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   onOpenAuth: () => void;
+  onBecomePromoter: () => void;
 }
 
-export default function Navbar({ user, onLogout, activeTab, setActiveTab, onOpenAuth }: NavbarProps) {
+export default function Navbar({ user, onLogout, activeTab, setActiveTab, onOpenAuth, onBecomePromoter }: NavbarProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Rien à proposer à qui vend déjà des billets : un organisateur, ou l'administrateur qui les
+  // valide, verrait là une invitation à demander un accès qu'il possède.
+  const canBecomePromoter = !user || user.role === "client";
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-orange-100 bg-white shadow-sm">
@@ -57,6 +62,19 @@ export default function Navbar({ user, onLogout, activeTab, setActiveTab, onOpen
               <Mail className="h-4 w-4" />
               <span>Contact</span>
             </button>
+
+            {/* Bordure plutôt que fond plein : le seul bouton plein de la barre reste l'action
+                principale du visiteur (« Se Connecter »), sinon les deux se disputent l'œil. */}
+            {canBecomePromoter && (
+              <button
+                id="nav-become-promoter-btn"
+                onClick={onBecomePromoter}
+                className="flex items-center space-x-1.5 rounded-xl border border-orange-200 bg-orange-50/60 px-3 py-2 text-sm font-bold text-orange-700 transition-colors hover:border-orange-300 hover:bg-orange-100 active:scale-95"
+              >
+                <Store className="h-4 w-4" />
+                <span>Devenir promoteur</span>
+              </button>
+            )}
 
             {user ? (
               <>
@@ -202,6 +220,7 @@ export default function Navbar({ user, onLogout, activeTab, setActiveTab, onOpen
           setActiveTab={setActiveTab}
           onLogout={onLogout}
           onOpenAuth={onOpenAuth}
+          onBecomePromoter={onBecomePromoter}
           onClose={() => setDrawerOpen(false)}
         />
       )}
