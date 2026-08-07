@@ -17,9 +17,17 @@ interface AuthPageProps {
   initialMode?: "login" | "register";
   /** Type de compte présélectionné à l'inscription (cf. initialMode). */
   initialRole?: UserRole;
+  /**
+   * Signale les bascules connexion <-> inscription faites depuis le formulaire lui-même
+   * (« Déjà membre ? Se connecter »). Sans cela, l'adresse resterait sur l'écran d'origine
+   * pendant qu'on affiche l'autre. Les étapes « mot de passe oublié » et « nouveau mot de
+   * passe » ne sont pas remontées : ce sont des sous-étapes de la connexion, pas des écrans
+   * à part, et elles n'ont pas d'URL propre.
+   */
+  onModeChange?: (mode: "login" | "register") => void;
 }
 
-export default function AuthPage({ onSuccess, onCancel, initialResetToken, initialMode, initialRole }: AuthPageProps) {
+export default function AuthPage({ onSuccess, onCancel, initialResetToken, initialMode, initialRole, onModeChange }: AuthPageProps) {
   // Le jeton de réinitialisation prime : il vient d'un lien e-mail, l'intention y est explicite.
   const [mode, setMode] = useState<AuthMode>(initialResetToken ? "reset" : initialMode || "login");
   const [email, setEmail] = useState("");
@@ -126,6 +134,7 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
 
   function switchMode(next: AuthMode) {
     setMode(next);
+    if (next === "login" || next === "register") onModeChange?.(next);
     setError(null);
     setForgotPasswordSent(false);
     setConfirmationEmailSentTo(null);

@@ -53,6 +53,13 @@ const nativeApp = isNativeApp();
 // interne qui passe ensuite par setActiveTab.
 const initialRoute = matchPath(window.location.pathname);
 
+// L'écran d'authentification n'est pas un onglet comme les autres : il remplace le contenu
+// principal. On retient donc séparément « quel écran d'authentification afficher », et l'onglet
+// conserve la destination vers laquelle revenir en cas d'abandon.
+type AuthScreen = "login" | "register";
+const initialAuthScreen: AuthScreen | null =
+  initialRoute.tab === "login" || initialRoute.tab === "register" ? initialRoute.tab : null;
+
 export default function App() {
   // La session vit désormais dans un cookie httpOnly (jamais lisible par du JS, cf.
   // server/lib/auth.ts) : on ne peut plus lire un utilisateur "déjà connecté" de façon
@@ -64,7 +71,9 @@ export default function App() {
 
   const [viewingOrganizerAlias, setViewingOrganizerAlias] = useState<string | null>(initialRoute.organizerAlias);
   const [viewingEventId, setViewingEventId] = useState<string | null>(initialRoute.eventId);
-  const [activeTab, setActiveTab] = useState<string>(initialRoute.tab);
+  // Onglet affiché derrière l'écran d'authentification : c'est là qu'on revient si l'utilisateur
+  // abandonne. Une URL /connexion ouverte à froid retombe donc sur l'accueil à l'annulation.
+  const [activeTab, setActiveTab] = useState<string>(initialAuthScreen ? "home" : initialRoute.tab);
   // Écran (sous forme de chemin canonique) que l'URL courante désignait lors du dernier
   // précédent/suivant. Tant que l'état affiché correspond, l'effet de synchronisation n'a rien
   // à empiler : sans quoi il réempilerait aussitôt l'entrée qu'on vient de quitter.
@@ -74,7 +83,11 @@ export default function App() {
   const [checkoutEvent, setCheckoutEvent] = useState<Event | null>(null);
   const [waitingRoomEvent, setWaitingRoomEvent] = useState<Event | null>(null);
   const [pendingEvent, setPendingEvent] = useState<Event | null>(null);
-  const [authModalVisible, setAuthModalVisible] = useState(false);
+  const [authModalVisible, setAuthModalVisible] = useState(Boolean(initialAuthScreen));
+  // Écran d'authentification courant. Il pilote l'URL (/connexion ou /inscription) et suit les
+  // bascules faites depuis le formulaire lui-même (« Déjà membre ? Se connecter »), sans quoi
+  // l'adresse annoncerait l'inscription pendant qu'on affiche la connexion.
+  const [authScreen, setAuthScreen] = useState<AuthScreen>(initialAuthScreen === "register" ? "register" : "login");
   // Pourquoi l'écran d'authentification a été ouvert : "promoter" le fait démarrer sur
   // l'inscription avec le type de compte adéquat. Remis à null à la fermeture, sans quoi une
   // ouverture ultérieure par « Se Connecter » afficherait encore l'inscription.
@@ -128,7 +141,7 @@ export default function App() {
     const token = params.get("reset_token");
     if (token) {
       setResetToken(token);
-      setAuthModalVisible(true);
+      openAuthScreen("login");
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
@@ -176,6 +189,13 @@ export default function App() {
   // bouton « Retourner à l'accueil » de l'écran d'authentification : partir ailleurs vaut
   // abandon. Le jeton de réinitialisation aussi — il est à usage unique et reste valable côté
   // serveur, le lien reçu par e-mail permet de reprendre.
+  // Ouverture de l'écran d'authentification. Passe par ici plutôt que par setAuthModalVisible
+  // direct : c'est ce qui fixe l'écran affiché, donc l'URL (/connexion ou /inscription).
+  function openAuthScreen(screen: AuthScreen) {
+    setAuthScreen(screen);
+    setAuthModalVisible(true);
+  }
+
   function navigateToTab(tab: string) {
     setAuthModalVisible(false);
     setAuthIntent(null);
@@ -204,6 +224,16 @@ export default function App() {
       // On mémorise l'écran que cette URL désigne, sous sa forme canonique, pour que l'effet
       // ci-dessous sache que l'état vient d'être dérivé de l'URL et n'ait rien à empiler.
       routeFromUrl.current = pathForTab(route.tab, route.organizerAlias, route.eventId);
+
+      // « Précédent » depuis un formulaire d'authentification doit le refermer, et y revenir
+      // doit le rouvrir — c'est tout l'intérêt de lui avoir donné une adresse.
+      if (route.tab === "login" || route.tab === "register") {
+        setAuthScreen(route.tab);
+        setAuthModalVisible(true);
+        return;
+      }
+      setAuthModalVisible(false);
+      setAuthIntent(null);
       setViewingOrganizerAlias(route.organizerAlias);
       setViewingEventId(route.eventId);
       setActiveTab(route.tab);
@@ -217,7 +247,11 @@ export default function App() {
   // l'application, et l'adresse affichée reste toujours celle de l'écran visible — donc
   // copiable et partageable telle quelle.
   useEffect(() => {
-    const nextPath = pathForTab(activeTab, viewingOrganizerAlias, viewingEventId);
+    // L'écran d'authentification masque l'onglet courant : c'est donc lui que l'adresse doit
+    // annoncer tant qu'il est affiché.
+    const nextPath = authModalVisible
+      ? pathForTab(authScreen)
+      : pathForTab(activeTab, viewingOrganizerAlias, viewingEventId);
 
     // État issu d'un précédent/suivant : l'URL est déjà la bonne, empiler ici renverrait
     // l'utilisateur d'où il vient à chaque appui sur « précédent ». On compare l'écran plutôt
@@ -232,7 +266,7 @@ export default function App() {
     if (nextPath !== window.location.pathname) {
       window.history.pushState({}, "", nextPath);
     }
-  }, [activeTab, viewingOrganizerAlias, viewingEventId]);
+  }, [activeTab, viewingOrganizerAlias, viewingEventId, authModalVisible, authScreen]);
 
   // Ouverture de la page d'un événement. C'est désormais ce que fait un clic sur une affiche,
   // à la place de l'ouverture directe de la fenêtre de paiement : sans écran intermédiaire,
@@ -256,7 +290,7 @@ export default function App() {
       // n'a par définition pas encore de compte. Le type de compte est présélectionné pour la
       // même raison — il vient d'exprimer son intention, la lui redemander serait redondant.
       setAuthIntent("promoter");
-      setAuthModalVisible(true);
+      openAuthScreen("register");
       return;
     }
     setActiveTab("profile");
@@ -398,7 +432,7 @@ export default function App() {
     const event = guestChoiceEvent;
     setGuestChoiceEvent(null);
     setPendingEvent(event);
-    setAuthModalVisible(true);
+    openAuthScreen("login");
   }
 
   function handleCheckoutSuccess(_tickets: any[]) {
@@ -453,7 +487,7 @@ export default function App() {
           onOpenAuth={() => {
             setCheckoutEvent(null);
             setAuthIntent(null);
-            setAuthModalVisible(true);
+            openAuthScreen("login");
           }}
           onBecomePromoter={handleBecomePromoter}
         />
@@ -478,8 +512,9 @@ export default function App() {
           <AuthPage
             onSuccess={handleLoginSuccess}
             initialResetToken={resetToken}
-            initialMode={authIntent === "promoter" ? "register" : undefined}
+            initialMode={authScreen}
             initialRole={authIntent === "promoter" ? "organizer" : undefined}
+            onModeChange={setAuthScreen}
             onCancel={() => {
               setAuthModalVisible(false);
               setAuthIntent(null);
@@ -562,7 +597,7 @@ export default function App() {
               {activeTab === "pricing" && (
                 <PricingPage
                   onBack={() => setActiveTab("home")}
-                  onCreateAccount={() => setAuthModalVisible(true)}
+                  onCreateAccount={() => openAuthScreen("register")}
                   onContact={() => setActiveTab("contact")}
                 />
               )}
@@ -608,7 +643,7 @@ export default function App() {
           onClose={() => { setCheckoutEvent(null); setGuestInfo(null); }}
           onSuccess={handleCheckoutSuccess}
           onOpenAuth={() => {
-            setAuthModalVisible(true);
+            openAuthScreen("login");
           }}
         />
       )}
@@ -655,7 +690,7 @@ export default function App() {
           onFocusSearch={handleFocusSearch}
           onOpenAuth={() => {
             setCheckoutEvent(null);
-            setAuthModalVisible(true);
+            openAuthScreen("login");
           }}
         />
       )}
