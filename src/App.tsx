@@ -65,9 +65,10 @@ export default function App() {
   const [viewingOrganizerAlias, setViewingOrganizerAlias] = useState<string | null>(initialRoute.organizerAlias);
   const [viewingEventId, setViewingEventId] = useState<string | null>(initialRoute.eventId);
   const [activeTab, setActiveTab] = useState<string>(initialRoute.tab);
-  // Posé le temps d'appliquer un changement venu des boutons précédent/suivant : sans lui,
-  // l'effet de synchronisation ci-dessous réempilerait aussitôt l'entrée qu'on vient de quitter.
-  const skipUrlSync = useRef(false);
+  // Écran (sous forme de chemin canonique) que l'URL courante désignait lors du dernier
+  // précédent/suivant. Tant que l'état affiché correspond, l'effet de synchronisation n'a rien
+  // à empiler : sans quoi il réempilerait aussitôt l'entrée qu'on vient de quitter.
+  const routeFromUrl = useRef<string | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [checkoutEvent, setCheckoutEvent] = useState<Event | null>(null);
@@ -163,6 +164,27 @@ export default function App() {
     return () => { cancelled = true; };
   }, []);
 
+  // Navigation par la barre de navigation, le tiroir mobile ou le pied de page.
+  //
+  // Elle DOIT refermer l'écran d'authentification : celui-ci occupe la zone principale à la
+  // place de l'onglet demandé, si bien qu'un simple setActiveTab changeait l'URL sans changer
+  // l'écran. Une fois cet écran ouvert — par « Se Connecter », par « Devenir promoteur » ou par
+  // un lien de réinitialisation — toute la navigation paraissait morte, logo compris : les
+  // clics étaient bien reçus, l'adresse changeait, mais le formulaire restait affiché.
+  //
+  // Les états du parcours d'achat interrompu sont relâchés au passage, comme le fait déjà le
+  // bouton « Retourner à l'accueil » de l'écran d'authentification : partir ailleurs vaut
+  // abandon. Le jeton de réinitialisation aussi — il est à usage unique et reste valable côté
+  // serveur, le lien reçu par e-mail permet de reprendre.
+  function navigateToTab(tab: string) {
+    setAuthModalVisible(false);
+    setAuthIntent(null);
+    setResetToken(null);
+    setCheckoutEvent(null);
+    setPendingEvent(null);
+    setActiveTab(tab);
+  }
+
   // Navigation vers la page publique d'un organisateur. L'URL est posée par l'effet de
   // synchronisation ci-dessous, comme pour tous les autres écrans.
   function handleViewOrganizer(alias: string) {
@@ -179,7 +201,9 @@ export default function App() {
   useEffect(() => {
     function handlePopState() {
       const route = matchPath(window.location.pathname);
-      skipUrlSync.current = true;
+      // On mémorise l'écran que cette URL désigne, sous sa forme canonique, pour que l'effet
+      // ci-dessous sache que l'état vient d'être dérivé de l'URL et n'ait rien à empiler.
+      routeFromUrl.current = pathForTab(route.tab, route.organizerAlias, route.eventId);
       setViewingOrganizerAlias(route.organizerAlias);
       setViewingEventId(route.eventId);
       setActiveTab(route.tab);
@@ -193,11 +217,18 @@ export default function App() {
   // l'application, et l'adresse affichée reste toujours celle de l'écran visible — donc
   // copiable et partageable telle quelle.
   useEffect(() => {
-    if (skipUrlSync.current) {
-      skipUrlSync.current = false;
-      return;
-    }
     const nextPath = pathForTab(activeTab, viewingOrganizerAlias, viewingEventId);
+
+    // État issu d'un précédent/suivant : l'URL est déjà la bonne, empiler ici renverrait
+    // l'utilisateur d'où il vient à chaque appui sur « précédent ». On compare l'écran plutôt
+    // que de consommer un drapeau à usage unique : si le retour ne change aucun état (retour
+    // vers l'écran déjà affiché), React ne re-rend pas, cet effet ne s'exécute pas, et un
+    // drapeau resterait posé — faisant sauter la mise à jour d'URL de la navigation SUIVANTE.
+    // L'écran et l'adresse divergeaient alors, et le clic sur l'onglet correspondant à l'URL
+    // ne produisait plus rien.
+    if (nextPath === routeFromUrl.current) return;
+    routeFromUrl.current = null;
+
     if (nextPath !== window.location.pathname) {
       window.history.pushState({}, "", nextPath);
     }
@@ -418,7 +449,7 @@ export default function App() {
           user={user}
           onLogout={handleLogout}
           activeTab={activeTab}
-          setActiveTab={setActiveTab}
+          setActiveTab={navigateToTab}
           onOpenAuth={() => {
             setCheckoutEvent(null);
             setAuthIntent(null);
@@ -595,19 +626,19 @@ export default function App() {
           <div className="mx-auto max-w-7xl px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
             <p>© {new Date().getFullYear()} clicbillet. Tous droits réservés.</p>
             <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
-              <button onClick={() => setActiveTab("pricing")} className="hover:text-gray-600">
+              <button onClick={() => navigateToTab("pricing")} className="hover:text-gray-600">
                 Tarifs
               </button>
               <span>•</span>
-              <button onClick={() => setActiveTab("contact")} className="hover:text-gray-600">
+              <button onClick={() => navigateToTab("contact")} className="hover:text-gray-600">
                 Contact
               </button>
               <span>•</span>
-              <button onClick={() => setActiveTab("terms")} className="hover:text-gray-600">
+              <button onClick={() => navigateToTab("terms")} className="hover:text-gray-600">
                 Conditions Générales de Vente
               </button>
               <span>•</span>
-              <button onClick={() => setActiveTab("privacy")} className="hover:text-gray-600">
+              <button onClick={() => navigateToTab("privacy")} className="hover:text-gray-600">
                 Confidentialité
               </button>
             </div>
@@ -620,7 +651,7 @@ export default function App() {
         <BottomTabBar
           user={user}
           activeTab={activeTab}
-          setActiveTab={setActiveTab}
+          setActiveTab={navigateToTab}
           onFocusSearch={handleFocusSearch}
           onOpenAuth={() => {
             setCheckoutEvent(null);
