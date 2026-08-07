@@ -36,7 +36,7 @@ export const RESEND_FROM_EMAIL = (process.env.RESEND_FROM_EMAIL || "ClicBillet <
 // ci-dessous — aucune erreur, aucun symptôme, juste des emails qui n'arrivent pas.
 // Même principe que SUPABASE_URL / VITE_SUPABASE_URL plus haut.
 const ADMIN_NOTIFICATION_EMAIL_FROM_ENV = (process.env.ADMIN_NOTIFICATION_EMAIL || process.env.ADMIN_EMAIL || "").trim();
-export const ADMIN_NOTIFICATION_EMAIL = ADMIN_NOTIFICATION_EMAIL_FROM_ENV || "admin@monticket.online";
+export const ADMIN_NOTIFICATION_EMAIL = ADMIN_NOTIFICATION_EMAIL_FROM_ENV || "admin@clicbillet.com";
 
 // isProduction n'est déclarée que plus bas dans ce fichier : on teste NODE_ENV directement,
 // comme les autres contrôles de démarrage situés avant elle.
