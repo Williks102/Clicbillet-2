@@ -21,6 +21,13 @@ export interface RouteMatch {
 // Chemins en français : ils sont visibles par l'utilisateur et partagés tels quels.
 const TAB_BY_PATH: Record<string, string> = {
   "/": "home",
+  // Connexion et inscription sont deux écrans à part entière, pas une fenêtre au-dessus d'un
+  // autre : sans URL propre, l'adresse continuait d'afficher la page quittée pendant qu'on
+  // remplissait le formulaire, un rechargement ramenait à cette page, et « précédent » ne
+  // refermait pas le formulaire. Ce sont aussi les deux adresses qu'on veut pouvoir envoyer
+  // telles quelles à quelqu'un.
+  "/connexion": "login",
+  "/inscription": "register",
   "/tarifs": "pricing",
   "/contact": "contact",
   "/cgv": "terms",

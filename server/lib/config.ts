@@ -16,14 +16,19 @@ export const PAYSTACK_SECRET_KEY = (process.env.PAYSTACK_SECRET_KEY || "").trim(
 // traité ou perdu (cf. server/routes/tickets.ts, /api/webhooks/paystack).
 export const PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL = (process.env.PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL || "").trim();
 export const RESEND_API_KEY = (process.env.RESEND_API_KEY || "").trim();
-// Domaine d'envoi encore distinct du domaine web. clicbillet.com était auparavant partagé avec
-// une autre application (Laravel) ; ce n'est plus le cas — il ne dessert plus que cette app.
-// Le repli reste néanmoins monticket.online tant que clicbillet.com n'est pas vérifié
-// (SPF/DKIM) côté Resend : basculer l'expéditeur avant cette vérification ferait rejeter tous
-// les emails transactionnels — billets, réinitialisation de mot de passe, notifications.
-// Seul l'EXPÉDITEUR est concerné ; le destinataire (ADMIN_NOTIFICATION_EMAIL ci-dessous) peut
-// être sur n'importe quel domaine.
-export const RESEND_FROM_EMAIL = (process.env.RESEND_FROM_EMAIL || "ClicBillet <no-reply@monticket.online>").trim();
+// Expéditeur de tous les emails transactionnels — billets, réinitialisation de mot de passe,
+// notifications. Le repli est désormais clicbillet.com : le domaine est vérifié (SPF/DKIM)
+// côté Resend, alors qu'auparavant il ne l'était pas et l'expéditeur devait rester sur
+// monticket.online sous peine de voir chaque envoi rejeté.
+//
+// Un acheteur reçoit ainsi son billet depuis le domaine sur lequel il vient d'acheter. Tant
+// que ce n'était pas le cas, le message le plus sensible du parcours — celui qui porte un QR
+// code monnayable — arrivait d'un domaine que le destinataire n'avait jamais vu.
+//
+// Seul l'EXPÉDITEUR est concerné : il doit appartenir à un domaine vérifié chez Resend, sans
+// quoi l'API refuse l'envoi. Le destinataire (ADMIN_NOTIFICATION_EMAIL ci-dessous) peut être
+// sur n'importe quel domaine, aucune vérification n'est requise de ce côté.
+export const RESEND_FROM_EMAIL = (process.env.RESEND_FROM_EMAIL || "ClicBillet <no-reply@clicbillet.com>").trim();
 // ADMIN_EMAIL est accepté comme alias : c'est le nom réellement utilisé dans la configuration
 // Vercel du projet. Sans cet alias, la variable définie là-bas était purement ignorée et
 // TOUTES les notifications administratives (nouvel organisateur, demande de retrait, message
@@ -31,7 +36,7 @@ export const RESEND_FROM_EMAIL = (process.env.RESEND_FROM_EMAIL || "ClicBillet <
 // ci-dessous — aucune erreur, aucun symptôme, juste des emails qui n'arrivent pas.
 // Même principe que SUPABASE_URL / VITE_SUPABASE_URL plus haut.
 const ADMIN_NOTIFICATION_EMAIL_FROM_ENV = (process.env.ADMIN_NOTIFICATION_EMAIL || process.env.ADMIN_EMAIL || "").trim();
-export const ADMIN_NOTIFICATION_EMAIL = ADMIN_NOTIFICATION_EMAIL_FROM_ENV || "admin@monticket.online";
+export const ADMIN_NOTIFICATION_EMAIL = ADMIN_NOTIFICATION_EMAIL_FROM_ENV || "admin@clicbillet.com";
 
 // isProduction n'est déclarée que plus bas dans ce fichier : on teste NODE_ENV directement,
 // comme les autres contrôles de démarrage situés avant elle.
