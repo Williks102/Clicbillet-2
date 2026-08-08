@@ -17,6 +17,10 @@ import { findPublicEventById, buildEventPreviewTags, injectPreviewTags } from ".
 import eventsRouter from "./server/routes/events.js";
 import authRouter from "./server/routes/auth.js";
 import ticketsRouter from "./server/routes/tickets.js";
+import checkoutRouter from "./server/routes/checkout.js";
+import paymentsRouter from "./server/routes/payments.js";
+import scanRouter from "./server/routes/scan.js";
+import maintenanceRouter from "./server/routes/maintenance.js";
 import webhooksRouter from "./server/routes/webhooks.js";
 import organizerRouter from "./server/routes/organizer.js";
 import organizerRequestsRouter from "./server/routes/organizerRequests.js";
@@ -106,6 +110,12 @@ app.use("/api/organizer", requireAuth);
 app.use(eventsRouter);
 app.use(authRouter);
 app.use(ticketsRouter);
+// Issus du découpage de l'ancien tickets.ts : mêmes chemins, même ordre de montage — le
+// comportement observable est identique, seule la lecture change.
+app.use(checkoutRouter);
+app.use(paymentsRouter);
+app.use(scanRouter);
+app.use(maintenanceRouter);
 app.use(webhooksRouter);
 app.use(organizerRouter);
 app.use(organizerRequestsRouter);
