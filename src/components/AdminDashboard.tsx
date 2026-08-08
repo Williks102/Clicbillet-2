@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { authFetch } from "../lib/apiClient";
 import { isEventPast } from "../lib/eventStatus";
+import { PageSkeleton } from "./Skeleton";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 import CommissionSheet from "./CommissionSheet";
@@ -462,10 +463,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
 
   if (loading) {
     return (
-      <div className="py-24 text-center" id="admin-dashboard-loading">
-        <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-orange-200 border-t-orange-600" />
-        <p className="mt-4 text-xs font-bold text-gray-500">Ouverture de la console de supervision...</p>
-      </div>
+      <PageSkeleton id="admin-dashboard-loading" label="Ouverture de la console de supervision" />
     );
   }
 

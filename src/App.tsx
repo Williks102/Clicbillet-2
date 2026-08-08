@@ -8,6 +8,7 @@ import GuestOrAuthModal, { GuestInfo } from "./components/GuestOrAuthModal";
 import ToastStack, { ToastItem } from "./components/ToastStack";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
 import JoinPromoterCta from "./components/JoinPromoterCta";
+import { EventGridSkeleton, PageSkeleton } from "./components/Skeleton";
 import OrganizerProfilePage from "./components/OrganizerProfilePage";
 import BottomTabBar from "./components/native/BottomTabBar";
 
@@ -28,14 +29,11 @@ const ContactPage = lazy(() => import("./components/ContactPage"));
 const ProfilePage = lazy(() => import("./components/ProfilePage"));
 const EventPage = lazy(() => import("./components/EventPage"));
 
-// Repli affiché le temps de récupérer le morceau de code d'un écran. Volontairement discret :
-// sur une connexion correcte il n'apparaît qu'une fraction de seconde.
+// Repli affiché le temps de récupérer le morceau de code d'un écran. Sur une connexion correcte
+// il n'apparaît qu'une fraction de seconde ; sur un réseau mobile lent, il tient l'écran assez
+// longtemps pour qu'un disque qui tourne devienne pesant — d'où la forme de l'écran à venir.
 function ScreenLoader() {
-  return (
-    <div className="flex min-h-[50vh] items-center justify-center" id="screen-loader">
-      <div className="h-8 w-8 animate-spin rounded-full border-4 border-orange-200 border-t-orange-600" />
-    </div>
-  );
+  return <PageSkeleton />;
 }
 import { User, Event } from "./types";
 import { Calendar, Compass, ShieldAlert, Sparkles } from "lucide-react";
@@ -464,8 +462,14 @@ export default function App() {
   // qui flasherait avant de basculer vers le tableau de bord si une session valide existe.
   if (sessionLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50" id="session-bootstrap-loader">
-        <div className="h-10 w-10 animate-spin rounded-full border-4 border-orange-200 border-t-orange-600" />
+      <div className="min-h-screen bg-gray-50" id="session-bootstrap-loader">
+        {/* Barre de navigation esquissée puis grille : c'est l'accueil qui s'affiche dans la
+            très grande majorité des cas, et le squelette évite l'écran vide du tout premier
+            affichage, avant même de savoir si une session existe. */}
+        <div className="h-16 w-full border-b border-orange-100 bg-white" />
+        <div className="mx-auto w-full max-w-7xl px-3 sm:px-6">
+          <EventGridSkeleton count={3} />
+        </div>
       </div>
     );
   }
@@ -528,10 +532,7 @@ export default function App() {
             {activeTab === "home" && (
               <>
                 {loadingEvents ? (
-                  <div className="py-24 text-center" id="global-events-loader">
-                    <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-orange-200 border-t-orange-600" />
-                    <p className="mt-4 text-xs font-bold text-gray-500">Mise à jour des événements en cours...</p>
-                  </div>
+                  <EventGridSkeleton id="global-events-loader" />
                 ) : (
                   <LandingPage
                     events={events}

@@ -6,6 +6,7 @@ import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
 import { isPaidTicket } from "../lib/ticketPayment";
 import { hasEventStarted } from "../lib/eventStatus";
+import { TicketListSkeleton } from "./Skeleton";
 import ResponsiveSheet from "./ResponsiveSheet";
 import AccountCodeBadge from "./AccountCodeBadge";
 
@@ -425,10 +426,7 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
         </h3>
 
         {loading ? (
-          <div className="py-12 text-center" id="tickets-loading-spinner">
-            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-orange-200 border-t-orange-600" />
-            <p className="mt-3 text-xs text-gray-500 font-semibold">Récupération des billets sécurisée...</p>
-          </div>
+          <TicketListSkeleton id="tickets-loading-spinner" />
         ) : error ? (
           <div className="rounded-xl bg-red-50 p-4 text-xs font-semibold text-red-600 border border-red-100">
             {error}

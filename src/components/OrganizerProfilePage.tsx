@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, User as UserIcon, Ticket as TicketIcon } from "lucide-react";
 import { Event } from "../types";
 import { isEventPast } from "../lib/eventStatus";
+import { EventGridSkeleton, SkeletonBlock } from "./Skeleton";
 import EventCard from "./EventCard";
 
 interface OrganizerProfile {
@@ -52,9 +53,12 @@ export default function OrganizerProfilePage({ alias, onBack, onViewEvent }: Org
 
   if (loading) {
     return (
-      <div className="py-24 text-center" id="organizer-profile-loader">
-        <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-orange-200 border-t-orange-600" />
-        <p className="mt-4 text-xs font-bold text-gray-500">Chargement du profil...</p>
+      <div id="organizer-profile-loader">
+        {/* En-tête d'organisateur puis ses affiches : la grille annonce déjà la forme réelle. */}
+        <SkeletonBlock className="h-32 w-full rounded-3xl" />
+        <div className="mt-6">
+          <EventGridSkeleton count={3} withFilters={false} />
+        </div>
       </div>
     );
   }
