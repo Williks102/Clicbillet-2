@@ -413,7 +413,15 @@ ALTER TABLE public.users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;
 -- sous-jacente (donc le filtre status='approved') continue de s'appliquer normalement pour
 -- le rôle appelant (anon/authenticated), plutôt que de la contourner comme le ferait une vue
 -- SECURITY DEFINER classique.
-CREATE OR REPLACE VIEW public.events_public
+-- DROP puis CREATE, et non CREATE OR REPLACE : la section 20 redéfinit plus bas cette même
+-- vue avec end_date/end_time. Sur une base où la section 20 a déjà été jouée, un
+-- CREATE OR REPLACE ici tenterait de RETIRER ces deux colonnes — ce que PostgreSQL refuse
+-- (ERROR 42P16 « cannot drop columns from view »), rendant le script non rejouable.
+-- Les colonnes de fin ne peuvent pas être listées ici : elles ne sont ajoutées à la table
+-- qu'en section 20, plus bas. La vue prend donc sa forme définitive à ce moment-là.
+DROP VIEW IF EXISTS public.events_public;
+
+CREATE VIEW public.events_public
 WITH (security_invoker = true) AS
 SELECT
   id, title, description, date, time, price, ticket_types, venue, category, banner,
