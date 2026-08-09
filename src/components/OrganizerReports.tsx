@@ -5,6 +5,7 @@ import { isPaidTicket } from "../lib/ticketPayment";
 import { formatTierLabel } from "../lib/ticketTier";
 import { hasEventStarted } from "../lib/eventStatus";
 import { Granularity, buildTimeBuckets, bucketStart, formatPercent } from "../lib/chartBuckets";
+import { ServerReport, bucketsFromSeries, foldTiers } from "../lib/reportStats";
 import StackedRevenueChart, { RevenueBucket, ACCENT_COLOR } from "./StackedRevenueChart";
 
 // Onglet "Rapports" de l'espace organisateur : les indicateurs usuels de la billetterie
@@ -28,9 +29,12 @@ interface OrganizerReportsProps {
   stats: SalesStatus | null;
   events: Event[];
   loading?: boolean;
+  // Indicateurs agrégés en base (cf. src/lib/reportStats.ts). Quand ils sont présents, ils
+  // priment sur le calcul local : celui-ci ne porte que sur la liste de billets reçue, bornée.
+  report?: ServerReport | null;
 }
 
-export default function OrganizerReports({ stats, events, loading = false }: OrganizerReportsProps) {
+export default function OrganizerReports({ stats, events, loading = false, report = null }: OrganizerReportsProps) {
   const [granularity, setGranularity] = useState<Granularity>("day");
 
   const allTickets = useMemo(() => stats?.tickets || [], [stats]);
@@ -44,6 +48,10 @@ export default function OrganizerReports({ stats, events, loading = false }: Org
   // Le net par période applique le taux effectif global : la ventilation est donc approchée
   // si plusieurs événements ont des taux négociés différents, le total restant juste.
   const buckets = useMemo<RevenueBucket[]>(() => {
+    // Série agrégée en base : le net par période y est exact événement par événement, là où le
+    // repli local applique le taux effectif global à chaque intervalle.
+    if (report) return bucketsFromSeries(report.series, granularity, (gross, commission) => gross - commission);
+
     const list = buildTimeBuckets(granularity).map((b) => ({ ...b, total: 0, primary: 0 }));
     const byKey = new Map(list.map((b) => [b.key, b]));
 
@@ -56,10 +64,26 @@ export default function OrganizerReports({ stats, events, loading = false }: Org
 
     for (const bucket of list) bucket.primary = bucket.total - Math.floor(bucket.total * commissionRate);
     return list;
-  }, [paidTickets, granularity, commissionRate]);
+  }, [paidTickets, granularity, commissionRate, report]);
 
   // --- Indicateurs sectoriels ---
   const indicators = useMemo(() => {
+    if (report) {
+      const scanRate = report.scannableCount > 0 ? report.scannedCount / report.scannableCount : null;
+      const abandoned = report.totalTicketRows - report.paidTicketRows;
+      return {
+        ticketsSold: report.ticketsSold,
+        gross: report.gross,
+        averagePrice: report.ticketsSold > 0 ? Math.round(report.gross / report.ticketsSold) : 0,
+        capacity: report.capacity,
+        fillRate: report.capacity > 0 ? Math.min(1, report.ticketsSold / report.capacity) : null,
+        scanRate,
+        scannedCount: report.scannedCount,
+        scannableCount: report.scannableCount,
+        abandoned,
+        abandonRate: report.totalTicketRows > 0 ? abandoned / report.totalTicketRows : null,
+      };
+    }
     const ticketsSold = paidTickets.reduce((sum, t) => sum + (Number(t.quantity) || 1), 0);
     const gross = paidTickets.reduce((sum, t) => sum + (Number(t.pricePaid) || 0), 0);
     const averagePrice = ticketsSold > 0 ? Math.round(gross / ticketsSold) : 0;
@@ -83,10 +107,11 @@ export default function OrganizerReports({ stats, events, loading = false }: Org
       scanRate, scannedCount, scannableCount: scannableTickets.length,
       abandoned, abandonRate,
     };
-  }, [paidTickets, allTickets, events]);
+  }, [paidTickets, allTickets, events, report]);
 
   // --- Répartition du chiffre d'affaires par catégorie de billet ---
   const tierBreakdown = useMemo(() => {
+    if (report) return foldTiers(report.tiers, formatTierLabel);
     const byTier = new Map<string, { gross: number; count: number }>();
     for (const t of paidTickets) {
       const key = t.tier || "standard";
@@ -110,12 +135,26 @@ export default function OrganizerReports({ stats, events, loading = false }: Org
       count: tail.reduce((s, r) => s + r.count, 0),
     });
     return head;
-  }, [paidTickets]);
+  }, [paidTickets, report]);
 
   const tierMax = Math.max(...tierBreakdown.map((r) => r.gross), 0);
 
   // --- Performance par événement ---
   const eventRows = useMemo(() => {
+    if (report) {
+      return report.events.map((e) => ({
+        id: e.id,
+        title: e.title,
+        date: e.date,
+        capacity: e.capacity,
+        sold: e.sold,
+        gross: e.gross,
+        net: e.gross - e.commission,
+        fillRate: e.capacity > 0 ? Math.min(1, e.sold / e.capacity) : null,
+        scanRate: e.started && e.paid_rows > 0 ? e.scanned / e.paid_rows : null,
+        started: e.started,
+      }));
+    }
     return events
       .map((evt) => {
         const evtTickets = paidTickets.filter((t) => t.eventId === evt.id);
@@ -138,7 +177,7 @@ export default function OrganizerReports({ stats, events, loading = false }: Org
         };
       })
       .sort((a, b) => b.gross - a.gross);
-  }, [events, paidTickets, commissionRate]);
+  }, [events, paidTickets, commissionRate, report]);
 
   if (loading) {
     return (
