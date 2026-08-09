@@ -53,6 +53,21 @@ export const SUPABASE_WEBHOOK_SECRET = (process.env.SUPABASE_WEBHOOK_SECRET || "
 // pour authentifier ses propres appels programmés — cf. /api/cron/expire-pending-tickets.
 export const CRON_SECRET = (process.env.CRON_SECRET || "").trim();
 
+// Les routes de maintenance (/api/cron/*) ne vérifient l'en-tête d'autorisation QUE si ce
+// secret est défini — sans lui, elles restent ouvertes à quiconque connaît leur URL. Or elles
+// ne sont pas anodines : l'une annule des billets en attente et purge des données, l'autre
+// vide la file d'e-mails. Un console.error plutôt qu'un avertissement : contrairement à une
+// APP_ORIGIN non définie, qui retombe sur une valeur correcte, il n'y a ici aucun repli — la
+// protection est simplement absente, et cela doit remonter jusqu'à Sentry.
+if (process.env.NODE_ENV === "production" && !CRON_SECRET) {
+  console.error(
+    "[Security] CRON_SECRET n'est pas définie : les routes /api/cron/* sont accessibles sans " +
+    "authentification à quiconque connaît leur URL — dont celle qui annule les billets en " +
+    "attente et purge les données. Définissez-la dans la configuration de l'hébergeur, avec la " +
+    "même valeur que dans le planificateur externe."
+  );
+}
+
 // Contrôle d'accès : bornes de la fenêtre pendant laquelle un billet est scannable.
 //
 // Sans borne haute, /api/verify-ticket validait un billet payé et non scanné indéfiniment —
