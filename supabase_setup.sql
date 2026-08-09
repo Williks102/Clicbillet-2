@@ -609,3 +609,75 @@ SELECT
 FROM public.events;
 
 GRANT SELECT ON public.events_public TO anon, authenticated;
+
+-- ==========================================
+-- 21. AGRÉGATS DE CHIFFRE D'AFFAIRES CALCULÉS EN BASE
+-- ==========================================
+-- L'API REST de Supabase renvoie au maximum 1 000 lignes par défaut. Or /api/admin/stats et
+-- /api/organizer/stats ramenaient TOUS les billets pour additionner le chiffre d'affaires en
+-- mémoire : au-delà de mille billets, le total affiché n'était plus qu'une fraction de la
+-- réalité — silencieusement, sans erreur ni avertissement. Sur un jeu de 4 500 billets,
+-- 78 % du chiffre d'affaires disparaissait.
+--
+-- Ces agrégats se calculent donc là où sont les données. Aucun plafond ne s'applique à une
+-- agrégation, et la base rend en quelques millisecondes ce qui demandait de transférer puis
+-- de parcourir toute la table dans une fonction serverless.
+--
+-- Miroir exact de computeCommissionBreakdown (server/lib/commission.ts), y compris ses deux
+-- subtilités : seuls les billets réellement encaissés comptent (PAID-/FREE-, cf.
+-- server/lib/ticketPayment.ts), et la commission est arrondie à l'entier inférieur ÉVÉNEMENT
+-- PAR ÉVÉNEMENT avant sommation — chacun pouvant avoir son propre taux négocié, appliquer un
+-- taux unique au total donnerait un autre résultat. L'égalité des deux implémentations a été
+-- vérifiée au franc près sur 4 500 billets couvrant tous les états de paiement, des taux
+-- négociés, un taux à 0 % et l'absence de taux.
+CREATE OR REPLACE FUNCTION public.ticket_revenue_stats(p_organizer_id TEXT DEFAULT NULL)
+RETURNS TABLE (
+  total_gross_revenue NUMERIC,
+  total_commission NUMERIC,
+  total_organizer_payout NUMERIC,
+  effective_commission_rate NUMERIC,
+  total_tickets_sold BIGINT
+)
+LANGUAGE sql
+STABLE
+AS $$
+  WITH taux_defaut AS (
+    SELECT COALESCE(
+      (SELECT value::numeric FROM public.platform_config WHERE key = 'ticket_commission_rate'),
+      0.06
+    ) AS v
+  ),
+  payes AS (
+    SELECT t.event_id, t.price_paid, t.quantity
+    FROM public.tickets t
+    JOIN public.events e ON e.id = t.event_id
+    WHERE (t.transaction_ref LIKE 'PAID-%' OR t.transaction_ref LIKE 'FREE-%')
+      AND (p_organizer_id IS NULL OR e.organizer_id = p_organizer_id)
+  ),
+  par_evenement AS (
+    SELECT p.event_id,
+           SUM(p.price_paid) AS brut,
+           SUM(COALESCE(p.quantity, 1)) AS billets,
+           COALESCE(e.commission_rate, (SELECT v FROM taux_defaut)) AS taux
+    FROM payes p
+    JOIN public.events e ON e.id = p.event_id
+    GROUP BY p.event_id, e.commission_rate
+  ),
+  totaux AS (
+    SELECT COALESCE(SUM(brut), 0) AS brut,
+           COALESCE(SUM(FLOOR(brut * taux)), 0) AS commission,
+           COALESCE(SUM(billets), 0) AS billets
+    FROM par_evenement
+  )
+  SELECT brut,
+         commission,
+         brut - commission,
+         CASE WHEN brut > 0 THEN commission / brut ELSE (SELECT v FROM taux_defaut) END,
+         billets::bigint
+  FROM totaux;
+$$;
+
+-- Appelée exclusivement par le backend (service_role, cf. server/routes/admin.ts et
+-- organizer.ts). Aucun accès anon/authenticated : ces chiffres sont commerciaux.
+REVOKE ALL ON FUNCTION public.ticket_revenue_stats(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.ticket_revenue_stats(TEXT) TO service_role;

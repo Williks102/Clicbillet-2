@@ -5,7 +5,7 @@ import { getDB, saveDB } from "../lib/db.js";
 import { requireAuth, requireRole } from "../lib/auth.js";
 import { runInBackground } from "../lib/utils.js";
 import { sendOrganizerPayoutStatusEmail } from "../lib/email.js";
-import { getDefaultCommissionRate, computeCommissionBreakdown } from "../lib/commission.js";
+import { getDefaultCommissionRate, computeCommissionBreakdown, fetchRevenueAggregates, MAX_LIST_ROWS } from "../lib/commission.js";
 import { isPaidTicket } from "../lib/ticketPayment.js";
 import { findTicketsByReference, confirmPaymentForTickets } from "../lib/paymentConfirmation.js";
 import { decryptPayoutDetails } from "../lib/payoutEncryption.js";
@@ -17,9 +17,15 @@ router.get("/api/admin/stats", async (req: express.Request, res: express.Respons
   const adminClient = supabaseAdmin;
   if (adminClient) {
     try {
-      const { data: users, error: uErr } = await adminClient.from("users").select("*");
-      const { data: events, error: eErr } = await adminClient.from("events").select("*");
-      const { data: tickets, error: tErr } = await adminClient.from("tickets").select("*");
+      const { data: users, error: uErr } = await adminClient.from("users").select("*").limit(MAX_LIST_ROWS);
+      const { data: events, error: eErr } = await adminClient.from("events").select("*").limit(MAX_LIST_ROWS);
+      // Les listes servent à l'affichage (tableaux, activité récente) et sont bornées ; les
+      // TOTAUX, eux, ne doivent jamais en dépendre — cf. commentaire de MAX_LIST_ROWS.
+      const { data: tickets, error: tErr } = await adminClient
+        .from("tickets")
+        .select("*")
+        .order("purchase_date", { ascending: false })
+        .limit(MAX_LIST_ROWS);
 
       if (uErr) throw uErr;
       if (eErr) throw eErr;
@@ -28,14 +34,26 @@ router.get("/api/admin/stats", async (req: express.Request, res: express.Respons
       const matchedTickets = tickets || [];
       const defaultCommissionRate = await getDefaultCommissionRate();
       const eventCommissionRateById = new Map((events || []).map((e: any) => [e.id, e.commission_rate != null ? Number(e.commission_rate) : null]));
-      const { totalGrossRevenue: totalRevenue, totalCommission: totalPlatformCommission, effectiveCommissionRate: commissionRate } = computeCommissionBreakdown(matchedTickets, eventCommissionRateById, defaultCommissionRate);
+
+      const aggregates = await fetchRevenueAggregates(adminClient, null);
+      const fallback = () => {
+        const b = computeCommissionBreakdown(matchedTickets, eventCommissionRateById, defaultCommissionRate);
+        return {
+          totalRevenue: b.totalGrossRevenue,
+          totalPlatformCommission: b.totalCommission,
+          commissionRate: b.effectiveCommissionRate,
+          totalTicketsSold: matchedTickets.filter(isPaidTicket).reduce((sum: number, t: any) => sum + Number(t.quantity || 1), 0),
+        };
+      };
+      const { totalRevenue, totalPlatformCommission, commissionRate, totalTicketsSold } = aggregates ?? fallback();
       const totalOrganizerPayout = totalRevenue - totalPlatformCommission;
 
-      // Cf. server/lib/ticketPayment.ts : seuls les billets encaissés comptent comme vendus,
-      // au même titre que le chiffre d'affaires calculé juste au-dessus.
-      const totalTicketsSold = matchedTickets.filter(isPaidTicket).reduce((sum: number, t: any) => sum + Number(t.quantity || 1), 0);
-      const totalUsers = (users || []).length;
-      const totalEvents = (events || []).length;
+      const [{ count: usersCount }, { count: eventsCount }] = await Promise.all([
+        adminClient.from("users").select("id", { count: "exact", head: true }),
+        adminClient.from("events").select("id", { count: "exact", head: true }),
+      ]);
+      const totalUsers = usersCount ?? (users || []).length;
+      const totalEvents = eventsCount ?? (events || []).length;
 
       const mappedUsers = (users || []).map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role, publicCode: u.public_code || null }));
       const mappedEvents = (events || []).map(e => ({
