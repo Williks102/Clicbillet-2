@@ -56,16 +56,22 @@ router.get("/api/events", async (req: express.Request, res: express.Response) =>
 
       if (error) throw error;
 
-      // Compute per-tier sold counts in one pass (avoid N+1 queries)
+      // Places vendues par tarif, agrégées EN BASE (fonction get_public_events_tier_sold,
+      // supabase_setup.sql section 12 — déjà utilisée par le catalogue lu directement depuis
+      // le navigateur, cf. src/lib/publicEvents.ts).
+      //
+      // Cette route refaisait le comptage à la main en ramenant les billets un par un : l'API
+      // REST de Supabase plafonnant à 1 000 lignes, les ventes au-delà n'étaient pas comptées
+      // et chaque tarif paraissait donc plus disponible qu'il ne l'est. Sur une billetterie,
+      // c'est le pire sens de l'erreur — on propose des places déjà vendues.
       const tierSoldByEvent: Record<string, Record<string, number>> = {};
-      const { data: tierTickets } = await supabase
-        .from("tickets")
-        .select("event_id, tier")
-        .not("transaction_ref", "like", "PENDING-%")
-        .not("transaction_ref", "like", "FAILED-%");
-      for (const t of tierTickets || []) {
-        if (!tierSoldByEvent[t.event_id]) tierSoldByEvent[t.event_id] = {};
-        tierSoldByEvent[t.event_id][t.tier] = (tierSoldByEvent[t.event_id][t.tier] || 0) + 1;
+      const { data: tierRows, error: tierErr } = await supabase.rpc("get_public_events_tier_sold");
+      if (tierErr) {
+        console.warn(`[Events] get_public_events_tier_sold indisponible (${tierErr.message}) : disponibilités par tarif non renseignées.`);
+      }
+      for (const row of tierRows || []) {
+        if (!tierSoldByEvent[row.event_id]) tierSoldByEvent[row.event_id] = {};
+        tierSoldByEvent[row.event_id][row.tier] = Number(row.sold) || 0;
       }
 
       // Alias public de chaque organisateur (si défini) : permet au frontend de rendre le
