@@ -308,7 +308,7 @@ export default function TermsPage({ onBack }: { onBack: () => void }) {
           </p>
           <p className="mt-1.5 flex items-center justify-center gap-2 text-sm">
             <Mail className="h-4 w-4" />
-            <a href="mailto:contact@clicbillet.com" className="underline">contact@clicbillet.com</a>
+            <a href="mailto:contacts@clicbillet.com" className="underline">contacts@clicbillet.com</a>
           </p>
         </LegalContactCard>
       </LegalSection>

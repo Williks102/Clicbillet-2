@@ -189,7 +189,7 @@ export default function PrivacyPage({ onBack }: { onBack: () => void }) {
           <h4 className="mb-2 font-bold text-green-800">Contact Data Protection Officer (DPO)</h4>
           <ul className="space-y-1 text-green-900">
             <li><strong>Email spécialisé :</strong> privacy@clicbillet.com</li>
-            <li><strong>Email général :</strong> contact@clicbillet.com</li>
+            <li><strong>Email général :</strong> contacts@clicbillet.com</li>
             <li><strong>Téléphone :</strong> +225 07 02 49 02 77</li>
           </ul>
         </div>
@@ -242,7 +242,7 @@ export default function PrivacyPage({ onBack }: { onBack: () => void }) {
           <div className="rounded-xl bg-gray-50 p-4">
             <h4 className="mb-2 font-bold text-gray-900">ClicBillet CI</h4>
             <p className="mb-1 flex items-center gap-2"><MapPin className="h-4 w-4 text-orange-600" /> Abidjan, Cocody, Côte d'Ivoire</p>
-            <p className="mb-1 flex items-center gap-2"><Mail className="h-4 w-4 text-orange-600" /> contact@clicbillet.com</p>
+            <p className="mb-1 flex items-center gap-2"><Mail className="h-4 w-4 text-orange-600" /> contacts@clicbillet.com</p>
             <p className="mb-1 flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-orange-600" /> privacy@clicbillet.com</p>
             <p className="flex items-center gap-2"><Phone className="h-4 w-4 text-orange-600" /> +225 07 02 49 02 77</p>
           </div>
