@@ -177,7 +177,7 @@ export default function ContactPage({ onBack }: { onBack: () => void }) {
               <div className="flex items-start gap-2.5">
                 <Mail className="mt-0.5 h-4 w-4 shrink-0 text-orange-600" />
                 <div>
-                  <p className="font-bold text-gray-900">contact@clicbillet.com</p>
+                  <p className="font-bold text-gray-900">contacts@clicbillet.com</p>
                   <p className="text-gray-400">Réponse dans l'heure</p>
                 </div>
               </div>
