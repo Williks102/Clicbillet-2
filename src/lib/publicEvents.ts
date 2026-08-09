@@ -40,8 +40,7 @@ function mapEvent(e: any, tierSoldByEvent: Record<string, Record<string, number>
     organizerName: e.organizer_name,
     organizerAlias: organizerAliasById[e.organizer_id] || null,
     status: e.status || "approved",
-    waitingRoomEnabled: e.waiting_room_enabled,
-    waitingRoomCapacity: e.waiting_room_capacity,
+    scheduledOnsale: e.scheduled_onsale,
     // commissionRate n'est plus lu depuis ce catalogue public (cf. commentaire d'en-tête) :
     // volontairement absent de la vue events_public. Reste disponible pour les organisateurs/
     // admins via /api/organizer/stats et /api/admin/stats (backend, service_role).

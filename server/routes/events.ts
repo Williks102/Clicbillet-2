@@ -108,8 +108,7 @@ router.get("/api/events", async (req: express.Request, res: express.Response) =>
         organizerName: e.organizer_name,
         organizerAlias: organizerAliasById[e.organizer_id] || null,
         status: e.status || "approved",
-        waitingRoomEnabled: e.waiting_room_enabled,
-        waitingRoomCapacity: e.waiting_room_capacity,
+        scheduledOnsale: e.scheduled_onsale,
         ticketsSoldByTier: tierSoldByEvent[e.id] || {}
       }));
       return res.json(mappedEvents);
@@ -244,8 +243,7 @@ router.get("/api/organizers/:alias", async (req: express.Request, res: express.R
           organizerId: e.organizer_id,
           organizerName: e.organizer_name,
           status: e.status || "approved",
-          waitingRoomEnabled: e.waiting_room_enabled,
-          waitingRoomCapacity: e.waiting_room_capacity,
+          scheduledOnsale: e.scheduled_onsale,
           ticketsSoldByTier: tierSoldByEvent[e.id] || {},
         })),
       });
@@ -283,7 +281,7 @@ router.get("/api/organizers/:alias", async (req: express.Request, res: express.R
 // Create Event Endpoint for Organizers
 router.post("/api/events", requireAuth, requireRole("organizer", "admin"), validateEvent, async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
-  const { title, description, date, time, endDate, endTime, price, ticketTypes, venue, category, banner, totalTickets, organizerName, waitingRoomEnabled, waitingRoomCapacity } = req.body;
+  const { title, description, date, time, endDate, endTime, price, ticketTypes, venue, category, banner, totalTickets, organizerName, scheduledOnsale } = req.body;
   // Un organisateur ne peut créer un événement que pour lui-même ; un admin peut le créer
   // au nom d'un organisateur précis (organizerId du body), sinon pour lui-même par défaut.
   const organizerId = authUser.role === "admin" ? (req.body.organizerId || authUser.id) : authUser.id;
@@ -318,8 +316,7 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
           organizer_id: organizerId,
           organizer_name: organizerName || "Organisateur ClicBillet",
           status: 'pending',
-          waiting_room_enabled: Boolean(waitingRoomEnabled),
-          waiting_room_capacity: Number(waitingRoomCapacity) || 50
+          scheduled_onsale: Boolean(scheduledOnsale)
         })
         .select()
         .single();
@@ -373,8 +370,7 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
         totalTickets: data.total_tickets,
         organizerId: data.organizer_id,
         organizerName: data.organizer_name,
-        waitingRoomEnabled: data.waiting_room_enabled,
-        waitingRoomCapacity: data.waiting_room_capacity
+        scheduledOnsale: data.scheduled_onsale
       };
 
       return res.status(201).json(mappedEvent);
@@ -413,7 +409,7 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
 router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), validateEvent, async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
   const { id } = req.params;
-  const { title, description, date, time, endDate, endTime, price, ticketTypes, venue, category, banner, totalTickets, waitingRoomEnabled, waitingRoomCapacity } = req.body;
+  const { title, description, date, time, endDate, endTime, price, ticketTypes, venue, category, banner, totalTickets, scheduledOnsale } = req.body;
 
   if (!title || !date || !time || isNaN(price) || !venue || !category || !totalTickets) {
     return res.status(400).json({ error: "Veuillez remplir tous les champs obligatoires correctement." });
@@ -453,8 +449,7 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
           category,
           banner: bannerUrl,
           total_tickets: Number(totalTickets),
-          ...(waitingRoomEnabled !== undefined ? { waiting_room_enabled: Boolean(waitingRoomEnabled) } : {}),
-          ...(waitingRoomCapacity !== undefined ? { waiting_room_capacity: Number(waitingRoomCapacity) || 50 } : {})
+          ...(scheduledOnsale !== undefined ? { scheduled_onsale: Boolean(scheduledOnsale) } : {})
         })
         .eq("id", id)
         .select()
@@ -494,8 +489,7 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
         totalTickets: data.total_tickets,
         organizerId: data.organizer_id,
         organizerName: data.organizer_name,
-        waitingRoomEnabled: data.waiting_room_enabled,
-        waitingRoomCapacity: data.waiting_room_capacity
+        scheduledOnsale: data.scheduled_onsale
       };
 
       return res.json({ success: true, message: "Événement modifié avec succès !", event: mappedEvent });

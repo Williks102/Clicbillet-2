@@ -114,7 +114,9 @@ router.get("/api/cron/expire-pending-tickets", async (req: express.Request, res:
     }
 
     const purgedRateLimitWindows = await purgeRateLimitWindows();
+    const purgedEventPressure = await purgeEventPressure();
     return res.json({
+      purgedEventPressure,
       expired: expiredCount,
       purgedAbandonedTickets: purgedTicketsCount || 0,
       purgedExpiredResetTokens: purgedResetsCount || 0,
@@ -188,6 +190,24 @@ async function purgeRateLimitWindows(): Promise<number> {
     .lt("window_start", seuil);
   if (error) {
     console.warn("[RateLimit] Purge des fenêtres périmées impossible :", error.message);
+    return 0;
+  }
+  return count || 0;
+}
+
+// Purge les mesures d'affluence des événements devenus inactifs (cf. supabase_setup.sql
+// section 26). La fonction waiting_room_gate purge déjà la fenêtre de l'événement qu'elle
+// consulte ; restent les événements que plus personne ne visite, dont les dernières lignes
+// resteraient sans jamais être relues.
+async function purgeEventPressure(): Promise<number> {
+  if (!isSupabaseEnabled || !supabase) return 0;
+  const seuil = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const { error, count } = await supabase
+    .from("event_pressure")
+    .delete({ count: "exact" })
+    .lt("seen_at", seuil);
+  if (error) {
+    console.warn("[Waiting Room] Purge des mesures d'affluence impossible :", error.message);
     return 0;
   }
   return count || 0;
