@@ -681,3 +681,88 @@ $$;
 -- organizer.ts). Aucun accès anon/authenticated : ces chiffres sont commerciaux.
 REVOKE ALL ON FUNCTION public.ticket_revenue_stats(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.ticket_revenue_stats(TEXT) TO service_role;
+
+-- ==========================================
+-- 22. INDICATEURS DES RAPPORTS CALCULÉS EN BASE
+-- ==========================================
+-- Même motif que la section 21, appliqué cette fois aux onglets Rapports : ils
+-- recalculaient taux de remplissage, taux d'entrée, taux d'abandon, répartition par tarif
+-- et performance par événement dans le navigateur, à partir de la liste de billets reçue —
+-- donc d'un échantillon plafonné, et au prix de plusieurs mégaoctets transférés.
+--
+-- ATTENTION à une subtilité conservée telle quelle : ici la commission est arrondie
+-- BILLET PAR BILLET (SUM(FLOOR(...))), alors que ticket_revenue_stats l'arrondit
+-- ÉVÉNEMENT PAR ÉVÉNEMENT. C'est la reproduction fidèle des deux implémentations
+-- JavaScript existantes, qui divergent déjà entre elles de quelques francs. Les unifier
+-- est un choix de gestion, pas une correction technique : à trancher séparément.
+--
+-- Les dates d'événement sont stockées en texte local ; la comparaison à now() est donc
+-- juste tant que la base tourne en UTC, ce qui correspond au fuseau ivoirien (UTC+0).
+-- Concordance vérifiée au franc près contre le calcul JavaScript sur 4 500 billets.
+CREATE OR REPLACE FUNCTION public.ticket_report_stats(p_organizer_id TEXT DEFAULT NULL)
+RETURNS JSONB
+LANGUAGE sql
+STABLE
+AS $$
+  WITH taux_defaut AS (
+    SELECT COALESCE((SELECT value::numeric FROM public.platform_config WHERE key='ticket_commission_rate'), 0.06) AS v
+  ),
+  evenements AS (
+    SELECT e.*, COALESCE(e.commission_rate, (SELECT v FROM taux_defaut)) AS taux,
+           ((e.date || ' ' || e.time)::timestamp <= now()) AS commence
+    FROM public.events e
+    WHERE p_organizer_id IS NULL OR e.organizer_id = p_organizer_id
+  ),
+  billets AS (
+    SELECT t.*, ev.taux, ev.commence,
+           (t.transaction_ref LIKE 'PAID-%' OR t.transaction_ref LIKE 'FREE-%') AS paye
+    FROM public.tickets t JOIN evenements ev ON ev.id = t.event_id
+  ),
+  payes AS (SELECT * FROM billets WHERE paye),
+  indicateurs AS (
+    SELECT
+      COALESCE(SUM(COALESCE(quantity,1)),0)::bigint AS tickets_sold,
+      COALESCE(SUM(price_paid),0) AS gross,
+      COALESCE(SUM(FLOOR(price_paid * taux)),0) AS commission,
+      COUNT(*) FILTER (WHERE commence)::bigint AS scannable_count,
+      COUNT(*) FILTER (WHERE commence AND scanned)::bigint AS scanned_count
+    FROM payes
+  ),
+  volumes AS (
+    SELECT COUNT(*)::bigint AS total_rows, COUNT(*) FILTER (WHERE paye)::bigint AS paid_rows FROM billets
+  ),
+  capacite AS (SELECT COALESCE(SUM(total_tickets),0)::bigint AS capacity FROM evenements)
+  SELECT jsonb_build_object(
+    'ticketsSold', i.tickets_sold,
+    'gross', i.gross,
+    'commission', i.commission,
+    'capacity', c.capacity,
+    'scannableCount', i.scannable_count,
+    'scannedCount', i.scanned_count,
+    'totalTicketRows', v.total_rows,
+    'paidTicketRows', v.paid_rows,
+    'tiers', COALESCE((SELECT jsonb_agg(x) FROM (
+        SELECT tier, SUM(price_paid) AS gross, SUM(COALESCE(quantity,1))::bigint AS count
+        FROM payes GROUP BY tier ORDER BY SUM(price_paid) DESC) x), '[]'::jsonb),
+    'events', COALESCE((SELECT jsonb_agg(y) FROM (
+        SELECT ev.id, ev.title, ev.date, ev.total_tickets AS capacity, ev.commence AS started,
+               COALESCE(SUM(p.price_paid),0) AS gross,
+               COALESCE(SUM(FLOOR(p.price_paid * ev.taux)),0) AS commission,
+               COALESCE(SUM(COALESCE(p.quantity,1)),0)::bigint AS sold,
+               COUNT(p.*)::bigint AS paid_rows,
+               COUNT(p.*) FILTER (WHERE p.scanned)::bigint AS scanned
+        FROM evenements ev LEFT JOIN payes p ON p.event_id = ev.id
+        GROUP BY ev.id, ev.title, ev.date, ev.total_tickets, ev.commence
+        ORDER BY COALESCE(SUM(p.price_paid),0) DESC) y), '[]'::jsonb),
+    'series', COALESCE((SELECT jsonb_agg(z ORDER BY z.jour) FROM (
+        SELECT date_trunc('day', purchase_date) AS jour,
+               SUM(price_paid) AS gross,
+               SUM(FLOOR(price_paid * taux)) AS commission
+        FROM payes WHERE purchase_date >= now() - interval '365 days'
+        GROUP BY 1) z), '[]'::jsonb)
+  )
+  FROM indicateurs i, volumes v, capacite c;
+$$;
+
+REVOKE ALL ON FUNCTION public.ticket_report_stats(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.ticket_report_stats(TEXT) TO service_role;

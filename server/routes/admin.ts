@@ -5,7 +5,7 @@ import { getDB, saveDB } from "../lib/db.js";
 import { requireAuth, requireRole } from "../lib/auth.js";
 import { runInBackground } from "../lib/utils.js";
 import { sendOrganizerPayoutStatusEmail } from "../lib/email.js";
-import { getDefaultCommissionRate, computeCommissionBreakdown, fetchRevenueAggregates, MAX_LIST_ROWS } from "../lib/commission.js";
+import { getDefaultCommissionRate, computeCommissionBreakdown, fetchRevenueAggregates, fetchReportStats, MAX_LIST_ROWS } from "../lib/commission.js";
 import { isPaidTicket } from "../lib/ticketPayment.js";
 import { findTicketsByReference, confirmPaymentForTickets } from "../lib/paymentConfirmation.js";
 import { decryptPayoutDetails } from "../lib/payoutEncryption.js";
@@ -35,7 +35,10 @@ router.get("/api/admin/stats", async (req: express.Request, res: express.Respons
       const defaultCommissionRate = await getDefaultCommissionRate();
       const eventCommissionRateById = new Map((events || []).map((e: any) => [e.id, e.commission_rate != null ? Number(e.commission_rate) : null]));
 
-      const aggregates = await fetchRevenueAggregates(adminClient, null);
+      const [aggregates, report] = await Promise.all([
+        fetchRevenueAggregates(adminClient, null),
+        fetchReportStats(adminClient, null),
+      ]);
       const fallback = () => {
         const b = computeCommissionBreakdown(matchedTickets, eventCommissionRateById, defaultCommissionRate);
         return {
@@ -108,7 +111,10 @@ router.get("/api/admin/stats", async (req: express.Request, res: express.Respons
         totalEvents,
         users: mappedUsers,
         events: mappedEvents,
-        tickets: mappedTickets
+        tickets: mappedTickets,
+        // Indicateurs agrégés en base : exacts quel que soit le volume, contrairement au
+        // calcul local que les écrans font à partir de la liste bornée ci-dessus.
+        report
       });
     } catch (err: any) {
       console.error("[Supabase Error] Admin stats, falling back to local file DB:", err.message);

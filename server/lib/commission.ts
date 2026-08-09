@@ -111,3 +111,26 @@ export async function fetchRevenueAggregates(
     return null;
   }
 }
+
+// Indicateurs des onglets Rapports, agrégés en base (fonction ticket_report_stats,
+// supabase_setup.sql section 22) : taux de remplissage, taux d'entrée, taux d'abandon,
+// répartition par tarif, performance par événement et série temporelle.
+//
+// Renvoie null si la migration n'a pas été jouée : les écrans retombent alors sur leur
+// calcul local, à partir de la liste bornée qu'ils reçoivent déjà.
+export async function fetchReportStats(
+  client: SupabaseClient,
+  organizerId: string | null
+): Promise<Record<string, any> | null> {
+  try {
+    const { data, error } = await client.rpc("ticket_report_stats", { p_organizer_id: organizerId });
+    if (error || !data) {
+      if (error) console.warn(`[Rapports] ticket_report_stats indisponible (${error.message}) : calcul local conservé.`);
+      return null;
+    }
+    return data as Record<string, any>;
+  } catch (err: any) {
+    console.warn("[Rapports] Échec de ticket_report_stats :", err?.message);
+    return null;
+  }
+}
