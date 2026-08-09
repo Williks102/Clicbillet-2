@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ArrowLeft, Calendar, MapPin, Tag, Users, Share2, Check, Minus, Plus, Hourglass, Ticket as TicketIcon } from "lucide-react";
 import { Event } from "../types";
 import { isEventPast } from "../lib/eventStatus";
+import { EventPageSkeleton } from "./Skeleton";
 import { formatTierLabel } from "../lib/ticketTier";
 
 // Page d'un événement, adressable par /e/:id.
@@ -84,9 +85,7 @@ export default function EventPage({ event, loading, onBack, onBuyTicket, onViewO
 
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center" id="event-page-loader">
-        <div className="h-10 w-10 animate-spin rounded-full border-4 border-orange-200 border-t-orange-600" />
-      </div>
+      <EventPageSkeleton />
     );
   }
 

@@ -19,7 +19,32 @@
     <meta property="og:title" content="ClicBillet – Billetterie Ivoirienne" />
     <meta property="og:description" content="Tickets instantanés, paiement mobile money, QR code de vérification." />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="/icon.svg" />
+    <meta property="og:url" content="https://www.clicbillet.com/" />
+    <!--
+      Trois contraintes que les robots d'aperçu (Facebook, WhatsApp, X) imposent, et que
+      l'ancienne valeur "/icon.svg" violait toutes :
+        - l'adresse doit être ABSOLUE. Un chemin relatif est rejeté ("URL non valable"), le
+          robot ne partageant pas le contexte de la page ;
+        - le format doit être JPEG ou PNG. Le SVG n'est pas décodé, même servi correctement ;
+        - l'image doit être une vraie vignette (1200x630 recommandé), pas une icône carrée de
+          512 px, sinon l'aperçu s'affiche en petit à côté du texte au lieu d'occuper la largeur.
+      Sans cela, un lien partagé sur WhatsApp n'affichait aucune image du tout.
+
+      Le domaine est écrit en dur, faute de contexte serveur dans un fichier statique. Les pages
+      d'événement, elles, reçoivent leurs propres balises côté serveur (affiche de l'événement),
+      construites à partir de APP_ORIGIN — cf. server/lib/socialPreview.ts.
+    -->
+    <meta property="og:image" content="https://www.clicbillet.com/og-image.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="ClicBillet, la billetterie de vos événements en Côte d'Ivoire" />
+    <meta property="og:site_name" content="ClicBillet" />
+    <meta property="og:locale" content="fr_FR" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="ClicBillet – Billetterie Ivoirienne" />
+    <meta name="twitter:description" content="Tickets instantanés, paiement mobile money, QR code de vérification." />
+    <meta name="twitter:image" content="https://www.clicbillet.com/og-image.jpg" />
 
     <!-- SDK Paystack Inline (popup de paiement) -->
     <script src="https://js.paystack.co/v1/inline.js"></script>

@@ -5,7 +5,7 @@ import { getDB, saveDB } from "../lib/db.js";
 import { requireRole } from "../lib/auth.js";
 import { runInBackground } from "../lib/utils.js";
 import { sendAdminPayoutRequestEmail } from "../lib/email.js";
-import { getDefaultCommissionRate, computeCommissionBreakdown } from "../lib/commission.js";
+import { getDefaultCommissionRate, computeCommissionBreakdown, fetchRevenueAggregates, MAX_LIST_ROWS } from "../lib/commission.js";
 import { isPaidTicket } from "../lib/ticketPayment.js";
 import { validateOrganizerAlias, MAX_ORGANIZER_BIO_LENGTH } from "../lib/organizerAlias.js";
 import { encryptPayoutDetails } from "../lib/payoutEncryption.js";
@@ -47,7 +47,8 @@ router.get("/api/organizer/export", requireRole("organizer", "admin"), async (re
           .from("tickets")
           .select("*")
           .in("event_id", eventIds)
-          .order("purchase_date", { ascending: false });
+          .order("purchase_date", { ascending: false })
+          .limit(MAX_LIST_ROWS);
         if (tktsError) throw tktsError;
         matchedTickets = tkts || [];
       }
@@ -126,7 +127,8 @@ router.get("/api/organizer/stats", requireRole("organizer", "admin"), async (req
           .from("tickets")
           .select("*")
           .in("event_id", eventIds)
-          .order("purchase_date", { ascending: false });
+          .order("purchase_date", { ascending: false })
+          .limit(MAX_LIST_ROWS);
 
         if (tktsError) throw tktsError;
         matchedTickets = tkts || [];
@@ -242,7 +244,14 @@ async function getOrganizerAvailableBalance(organizerId: string): Promise<number
 
   const defaultRate = await getDefaultCommissionRate();
   const rateById = new Map((organizerEvents || []).map((e: any) => [e.id, e.commission_rate != null ? Number(e.commission_rate) : null]));
-  const { totalRevenue } = computeCommissionBreakdown(matchedTickets, rateById, defaultRate);
+
+  // Le solde autorisant les retraits est calculé en base : la requête ci-dessus est plafonnée
+  // à 1 000 lignes par l'API Supabase, si bien qu'au-delà de mille billets un organisateur se
+  // voyait refuser des retraits sur de l'argent qu'il avait réellement encaissé.
+  const aggregates = await fetchRevenueAggregates(supabase, organizerId);
+  const totalRevenue = aggregates
+    ? aggregates.totalRevenue - aggregates.totalPlatformCommission
+    : computeCommissionBreakdown(matchedTickets, rateById, defaultRate).totalRevenue;
 
   const { data: existingPayouts } = await supabase
     .from("payouts")
