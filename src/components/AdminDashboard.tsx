@@ -12,6 +12,7 @@ import { isVipTier, formatTierLabel } from "../lib/ticketTier";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 import CommissionSheet from "./CommissionSheet";
 import AdminReports from "./AdminReports";
+import { normalizeReport } from "../lib/reportStats";
 
 interface AdminDashboardProps {
   user: User;
@@ -1017,6 +1018,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
             tickets={stats.tickets}
             commissionRate={stats.commissionRate || 0}
             loading={loading}
+            report={normalizeReport((stats as any)?.report)}
           />
         )}
 

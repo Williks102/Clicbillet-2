@@ -1,5 +1,39 @@
-import { RESEND_API_KEY, RESEND_FROM_EMAIL, ADMIN_NOTIFICATION_EMAIL, APP_ORIGIN } from "./config.js";
+import crypto from "crypto";
+import { RESEND_API_KEY, RESEND_FROM_EMAIL, ADMIN_NOTIFICATION_EMAIL, APP_ORIGIN, isSupabaseEnabled, supabase } from "./config.js";
+import { getDB, saveDB } from "./db.js";
 import { isQrUnlocked, getQrUnlockTime } from "./utils.js";
+
+export const RESEND_API_BASE = "https://api.resend.com";
+
+// Met un message de côté pour un réessai ultérieur (cf. supabase_setup.sql section 23, et la
+// route de drainage /api/cron/drain-emails). Appelée quand l'envoi immédiat a échoué : le
+// message n'est alors plus perdu, seulement retardé.
+//
+// Silencieuse en cas d'échec d'écriture : on est déjà dans un chemin de rattrapage, et faire
+// remonter une erreur ici ferait échouer la route métier — précisément ce que le caractère
+// « meilleur effort » des e-mails cherche à éviter.
+export async function enqueueEmail(to: string, subject: string, html: string): Promise<void> {
+  const id = `mail-${crypto.randomUUID()}`;
+  try {
+    if (isSupabaseEnabled && supabase) {
+      const { error } = await supabase.from("email_outbox").insert({ id, recipient: to, subject, html });
+      if (error) throw error;
+      console.warn(`[Email Service] Envoi différé, message mis en file : "${subject}" -> ${to}`);
+      return;
+    }
+    const db = getDB();
+    db.emailOutbox = db.emailOutbox || [];
+    db.emailOutbox.push({
+      id, recipient: to, subject, html,
+      status: "pending", attempts: 0, lastError: null,
+      nextAttemptAt: new Date().toISOString(), createdAt: new Date().toISOString(), sentAt: null,
+    });
+    saveDB(db);
+    console.warn(`[Email Service] Envoi différé (db.json), message mis en file : "${subject}" -> ${to}`);
+  } catch (err: any) {
+    console.error(`[Email Service] Message perdu — mise en file impossible pour ${to} :`, err?.message || err);
+  }
+}
 
 // ==========================================
 // SERVICE D'ENVOI D'EMAILS (Resend)
@@ -15,7 +49,7 @@ export async function sendEmail({ to, subject, html }: { to: string; subject: st
   }
 
   try {
-    const response = await fetch("https://api.resend.com/emails", {
+    const response = await fetch(`${RESEND_API_BASE}/emails`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${RESEND_API_KEY}`,
@@ -32,6 +66,8 @@ export async function sendEmail({ to, subject, html }: { to: string; subject: st
     if (!response.ok) {
       const errorBody = await response.text().catch(() => "");
       console.error(`[Email Service] Échec d'envoi Resend (${response.status}) à ${to} :`, errorBody);
+      // 429 (débit dépassé) comme 5xx : le message part en file plutôt qu'à la poubelle.
+      await enqueueEmail(to, subject, html);
       return false;
     }
 
@@ -39,6 +75,7 @@ export async function sendEmail({ to, subject, html }: { to: string; subject: st
     return true;
   } catch (err: any) {
     console.error(`[Email Service] Erreur réseau lors de l'envoi à ${to} :`, err.message || err);
+    await enqueueEmail(to, subject, html);
     return false;
   }
 }

@@ -4,6 +4,7 @@ import { Event, Ticket } from "../types";
 import { isPaidTicket } from "../lib/ticketPayment";
 import { hasEventStarted } from "../lib/eventStatus";
 import { Granularity, buildTimeBuckets, bucketStart, formatPercent } from "../lib/chartBuckets";
+import { ServerReport, bucketsFromSeries, foldTiers } from "../lib/reportStats";
 import StackedRevenueChart, { RevenueBucket, ACCENT_COLOR } from "./StackedRevenueChart";
 
 // Onglet "Rapports" de la supervision : le pendant plateforme du rapport organisateur, avec
@@ -18,12 +19,14 @@ import StackedRevenueChart, { RevenueBucket, ACCENT_COLOR } from "./StackedReven
 interface AdminReportsProps {
   events: Event[];
   tickets: Ticket[];
+  // Cf. OrganizerReports : agrégats de base, prioritaires sur le calcul local.
+  report?: ServerReport | null;
   // Taux effectif calculé côté serveur, utilisé en repli pour un événement sans taux négocié.
   commissionRate: number;
   loading?: boolean;
 }
 
-export default function AdminReports({ events, tickets, commissionRate, loading = false }: AdminReportsProps) {
+export default function AdminReports({ events, tickets, commissionRate, loading = false, report = null }: AdminReportsProps) {
   const [granularity, setGranularity] = useState<Granularity>("day");
 
   const paidTickets = useMemo(() => tickets.filter(isPaidTicket), [tickets]);
@@ -41,6 +44,8 @@ export default function AdminReports({ events, tickets, commissionRate, loading 
   }
 
   const buckets = useMemo<RevenueBucket[]>(() => {
+    if (report) return bucketsFromSeries(report.series, granularity, (_gross, commission) => commission);
+
     const list = buildTimeBuckets(granularity).map((b) => ({ ...b, total: 0, primary: 0 }));
     const byKey = new Map(list.map((b) => [b.key, b]));
 
@@ -54,9 +59,30 @@ export default function AdminReports({ events, tickets, commissionRate, loading 
     }
 
     return list;
-  }, [paidTickets, granularity, rateByEvent, commissionRate]);
+  }, [paidTickets, granularity, rateByEvent, commissionRate, report]);
 
   const indicators = useMemo(() => {
+    if (report) {
+      // Les classements par organisateur et par catégorie restent locaux : ils croisent les
+      // billets avec la liste d'événements, et la base ne les agrège pas encore. Ce sont des
+      // palmarès indicatifs, pas des totaux — contrairement aux six indicateurs ci-dessous.
+      const scanRate = report.scannableCount > 0 ? report.scannedCount / report.scannableCount : null;
+      const abandoned = report.totalTicketRows - report.paidTicketRows;
+      return {
+        gross: report.gross,
+        commission: report.commission,
+        payout: report.gross - report.commission,
+        ticketsSold: report.ticketsSold,
+        averagePrice: report.ticketsSold > 0 ? Math.round(report.gross / report.ticketsSold) : 0,
+        scanRate,
+        scanned: report.scannedCount,
+        scannableCount: report.scannableCount,
+        abandoned,
+        abandonRate: report.totalTicketRows > 0 ? abandoned / report.totalTicketRows : null,
+        activeOrganizers: new Set(report.events.filter((e) => e.gross > 0).map((e) => e.id)).size,
+        pendingEvents: events.filter((e) => e.status === "pending").length,
+      };
+    }
     const gross = paidTickets.reduce((sum, t) => sum + (Number(t.pricePaid) || 0), 0);
     const commission = paidTickets.reduce((sum, t) => sum + commissionFor(t), 0);
     const ticketsSold = paidTickets.reduce((sum, t) => sum + (Number(t.quantity) || 1), 0);
@@ -84,7 +110,7 @@ export default function AdminReports({ events, tickets, commissionRate, loading 
       scanRate, scanned, scannableCount: scannable.length,
       abandoned, abandonRate, activeOrganizers: sellingOrganizers.size, pendingEvents,
     };
-  }, [paidTickets, tickets, events, rateByEvent, commissionRate]);
+  }, [paidTickets, tickets, events, rateByEvent, commissionRate, report]);
 
   // --- Classement des organisateurs par volume d'affaires ---
   const organizerRows = useMemo(() => {

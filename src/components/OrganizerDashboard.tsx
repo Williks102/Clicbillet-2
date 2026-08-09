@@ -12,6 +12,7 @@ import DashboardMobileMenu from "./DashboardMobileMenu";
 import AccountCodeBadge from "./AccountCodeBadge";
 import WeeklySalesChart from "./WeeklySalesChart";
 import OrganizerReports from "./OrganizerReports";
+import { normalizeReport } from "../lib/reportStats";
 
 interface OrganizerDashboardProps {
   user: User;
@@ -1031,7 +1032,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
           </div>
         </div>
       ) : subTab === "reports" ? (
-        <OrganizerReports stats={stats} events={myEvents} loading={loadingStats} />
+        <OrganizerReports stats={stats} events={myEvents} loading={loadingStats} report={normalizeReport((stats as any)?.report)} />
       ) : subTab === "create" ? (
         /* Create New Event Form Layout */
         <form onSubmit={handleCreateEvent} className="min-w-0 rounded-2xl border border-gray-100/70 bg-white p-4 space-y-5 sm:p-6 sm:space-y-6" id="orga-create-form-view">

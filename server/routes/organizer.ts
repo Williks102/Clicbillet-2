@@ -5,7 +5,7 @@ import { getDB, saveDB } from "../lib/db.js";
 import { requireRole } from "../lib/auth.js";
 import { runInBackground } from "../lib/utils.js";
 import { sendAdminPayoutRequestEmail } from "../lib/email.js";
-import { getDefaultCommissionRate, computeCommissionBreakdown, fetchRevenueAggregates, MAX_LIST_ROWS } from "../lib/commission.js";
+import { getDefaultCommissionRate, computeCommissionBreakdown, fetchRevenueAggregates, fetchReportStats, MAX_LIST_ROWS } from "../lib/commission.js";
 import { isPaidTicket } from "../lib/ticketPayment.js";
 import { validateOrganizerAlias, MAX_ORGANIZER_BIO_LENGTH } from "../lib/organizerAlias.js";
 import { encryptPayoutDetails } from "../lib/payoutEncryption.js";
@@ -136,11 +136,25 @@ router.get("/api/organizer/stats", requireRole("organizer", "admin"), async (req
 
       const defaultCommissionRate = await getDefaultCommissionRate();
       const eventCommissionRateById = new Map((organizerEvents || []).map((e: any) => [e.id, e.commission_rate != null ? Number(e.commission_rate) : null]));
-      const { totalGrossRevenue, totalCommission, totalRevenue, effectiveCommissionRate: commissionRate } = computeCommissionBreakdown(matchedTickets, eventCommissionRateById, defaultCommissionRate);
+      const local = computeCommissionBreakdown(matchedTickets, eventCommissionRateById, defaultCommissionRate);
+
+      // Totaux agrégés en base : la liste ci-dessus est bornée, elle ne peut pas servir à
+      // totaliser (cf. server/lib/commission.ts). Repli sur le calcul local si la migration
+      // n'a pas encore été jouée.
+      const [aggregates, report] = await Promise.all([
+        fetchRevenueAggregates(supabase, String(organizerId)),
+        fetchReportStats(supabase, String(organizerId)),
+      ]);
+      const totalGrossRevenue = aggregates ? aggregates.totalRevenue : local.totalGrossRevenue;
+      const totalCommission = aggregates ? aggregates.totalPlatformCommission : local.totalCommission;
+      const totalRevenue = totalGrossRevenue - totalCommission;
+      const commissionRate = aggregates ? aggregates.commissionRate : local.effectiveCommissionRate;
 
       // Même définition que le chiffre d'affaires ci-dessus : un billet réservé mais jamais
       // payé n'est pas vendu — il sera annulé par le cron et son stock rendu à l'événement.
-      const ticketsSold = matchedTickets.filter(isPaidTicket).reduce((sum: number, t: any) => sum + Number(t.quantity || 1), 0);
+      const ticketsSold = aggregates
+        ? aggregates.totalTicketsSold
+        : matchedTickets.filter(isPaidTicket).reduce((sum: number, t: any) => sum + Number(t.quantity || 1), 0);
       const activeEvents = (organizerEvents || []).length;
 
       const recentSales = matchedTickets.slice(0, 10).map((t: any) => ({
@@ -174,7 +188,8 @@ router.get("/api/organizer/stats", requireRole("organizer", "admin"), async (req
         ticketsSold,
         activeEvents,
         recentSales,
-        tickets
+        tickets,
+        report
       });
     } catch (err: any) {
       console.error("[Supabase Error] Organizer statistics, falling back to local file DB:", err.message);

@@ -3,14 +3,15 @@
 // Protégées par CRON_SECRET plutôt que par une session : personne n'est connecté quand elles
 // s'exécutent. Elles libèrent l'inventaire réservé par les paniers abandonnés et purgent les
 // données qui n'ont plus de valeur passé leur délai de rétention.
+import crypto from "crypto";
 import express from "express";
 import { isSupabaseEnabled, supabase } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { runInBackground } from "../lib/utils.js";
-import { sendReservationExpiredEmail } from "../lib/email.js";
+import { sendReservationExpiredEmail, RESEND_API_BASE } from "../lib/email.js";
 import { releaseWaitingRoomSlot } from "../lib/waitingRoom.js";
 import { groupTicketsByOrder, ticketEmailShape } from "../lib/paymentConfirmation.js";
-import { CRON_SECRET, PENDING_TICKET_EXPIRY_MINUTES, ABANDONED_TICKET_RETENTION_DAYS } from "../lib/config.js";
+import { CRON_SECRET, PENDING_TICKET_EXPIRY_MINUTES, ABANDONED_TICKET_RETENTION_DAYS, RESEND_API_KEY, RESEND_FROM_EMAIL } from "../lib/config.js";
 
 const router = express.Router();
 
@@ -155,6 +156,135 @@ router.get("/api/cron/expire-pending-tickets", async (req: express.Request, res:
     purgedAbandonedTickets: purgedTicketsCountLocal,
     purgedExpiredResetTokens: purgedResetsCountLocal
   });
+});
+
+// Vide la file des e-mails en attente (cf. supabase_setup.sql section 23).
+//
+// À appeler par le même planificateur externe que l'expiration des billets, avec le même
+// en-tête d'autorisation. Deux paramètres de conception :
+//
+//   - envoi PAR LOT : l'API Resend accepte 100 messages en un seul appel, là où cent appels
+//     séparés dépasseraient largement son débit autorisé (10 requêtes par seconde et par
+//     équipe) — c'est-à-dire exactement ce qui faisait échouer les envois lors d'un pic ;
+//   - réessai à délai CROISSANT : 2, 4, 8… minutes, plafonné à une heure. Un service
+//     momentanément indisponible n'est pas martelé, et un message définitivement refusé
+//     (adresse invalide) cesse d'être retenté au bout de six essais. Il reste alors en base
+//     avec sa dernière erreur, consultable, au lieu de disparaître.
+const OUTBOX_BATCH_SIZE = 100;
+const OUTBOX_MAX_ATTEMPTS = 6;
+
+function prochainEssai(attempts: number): string {
+  const minutes = Math.min(2 ** attempts, 60);
+  return new Date(Date.now() + minutes * 60 * 1000).toISOString();
+}
+
+router.get("/api/cron/drain-emails", async (req: express.Request, res: express.Response) => {
+  if (CRON_SECRET && req.headers.authorization !== `Bearer ${CRON_SECRET}`) {
+    return res.status(401).json({ error: "Non autorisé." });
+  }
+  if (!RESEND_API_KEY) {
+    return res.json({ success: true, skipped: "Resend non configuré", sent: 0 });
+  }
+
+  if (isSupabaseEnabled && supabase) {
+    const { data: dus, error } = await supabase
+      .from("email_outbox")
+      .select("*")
+      .eq("status", "pending")
+      .lte("next_attempt_at", new Date().toISOString())
+      .order("created_at", { ascending: true })
+      .limit(OUTBOX_BATCH_SIZE);
+
+    if (error) {
+      console.error("[Outbox] Lecture de la file impossible :", error.message);
+      return res.status(500).json({ error: "Lecture de la file impossible." });
+    }
+    if (!dus || dus.length === 0) {
+      return res.json({ success: true, sent: 0, retried: 0, abandoned: 0 });
+    }
+
+    let envoyes = 0, differes = 0, abandonnes = 0;
+    try {
+      const response = await fetch(`${RESEND_API_BASE}/emails/batch`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${RESEND_API_KEY}`,
+          "Content-Type": "application/json",
+          // Un lot rejoué après un échec d'écriture de notre côté ne doit pas renvoyer les
+          // mêmes messages deux fois : la clé dérive du contenu exact du lot.
+          "Idempotency-Key": crypto.createHash("sha256").update(dus.map((m: any) => m.id).join(",")).digest("hex"),
+        },
+        body: JSON.stringify(dus.map((m: any) => ({ from: RESEND_FROM_EMAIL, to: m.recipient, subject: m.subject, html: m.html }))),
+      });
+
+      if (!response.ok) throw new Error(`Resend ${response.status} : ${await response.text().catch(() => "")}`);
+
+      await supabase
+        .from("email_outbox")
+        .update({ status: "sent", sent_at: new Date().toISOString(), last_error: null })
+        .in("id", dus.map((m: any) => m.id));
+      envoyes = dus.length;
+    } catch (err: any) {
+      // Le lot entier est rejoué : Resend ne détaille pas les échecs message par message,
+      // et la clé d'idempotence ci-dessus protège des doublons.
+      const message = String(err?.message || err).slice(0, 500);
+      for (const m of dus as any[]) {
+        const attempts = Number(m.attempts || 0) + 1;
+        const abandon = attempts >= OUTBOX_MAX_ATTEMPTS;
+        await supabase.from("email_outbox").update({
+          attempts,
+          last_error: message,
+          status: abandon ? "failed" : "pending",
+          next_attempt_at: prochainEssai(attempts),
+        }).eq("id", m.id);
+        if (abandon) abandonnes++; else differes++;
+      }
+      console.error(`[Outbox] Lot de ${dus.length} message(s) en échec :`, message);
+    }
+    return res.json({ success: true, sent: envoyes, retried: differes, abandoned: abandonnes });
+  }
+
+  // Repli db.json : le même envoi par lot, pas une simulation. Marquer « envoyé » sans
+  // envoyer masquerait en développement précisément ce qu'on cherche à corriger.
+  const db = getDB();
+  db.emailOutbox = db.emailOutbox || [];
+  const dus = db.emailOutbox
+    .filter((m: any) => m.status === "pending" && new Date(m.nextAttemptAt) <= new Date())
+    .slice(0, OUTBOX_BATCH_SIZE);
+  if (dus.length === 0) {
+    return res.json({ success: true, sent: 0, retried: 0, abandoned: 0 });
+  }
+
+  let envoyes = 0, differes = 0, abandonnes = 0;
+  try {
+    const response = await fetch(`${RESEND_API_BASE}/emails/batch`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": crypto.createHash("sha256").update(dus.map((m: any) => m.id).join(",")).digest("hex"),
+      },
+      body: JSON.stringify(dus.map((m: any) => ({ from: RESEND_FROM_EMAIL, to: m.recipient, subject: m.subject, html: m.html }))),
+    });
+    if (!response.ok) throw new Error(`Resend ${response.status} : ${await response.text().catch(() => "")}`);
+    for (const m of dus) {
+      m.status = "sent";
+      m.sentAt = new Date().toISOString();
+      m.lastError = null;
+      envoyes++;
+    }
+  } catch (err: any) {
+    const message = String(err?.message || err).slice(0, 500);
+    for (const m of dus) {
+      m.attempts = Number(m.attempts || 0) + 1;
+      m.lastError = message;
+      m.nextAttemptAt = prochainEssai(m.attempts);
+      if (m.attempts >= OUTBOX_MAX_ATTEMPTS) { m.status = "failed"; abandonnes++; } else { differes++; }
+    }
+    console.error(`[Outbox] Lot de ${dus.length} message(s) en échec :`, message);
+  }
+  saveDB(db);
+  res.json({ success: true, sent: envoyes, retried: differes, abandoned: abandonnes });
 });
 
 export default router;
