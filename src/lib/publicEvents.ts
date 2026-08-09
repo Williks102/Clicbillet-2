@@ -33,6 +33,7 @@ function mapEvent(e: any, tierSoldByEvent: Record<string, Record<string, number>
     ticketTypes: e.ticket_types,
     venue: e.venue,
     category: e.category,
+    categorySlug: e.category_slug,
     banner: e.banner,
     ticketsSold: e.tickets_sold ?? 0,
     totalTickets: e.total_tickets,

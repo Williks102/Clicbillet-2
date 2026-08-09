@@ -44,7 +44,8 @@ export interface Event {
   ticketTypes?: { name: string; price: number; total?: number }[]; // Custom ticket types (e.g. VIP, Standard)
   ticketsSoldByTier?: Record<string, number>; // Sold count per tier name (computed server-side)
   venue: string; // Event location, e.g., "Palais de la Culture, Treichville"
-  category: string; // "Concert", "Sport", etc.
+  category: string;
+  categorySlug?: string | null; // "Concert", "Sport", etc.
   banner: string; // Banner image URL
   ticketsSold: number;
   totalTickets: number;
