@@ -4,7 +4,7 @@ import { Event, User, SalesStatus } from "../types";
 import { authFetch } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
 import { isEventPast, EVENT_SCAN_GRACE_HOURS, EVENT_DEFAULT_DURATION_HOURS } from "../lib/eventStatus";
-import { compressImageToDataUrl } from "../lib/imageCompress";
+import { BannerUploadZone } from "./BannerUploadZone";
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
 import { isPaidTicket } from "../lib/ticketPayment";
@@ -176,7 +176,6 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
 
   // Event Editing States
   const [editingEvent, setEditingEvent] = useState<Event | null>(null);
@@ -490,52 +489,6 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     }
   }
 
-  function handleImageFile(file: File) {
-    if (!file.type.startsWith("image/")) {
-      setFormError("Veuillez sélectionner un fichier image (JPG, PNG, GIF, WEBP).");
-      return;
-    }
-    if (file.size > 4 * 1024 * 1024) {
-      setFormError("La taille de l'image ne doit pas dépasser 4 Mo.");
-      return;
-    }
-
-    // Redimensionne/recompresse avant de stocker : une photo de téléphone telle quelle
-    // (plusieurs Mo) alourdirait la réponse /api/events envoyée à chaque visiteur.
-    compressImageToDataUrl(file)
-      .then((dataUrl) => {
-        setCustomBannerUrl(dataUrl);
-        setSelectedBanner("");
-      })
-      .catch(() => setFormError("Impossible de traiter cette image, réessayez avec un autre fichier."));
-  }
-
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) {
-      handleImageFile(file);
-    }
-  }
-
-  function handleDrag(e: React.DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
-  }
-
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      handleImageFile(file);
-    }
-  }
 
   // Fetch sales report stats from backend API
   async function fetchStats() {
@@ -1327,68 +1280,15 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                   Importer l'affiche de l'événement (Recommandé) :
                 </span>
 
-                {/* Drag-and-drop container */}
-                <div
-                  onDragEnter={handleDrag}
-                  onDragOver={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDrop={handleDrop}
-                  onClick={() => document.getElementById("banner-file-input")?.click()}
-                  className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer flex flex-col items-center justify-center space-y-2 relative overflow-hidden ${
-                    dragActive
-                      ? "border-orange-500 bg-orange-50"
-                      : customBannerUrl.startsWith("data:image")
-                      ? "border-emerald-500 bg-emerald-50/20"
-                      : "border-gray-200 hover:border-orange-400 hover:bg-gray-50 bg-white"
-                  }`}
-                >
-                  <input
-                    type="file"
-                    id="banner-file-input"
-                    className="hidden"
-                    accept="image/*"
-                    onChange={handleFileChange}
-                  />
-
-                  {customBannerUrl.startsWith("data:image") ? (
-                    <div className="flex flex-col items-center space-y-2">
-                      <div className="relative">
-                        <img
-                          src={customBannerUrl}
-                          alt="Prévisualisation d'affiche"
-                          className="h-20 w-32 object-cover rounded-xl border border-emerald-200 shadow-sm"
-                        />
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setCustomBannerUrl("");
-                          }}
-                          className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-gray-200 bg-white text-red-500 shadow-md transition-colors hover:border-red-600 hover:bg-red-600 hover:text-white"
-                          title="Effacer la photo"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                      <p className="flex items-center gap-1 text-[11px] font-black text-emerald-800">
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        <span>Photo importée avec succès !</span>
-                      </p>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="rounded-full bg-orange-50 p-3 text-orange-600">
-                        <Upload className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <p className="text-xs font-black text-gray-800">
-                          Glissez-déposez votre affiche ici, ou <span className="text-orange-600 underline">parcourez vos fichiers</span>
-                        </p>
-                        <p className="text-[9px] text-gray-400 mt-1 uppercase font-bold">PNG, JPG, WEBP jusqu'à 4 Mo maximum</p>
-                      </div>
-                    </>
-                  )}
-                </div>
+                <BannerUploadZone
+                  value={customBannerUrl}
+                  onChange={(dataUrl) => {
+                    setCustomBannerUrl(dataUrl);
+                    setSelectedBanner("");
+                  }}
+                  onError={setFormError}
+                  inputId="banner-file-input"
+                />
 
                 <div className="relative flex py-2 items-center">
                   <div className="flex-grow border-t border-gray-100"></div>
@@ -1895,7 +1795,24 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                 </div>
 
                 <div className="sm:col-span-2 space-y-2">
-                  <label className="text-xs font-bold text-gray-700">Modèle de Bannière ou URL</label>
+                  <label className="text-xs font-bold text-gray-700">Affiche de l'événement</label>
+
+                  <BannerUploadZone
+                    value={editCustomBannerUrl}
+                    onChange={(dataUrl) => {
+                      setEditCustomBannerUrl(dataUrl);
+                      setEditSelectedBanner("");
+                    }}
+                    onError={setEditError}
+                    inputId="edit-banner-file-input"
+                  />
+
+                  <div className="relative flex py-1 items-center">
+                    <div className="flex-grow border-t border-gray-100"></div>
+                    <span className="flex-shrink mx-3 text-[9px] text-gray-400 font-black uppercase">Ou choisir un visuel</span>
+                    <div className="flex-grow border-t border-gray-100"></div>
+                  </div>
+
                   <div className="grid grid-cols-5 gap-2">
                     {BANNER_TEMPLATES.map((tmpl, index) => (
                       <img
@@ -1919,7 +1836,10 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                   <input
                     type="url"
                     placeholder="Ou lien URL vers image personnalisée..."
-                    value={editCustomBannerUrl}
+                    /* Une affiche importée est une data:image/... de plusieurs dizaines de
+                       milliers de caractères : l'afficher ici remplissait le champ de base64
+                       illisible. La zone d'import ci-dessus en montre l'aperçu. */
+                    value={editCustomBannerUrl.startsWith("data:image") ? "" : editCustomBannerUrl}
                     onChange={(e) => {
                       setEditCustomBannerUrl(e.target.value);
                       setEditSelectedBanner("");
