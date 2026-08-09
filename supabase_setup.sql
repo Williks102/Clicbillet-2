@@ -774,3 +774,42 @@ $$;
 
 REVOKE ALL ON FUNCTION public.ticket_report_stats(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.ticket_report_stats(TEXT) TO service_role;
+
+-- ==========================================
+-- 23. FILE D'ATTENTE DES E-MAILS SORTANTS
+-- ==========================================
+-- Les e-mails partaient en « meilleur effort » : un échec d'envoi n'était que journalisé, et
+-- le message perdu. Sur le message le plus sensible du parcours — celui qui porte le QR code
+-- d'un billet payé — cela signifie un client qui a payé et ne reçoit rien, sans que personne
+-- ne s'en aperçoive avant sa réclamation.
+--
+-- Le débit y contribue : Resend accepte 10 requêtes par seconde et par équipe. Une mise en
+-- vente qui écoule cent billets en quelques minutes dépasse ce seuil, et les envois refusés
+-- l'étaient définitivement.
+--
+-- Cette table est donc un filet : tout envoi qui échoue y atterrit, et une route de
+-- maintenance la vide par lots (l'API Resend accepte 100 messages par appel), avec un délai
+-- de réessai croissant. Un e-mail n'est plus perdu, il est retardé — et ce qui a
+-- définitivement échoué reste visible en base au lieu de disparaître dans les journaux.
+CREATE TABLE IF NOT EXISTS public.email_outbox (
+    id TEXT PRIMARY KEY,
+    recipient TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    html TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'sent' | 'failed'
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    sent_at TIMESTAMPTZ
+);
+
+-- Index de drainage : la route de maintenance ne cherche que les messages dus, les plus
+-- anciens d'abord. Sans lui, elle balaierait toute la table à chaque passage.
+CREATE INDEX IF NOT EXISTS idx_email_outbox_due
+    ON public.email_outbox (next_attempt_at)
+    WHERE status = 'pending';
+
+ALTER TABLE public.email_outbox ENABLE ROW LEVEL SECURITY;
+-- Aucune policy anon/authenticated : le contenu des messages (QR codes, liens de
+-- réinitialisation) ne doit être lisible que par le backend, via la clé service_role.
