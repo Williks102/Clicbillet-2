@@ -9,6 +9,7 @@ import { getDefaultCommissionRate, computeCommissionBreakdown, fetchRevenueAggre
 import { isPaidTicket } from "../lib/ticketPayment.js";
 import { findTicketsByReference, confirmPaymentForTickets } from "../lib/paymentConfirmation.js";
 import { decryptPayoutDetails } from "../lib/payoutEncryption.js";
+import { getCategories, slugifyCategory, inValiderCacheCategories } from "../lib/categories.js";
 
 const router = express.Router();
 
@@ -70,6 +71,7 @@ router.get("/api/admin/stats", async (req: express.Request, res: express.Respons
         price: Number(e.price),
         venue: e.venue,
         category: e.category,
+        categorySlug: e.category_slug,
         banner: e.banner,
         ticketsSold: e.tickets_sold ?? 0,
         totalTickets: e.total_tickets,
@@ -384,5 +386,125 @@ router.post("/api/admin/compress-banners", requireAuth, requireRole("admin"), as
   });
 });
 
-export default router;
 
+
+
+// ==========================================
+// RÉFÉRENTIEL DES CATÉGORIES (onglet Configuration)
+// ==========================================
+// Ajouter une catégorie demandait jusqu'ici de modifier deux fichiers du code et de
+// redéployer. C'est une décision éditoriale, pas un changement de logiciel : elle se prend
+// donc depuis l'interface d'administration.
+
+router.get("/api/admin/categories", requireAuth, requireRole("admin"), async (_req: express.Request, res: express.Response) => {
+  // `true` : les catégories désactivées comprises — c'est précisément l'écran où on les gère.
+  res.json(await getCategories(true));
+});
+
+router.post("/api/admin/categories", requireAuth, requireRole("admin"), async (req: express.Request, res: express.Response) => {
+  if (!isSupabaseEnabled || !supabase) {
+    return res.status(503).json({ error: "Référentiel indisponible sans base de données." });
+  }
+  const label = String(req.body?.label || "").trim();
+  if (label.length < 2 || label.length > 60) {
+    return res.status(400).json({ error: "Le nom de la catégorie doit faire entre 2 et 60 caractères." });
+  }
+
+  // La clé est DÉRIVÉE du libellé, jamais saisie : c'est ce qui garantit qu'elle reste
+  // normalisée, et donc comparable, quoi qu'on tape dans le champ.
+  const slug = slugifyCategory(label);
+  if (!slug) {
+    return res.status(400).json({ error: "Ce nom ne produit aucune clé exploitable. Utilisez au moins une lettre ou un chiffre." });
+  }
+
+  const { data: existante } = await supabase.from("categories").select("slug, label, active").eq("slug", slug).maybeSingle();
+  if (existante) {
+    // Une catégorie reprise d'une ancienne saisie libre est désactivée : la « recréer »
+    // revient à la réactiver, plutôt que de renvoyer une erreur incompréhensible sur une
+    // catégorie que l'administrateur ne voit pas dans sa liste active.
+    if (!existante.active) {
+      await supabase.from("categories").update({ label, active: true }).eq("slug", slug);
+      inValiderCacheCategories();
+      return res.status(200).json({ slug, label, reactivee: true });
+    }
+    return res.status(409).json({ error: `La catégorie « ${existante.label} » existe déjà.` });
+  }
+
+  const { data: derniere } = await supabase
+    .from("categories").select("sort_order").order("sort_order", { ascending: false }).limit(1).maybeSingle();
+
+  const { error } = await supabase.from("categories").insert({
+    slug,
+    label,
+    icon: String(req.body?.icon || "Tag"),
+    sort_order: (Number(derniere?.sort_order) || 0) + 10,
+    active: true
+  });
+  if (error) return res.status(500).json({ error: "Création impossible." });
+
+  inValiderCacheCategories();
+  res.status(201).json({ slug, label });
+});
+
+router.patch("/api/admin/categories/:slug", requireAuth, requireRole("admin"), async (req: express.Request, res: express.Response) => {
+  if (!isSupabaseEnabled || !supabase) {
+    return res.status(503).json({ error: "Référentiel indisponible sans base de données." });
+  }
+  const maj: Record<string, any> = {};
+
+  // Le libellé se renomme librement ; la CLÉ ne bouge pas. C'est tout l'intérêt de les avoir
+  // séparés : rebaptiser « Théâtre & Humour » en « Spectacles » ne touche aucun événement et
+  // ne casse aucun lien partagé.
+  if (typeof req.body?.label === "string") {
+    const label = req.body.label.trim();
+    if (label.length < 2 || label.length > 60) {
+      return res.status(400).json({ error: "Le nom de la catégorie doit faire entre 2 et 60 caractères." });
+    }
+    maj.label = label;
+  }
+  if (typeof req.body?.active === "boolean") maj.active = req.body.active;
+  if (typeof req.body?.icon === "string") maj.icon = req.body.icon;
+  if (Number.isFinite(Number(req.body?.sortOrder))) maj.sort_order = Number(req.body.sortOrder);
+
+  if (Object.keys(maj).length === 0) {
+    return res.status(400).json({ error: "Aucune modification fournie." });
+  }
+
+  const { error } = await supabase.from("categories").update(maj).eq("slug", req.params.slug);
+  if (error) return res.status(500).json({ error: "Modification impossible." });
+
+  inValiderCacheCategories();
+  res.json({ success: true });
+});
+
+router.delete("/api/admin/categories/:slug", requireAuth, requireRole("admin"), async (req: express.Request, res: express.Response) => {
+  if (!isSupabaseEnabled || !supabase) {
+    return res.status(503).json({ error: "Référentiel indisponible sans base de données." });
+  }
+  const slug = req.params.slug;
+
+  // Une catégorie portée par des événements n'est jamais supprimée : elle est DÉSACTIVÉE.
+  // La supprimer laisserait ces événements sans catégorie valide — la contrainte d'intégrité
+  // le refuserait de toute façon, mais avec un message que personne ne peut interpréter.
+  const { count } = await supabase
+    .from("events").select("id", { count: "exact", head: true }).eq("category_slug", slug);
+
+  if ((count || 0) > 0) {
+    const { error } = await supabase.from("categories").update({ active: false }).eq("slug", slug);
+    if (error) return res.status(500).json({ error: "Désactivation impossible." });
+    inValiderCacheCategories();
+    return res.json({
+      success: true,
+      desactivee: true,
+      evenements: count,
+      message: `${count} événement(s) utilisent cette catégorie : elle a été retirée des listes sans être supprimée, pour ne pas les laisser sans catégorie.`
+    });
+  }
+
+  const { error } = await supabase.from("categories").delete().eq("slug", slug);
+  if (error) return res.status(500).json({ error: "Suppression impossible." });
+  inValiderCacheCategories();
+  res.json({ success: true, desactivee: false });
+});
+
+export default router;

@@ -1,5 +1,5 @@
 -- ==========================================================================
--- ClicBillet — mise à jour de charge et de concurrence
+-- ClicBillet — mise à jour charge, concurrence et catégories
 -- ==========================================================================
 -- À COLLER EN ENTIER dans l'éditeur SQL de Supabase, puis "Run" SANS RIEN
 -- SÉLECTIONNER. Exécuter une sélection partielle coupe une ligne de commentaire
@@ -7,14 +7,16 @@
 -- (« syntax error at or near ... »).
 --
 -- Ce fichier est un extrait de supabase_setup.sql : les blocs ci-dessous y
--- figurent à l'identique. Il est rejouable — le relancer ne casse rien et
--- n'écrase aucun compteur de vente en cours.
+-- figurent à l'identique. Il est rejouable — le relancer ne casse rien,
+-- n'écrase aucun compteur de vente en cours et ne touche pas aux catégories
+-- déjà réglées depuis l'onglet Configuration.
 --
 -- Contenu :
 --   1. Salle d'attente : capacité réellement respectée sous affluence
 --   2. Limitation de débit à compteur partagé (section 24)
 --   3. Réservation de places atomique (section 25)
 --   4. Salle d'attente armée par la mesure, plus par l'organisateur (section 26)
+--   5. Référentiel des catégories (section 27)
 -- ==========================================================================
 
 
@@ -396,3 +398,115 @@ $$;
 
 REVOKE ALL ON FUNCTION public.waiting_room_gate(TEXT, TEXT, INTEGER) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.waiting_room_gate(TEXT, TEXT, INTEGER) TO service_role;
+
+-- ==========================================
+-- 27. CATÉGORIES : UN VRAI RÉFÉRENTIEL
+-- ==========================================
+-- Une catégorie n'était rien d'autre qu'un texte libre dans events.category, sans référentiel
+-- ni contrainte, et DEUX listes codées en dur devaient s'accorder sans rien pour les y forcer :
+-- celle du formulaire organisateur et celle des filtres de la page d'accueil. Elles avaient
+-- déjà divergé — "Professionnel" était proposé à la création mais n'avait aucune puce de
+-- filtre, si bien qu'une conférence n'était trouvable que sous "Tous".
+--
+-- Le filtre comparait par ailleurs les libellés par ÉGALITÉ STRICTE : une majuscule, un accent
+-- ou une espace de différence et la catégorie devenait silencieusement introuvable, alors même
+-- que l'API acceptait n'importe quel texte de moins de 100 caractères.
+--
+-- Le référentiel vit donc en base, avec une clé stable (le "slug", normalisé) distincte du
+-- libellé affiché. Renommer "Théâtre & Humour" en "Spectacles" devient un changement
+-- d'affichage qui ne casse aucun filtre et ne touche à aucun événement.
+
+-- Normalise un libellé en clé stable : minuscules, sans accent, séparateurs réduits à un
+-- tiret. "Théâtre & Humour" et "theatre et humour" donnent la même clé.
+CREATE OR REPLACE FUNCTION public.slugify_category(p_text TEXT)
+RETURNS TEXT
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT trim(both '-' from regexp_replace(
+    lower(translate(COALESCE(p_text, ''),
+      'àâäáãåçéèêëíìîïñóòôöõúùûüýÿÀÂÄÁÃÅÇÉÈÊËÍÌÎÏÑÓÒÔÖÕÚÙÛÜÝ',
+      'aaaaaaceeeeiiiinooooouuuuyyaaaaaaceeeeiiiinooooouuuuy')),
+    '[^a-z0-9]+', '-', 'g'));
+$$;
+
+CREATE TABLE IF NOT EXISTS public.categories (
+    slug TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    -- Nom d'icône lucide-react, résolu côté frontend par une table de correspondance
+    -- explicite : une icône inconnue retombe sur une icône neutre plutôt que de faire
+    -- planter le rendu.
+    icon TEXT NOT NULL DEFAULT 'Tag',
+    sort_order INTEGER NOT NULL DEFAULT 100,
+    -- Une catégorie désactivée n'est plus proposée à la création ni affichée en filtre, mais
+    -- les événements qui la portent restent parfaitement visibles. C'est ce qui permet de
+    -- retirer une catégorie sans toucher à l'historique.
+    active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO public.categories (slug, label, icon, sort_order) VALUES
+  ('concert',        'Concert',           'Music',       10),
+  ('festivals',      'Festivals',         'PartyPopper', 20),
+  ('theatre-humour', 'Théâtre & Humour',  'Drama',       30),
+  ('sport',          'Sport',             'Trophy',      40),
+  ('professionnel',  'Professionnel',     'Briefcase',   50)
+ON CONFLICT (slug) DO NOTHING;
+
+ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
+
+-- Lecture publique : le catalogue est lu directement depuis le navigateur avec la clé anon
+-- (cf. section 15), et les filtres ont besoin de cette liste. Rien de sensible ici — ce sont
+-- les mêmes libellés que ceux affichés sur la page d'accueil. L'écriture reste réservée au
+-- backend (service_role), qui contourne RLS par conception.
+DROP POLICY IF EXISTS "Public read access to active categories" ON public.categories;
+CREATE POLICY "Public read access to active categories"
+  ON public.categories FOR SELECT
+  USING (active = true);
+
+-- Clé portée par l'événement, à côté du libellé historique qui reste la valeur d'affichage.
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS category_slug TEXT;
+
+UPDATE public.events SET category_slug = public.slugify_category(category)
+ WHERE category_slug IS NULL;
+
+-- Toute catégorie libre déjà présente en base devient une vraie catégorie, mais DÉSACTIVÉE :
+-- les événements concernés restent visibles et cohérents, sans pour autant faire apparaître
+-- sur la page d'accueil une puce issue d'une saisie approximative. À l'administrateur de
+-- l'activer si elle mérite d'exister.
+INSERT INTO public.categories (slug, label, icon, sort_order, active)
+SELECT s, max(lbl), 'Tag', 900, false
+  FROM (SELECT public.slugify_category(category) AS s, category AS lbl FROM public.events) x
+ WHERE s <> ''
+ GROUP BY s
+ON CONFLICT (slug) DO NOTHING;
+
+-- L'intégrité référentielle est posée APRÈS le rattrapage ci-dessus, donc sans rien rejeter
+-- de l'existant. ON UPDATE CASCADE : renommer une clé suit les événements.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'events_category_slug_fkey') THEN
+    ALTER TABLE public.events
+      ADD CONSTRAINT events_category_slug_fkey
+      FOREIGN KEY (category_slug) REFERENCES public.categories(slug) ON UPDATE CASCADE;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_events_category_slug ON public.events (category_slug);
+
+-- La vue publique doit exposer la clé, sans quoi le filtrage du catalogue lu directement
+-- depuis le navigateur retomberait sur la comparaison de libellés qu'on remplace ici.
+--
+-- Corrige au passage une omission : la vue exposait encore waiting_room_enabled/capacity,
+-- colonnes remplacées par scheduled_onsale (section 26). Le catalogue lu en direct recevait
+-- donc un scheduled_onsale toujours vide, et l'avertissement de file d'attente ne s'affichait
+-- jamais sur une mise en vente programmée.
+DROP VIEW IF EXISTS public.events_public;
+
+CREATE VIEW public.events_public
+WITH (security_invoker = true) AS
+SELECT
+  id, title, description, date, time, end_date, end_time, price, ticket_types, venue,
+  category, category_slug, banner, tickets_sold, total_tickets, organizer_id, organizer_name,
+  status, created_at, scheduled_onsale
+FROM public.events;
+
+GRANT SELECT ON public.events_public TO anon, authenticated;

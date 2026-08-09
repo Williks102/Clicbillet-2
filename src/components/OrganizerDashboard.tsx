@@ -5,6 +5,7 @@ import { authFetch } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
 import { isEventPast, EVENT_SCAN_GRACE_HOURS, EVENT_DEFAULT_DURATION_HOURS } from "../lib/eventStatus";
 import { BannerUploadZone } from "./BannerUploadZone";
+import { fetchCategories, cleDeLEvenement, type Category } from "../lib/categories";
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
 import { isPaidTicket } from "../lib/ticketPayment";
@@ -41,7 +42,6 @@ const ORGANIZER_SUB_TAB_ICONS: Record<OrganizerSubTab, React.ReactNode> = {
   invoices: <ListCollapse className="h-4 w-4" />
 };
 
-const CATEGORIES = ["Concert", "Festivals", "Théâtre & Humour", "Sport"];
 
 // Curated banner collections for easy selection
 const BANNER_TEMPLATES = [
@@ -167,9 +167,18 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [price, setPrice] = useState("");
   const [ticketTypes, setTicketTypes] = useState<{name: string; price: string; total: string}[]>([{ name: 'Standard', price: '', total: '' }]);
   const [venue, setVenue] = useState("");
-  const [category, setCategory] = useState("Concert");
+  const [category, setCategory] = useState("concert");
   const [totalTickets, setTotalTickets] = useState("");
   const [scheduledOnsale, setScheduledOnsale] = useState(false);
+  // Même référentiel que les filtres du catalogue : une catégorie proposée ici a forcément
+  // sa puce sur l'accueil, ce qui n'était pas garanti tant que les deux listes étaient
+  // codées en dur séparément.
+  const [categories, setCategories] = useState<Category[]>([]);
+  useEffect(() => {
+    let annule = false;
+    fetchCategories().then((liste) => { if (!annule) setCategories(liste); });
+    return () => { annule = true; };
+  }, []);
   const [selectedBanner, setSelectedBanner] = useState(BANNER_TEMPLATES[0].url);
   const [customBannerUrl, setCustomBannerUrl] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
@@ -187,7 +196,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [editPrice, setEditPrice] = useState("");
   const [editTicketTypes, setEditTicketTypes] = useState<{name: string; price: string; total: string}[]>([]);
   const [editVenue, setEditVenue] = useState("");
-  const [editCategory, setEditCategory] = useState("Concert");
+  const [editCategory, setEditCategory] = useState("concert");
   const [editTotalTickets, setEditTotalTickets] = useState("");
   const [editScheduledOnsale, setEditScheduledOnsale] = useState(false);
   const [editSelectedBanner, setEditSelectedBanner] = useState("");
@@ -349,7 +358,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     setEditEndTime(evt.endTime || "");
     setEditPrice(String(evt.price));
     setEditVenue(evt.venue);
-    setEditCategory(evt.category);
+    setEditCategory(cleDeLEvenement(evt));
     setEditTotalTickets(String(evt.totalTickets));
     setEditTicketTypes((evt.ticketTypes || []).map(t => ({ name: t.name, price: String(t.price), total: String(t.total || '') })));
     setEditScheduledOnsale(Boolean(evt.scheduledOnsale));
@@ -1219,10 +1228,9 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                 onChange={(e) => setCategory(e.target.value)}
                 className="w-full rounded-xl border border-gray-200 bg-white py-3 px-4 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 text-gray-700"
               >
-                {CATEGORIES.map((cat) => (
-                  <option key={cat} value={cat}>{cat}</option>
+                {categories.map((cat) => (
+                  <option key={cat.slug} value={cat.slug}>{cat.label}</option>
                 ))}
-                <option value="Professionnel">Professionnel</option>
               </select>
             </div>
 
@@ -1762,10 +1770,9 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                     onChange={(e) => setEditCategory(e.target.value)}
                     className="w-full rounded-xl border border-gray-200 bg-white py-2.5 px-4 text-xs outline-none text-gray-700"
                   >
-                    {CATEGORIES.map((cat) => (
-                      <option key={cat} value={cat}>{cat}</option>
+                    {categories.map((cat) => (
+                      <option key={cat.slug} value={cat.slug}>{cat.label}</option>
                     ))}
-                    <option value="Professionnel">Professionnel</option>
                   </select>
                 </div>
 

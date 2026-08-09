@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { User, Event, Ticket, OrganizerRequest } from "../types";
+import CategorySettings from "./admin/CategorySettings";
 import {
   Building2, Users, Calendar, DollarSign, Trash2, ShieldCheck,
   Search, ShieldAlert, Sparkles, Ticket as TicketIcon, TrendingUp, Filter, Percent,
-  Image as ImageIcon, RefreshCw, Store, ArrowUpCircle, ArrowDownCircle, BarChart3
+  Image as ImageIcon, RefreshCw, Store, ArrowUpCircle, ArrowDownCircle, BarChart3, Settings
 } from "lucide-react";
 import { authFetch } from "../lib/apiClient";
 import { isEventPast } from "../lib/eventStatus";
@@ -31,9 +32,9 @@ interface AdminStats {
   tickets: Ticket[];
 }
 
-type AdminSubTab = "overview" | "reports" | "events" | "users" | "organizer-requests" | "tickets" | "payouts" | "transactions";
+type AdminSubTab = "overview" | "reports" | "events" | "users" | "organizer-requests" | "tickets" | "payouts" | "transactions" | "configuration";
 
-const ADMIN_SUB_TABS: AdminSubTab[] = ["overview", "reports", "events", "users", "organizer-requests", "tickets", "payouts", "transactions"];
+const ADMIN_SUB_TABS: AdminSubTab[] = ["overview", "reports", "events", "users", "organizer-requests", "tickets", "payouts", "transactions", "configuration"];
 
 const ADMIN_SUB_TAB_LABELS: Record<AdminSubTab, string> = {
   overview: "Tableau de Bord",
@@ -43,7 +44,8 @@ const ADMIN_SUB_TAB_LABELS: Record<AdminSubTab, string> = {
   "organizer-requests": "Demandes Organisateur",
   tickets: "Billets Vendus",
   payouts: "Demandes de Retrait",
-  transactions: "Log Transactions"
+  transactions: "Log Transactions",
+  configuration: "Configuration"
 };
 
 const ADMIN_SUB_TAB_ICONS: Record<AdminSubTab, React.ReactNode> = {
@@ -54,7 +56,8 @@ const ADMIN_SUB_TAB_ICONS: Record<AdminSubTab, React.ReactNode> = {
   "organizer-requests": <Store className="h-4 w-4" />,
   tickets: <TicketIcon className="h-4 w-4" />,
   payouts: <DollarSign className="h-4 w-4" />,
-  transactions: <TrendingUp className="h-4 w-4" />
+  transactions: <TrendingUp className="h-4 w-4" />,
+  configuration: <Settings className="h-4 w-4" />
 };
 
 export default function AdminDashboard({ user }: AdminDashboardProps) {
@@ -1274,6 +1277,17 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         )}
 
         {/* TAB 6: LOGS TRANSACTIONS */}
+        {/* Onglet Configuration : réglages de la plateforme. Conçu par blocs pour que les
+            prochains (commission, seuils de salle d'attente, etc.) s'y ajoutent sans
+            réorganiser l'écran. */}
+        {activeSubTab === "configuration" && (
+          <div className="space-y-6">
+            <div className="bg-white border border-gray-100 rounded-2xl p-5">
+              <CategorySettings />
+            </div>
+          </div>
+        )}
+
         {activeSubTab === "transactions" && (
           <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
             <h4 className="text-sm font-black text-gray-950 border-b border-gray-50 pb-4">

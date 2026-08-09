@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Search, Tag, LayoutGrid, Music, PartyPopper, Drama, Trophy } from "lucide-react";
+import { Search, Tag } from "lucide-react";
 import { Event } from "../types";
+import { fetchCategories, iconeDeCategorie, cleDeLEvenement, TOUTES_CATEGORIES, type Category } from "../lib/categories";
 import { isEventPast } from "../lib/eventStatus";
 import EventCard from "./EventCard";
 import Reveal from "./Reveal";
@@ -12,17 +13,24 @@ interface LandingPageProps {
   onViewOrganizer?: (alias: string) => void;
 }
 
-const CATEGORIES = [
-  { label: "Tous", icon: LayoutGrid },
-  { label: "Concert", icon: Music },
-  { label: "Festivals", icon: PartyPopper },
-  { label: "Théâtre & Humour", icon: Drama },
-  { label: "Sport", icon: Trophy }
-];
-
 export default function LandingPage({ events, onViewEvent, userRole, onViewOrganizer }: LandingPageProps) {
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("Tous");
+  const [selectedCategory, setSelectedCategory] = useState(TOUTES_CATEGORIES);
+  const [categories, setCategories] = useState<Category[]>([]);
+
+  // Le référentiel est chargé une fois puis mis en cache par le module : les puces
+  // proviennent de la même source que la liste déroulante du formulaire organisateur.
+  useEffect(() => {
+    let annule = false;
+    fetchCategories().then((liste) => { if (!annule) setCategories(liste); });
+    return () => { annule = true; };
+  }, []);
+
+  // "Tous" en tête, puis le référentiel dans son ordre d'affichage.
+  const puces = [
+    { slug: TOUTES_CATEGORIES, label: "Tous", icon: "LayoutGrid" },
+    ...categories
+  ];
   const categoriesScrollRef = useRef<HTMLDivElement>(null);
   const [autoScrollPaused, setAutoScrollPaused] = useState(false);
 
@@ -60,8 +68,10 @@ export default function LandingPage({ events, onViewEvent, userRole, onViewOrgan
       evt.venue.toLowerCase().includes(searchTerm.toLowerCase()) ||
       evt.description.toLowerCase().includes(searchTerm.toLowerCase());
 
+    // Comparaison sur la CLÉ, jamais sur le libellé : une différence de casse ou d'accent
+    // faisait auparavant disparaître silencieusement l'événement du filtre.
     const matchesCategory =
-      selectedCategory === "Tous" || evt.category === selectedCategory;
+      selectedCategory === TOUTES_CATEGORIES || cleDeLEvenement(evt) === selectedCategory;
 
     return matchesSearch && matchesCategory;
   });
@@ -95,13 +105,15 @@ export default function LandingPage({ events, onViewEvent, userRole, onViewOrgan
           id="categories-bar"
         >
           <div className="flex space-x-3">
-            {CATEGORIES.map(({ label, icon: Icon }) => (
+            {puces.map(({ slug, label, icon }) => {
+              const Icon = iconeDeCategorie(icon);
+              return (
               <button
-                key={label}
-                id={`category-btn-${label.toLowerCase().replace(/\s/g, "-")}`}
-                onClick={() => setSelectedCategory(label)}
+                key={slug}
+                id={`category-btn-${slug}`}
+                onClick={() => setSelectedCategory(slug)}
                 className={`flex w-24 shrink-0 flex-col items-center gap-2 rounded-2xl border p-4 text-center transition-all ${
-                  selectedCategory === label
+                  selectedCategory === slug
                     ? "border-orange-200 bg-orange-50 text-orange-600 shadow-sm"
                     : "border-gray-100 bg-white text-gray-700 hover:bg-gray-50"
                 }`}
@@ -109,7 +121,8 @@ export default function LandingPage({ events, onViewEvent, userRole, onViewOrgan
                 <Icon className="h-6 w-6" />
                 <span className="text-xs font-bold leading-tight">{label}</span>
               </button>
-            ))}
+              );
+            })}
           </div>
         </div>
       </section>

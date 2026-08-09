@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import express from "express";
+import { resoudreCategorie } from "./categories.js";
 
 const MIN_PASSWORD_LENGTH = 10;
 
@@ -114,7 +115,7 @@ export const validateResetPassword = async (req: express.Request, res: express.R
 };
 
 // Middleware de validation pour la création / modification d'événements
-export const validateEvent = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+export const validateEvent = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const { title, description, date, time, price, venue, category, banner, totalTickets, organizerId } = req.body;
   let { endDate, endTime } = req.body;
 
@@ -208,6 +209,21 @@ export const validateEvent = (req: express.Request, res: express.Response, next:
   if (banner && !banner.startsWith("http://") && !banner.startsWith("https://") && !banner.startsWith("data:image/")) {
     return res.status(400).json({ error: "L'URL de l'image de couverture est invalide (doit commencer par http://, https:// ou être une image uploadée)." });
   }
+
+  // La catégorie doit exister au référentiel (cf. server/lib/categories.ts). Auparavant
+  // n'importe quel texte de moins de 100 caractères passait : un "concert" en minuscules
+  // créait un événement introuvable sous la puce "Concert", sans erreur ni avertissement.
+  //
+  // La saisie est acceptée sous forme de clé ("concert") comme de libellé ("Concert") : le
+  // frontend envoie la clé, mais un appel d'API existant qui envoie encore le libellé
+  // continue de fonctionner.
+  const categorieResolue = await resoudreCategorie(String(category));
+  if (!categorieResolue) {
+    return res.status(400).json({ error: "Catégorie inconnue. Choisissez-en une dans la liste proposée." });
+  }
+  // L'aval ne manipule plus que des valeurs canoniques.
+  req.body.category = categorieResolue.label;
+  req.body.categorySlug = categorieResolue.slug;
 
   next();
 };

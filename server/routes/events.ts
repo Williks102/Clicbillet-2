@@ -4,6 +4,7 @@ import { isSupabaseEnabled, supabase, supabaseAdmin } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { requireAuth, requireRole } from "../lib/auth.js";
 import { validateEvent, validateContactMessage } from "../lib/validators.js";
+import { getCategories } from "../lib/categories.js";
 import { runInBackground } from "../lib/utils.js";
 import { sendOrganizerEventStatusEmail, sendAdminContactMessageEmail } from "../lib/email.js";
 import { getDefaultCommissionRate } from "../lib/commission.js";
@@ -21,9 +22,17 @@ router.post("/api/contact", contactRateLimiter, validateContactMessage, async (r
   res.json({ success: true });
 });
 
+// Référentiel des catégories : une seule source pour le formulaire organisateur ET les
+// filtres du catalogue, qui divergeaient tant qu'ils étaient codés en dur chacun de leur côté.
+// Mis en cache par le CDN — cette liste change au rythme des décisions éditoriales.
+router.get("/api/categories", async (_req: express.Request, res: express.Response) => {
+  res.set("Cache-Control", "public, max-age=300, stale-while-revalidate=3600");
+  res.json(await getCategories());
+});
+
 // API Endpoints: Event Fetching
 router.get("/api/events", async (req: express.Request, res: express.Response) => {
-  const { includePending } = req.query;
+  const { includePending, category } = req.query;
 
   // Catalogue public (sans includePending) : identique pour tout visiteur anonyme, peut
   // être mis en cache par le CDN Vercel quelques secondes pour absorber le trafic sans
@@ -40,6 +49,12 @@ router.get("/api/events", async (req: express.Request, res: express.Response) =>
       let query = supabase.from("events").select("*").order("created_at", { ascending: false });
       if (!includePending) {
         query = query.eq("status", "approved");
+      }
+      // Le paramètre ?category=<clé> était accepté puis ignoré : il filtre désormais
+      // réellement, en base. Le catalogue restant filtré côté navigateur pour la réactivité,
+      // ce filtre sert surtout aux appels directs à l'API et aux liens partagés.
+      if (category) {
+        query = query.eq("category_slug", String(category));
       }
       let { data, error } = await query;
 
@@ -101,6 +116,7 @@ router.get("/api/events", async (req: express.Request, res: express.Response) =>
         ticketTypes: e.ticket_types,
         venue: e.venue,
         category: e.category,
+        categorySlug: e.category_slug,
         banner: e.banner,
         ticketsSold: e.tickets_sold ?? 0,
         totalTickets: e.total_tickets,
@@ -237,6 +253,7 @@ router.get("/api/organizers/:alias", async (req: express.Request, res: express.R
           ticketTypes: e.ticket_types,
           venue: e.venue,
           category: e.category,
+          categorySlug: e.category_slug,
           banner: e.banner,
           ticketsSold: e.tickets_sold ?? 0,
           totalTickets: e.total_tickets,
@@ -310,6 +327,7 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
           ticket_types: ticketTypes,
           venue,
           category,
+          category_slug: req.body.categorySlug,
           banner: bannerUrl,
           tickets_sold: 0,
           total_tickets: Number(totalTickets),
@@ -324,7 +342,7 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
       // Repli pour les bases antérieures aux migrations : 'status' (section 5) ou
       // 'end_date'/'end_time' (section 20). On réinsère sans ces colonnes plutôt que
       // de renvoyer une 500 à l'organisateur.
-      if (error && (error.message.includes('status') || error.message.includes('end_date') || error.message.includes('end_time'))) {
+      if (error && (error.message.includes('status') || error.message.includes('end_date') || error.message.includes('end_time') || error.message.includes('category_slug'))) {
         const fallback = await supabase
           .from("events")
           .insert({
@@ -365,6 +383,7 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
         ticketTypes: data.ticket_types,
         venue: data.venue,
         category: data.category,
+        categorySlug: data.category_slug,
         banner: data.banner,
         ticketsSold: data.tickets_sold,
         totalTickets: data.total_tickets,
@@ -392,6 +411,7 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
     ticketTypes,
     venue,
     category,
+    categorySlug: req.body.categorySlug,
     banner: bannerUrl,
     ticketsSold: 0,
     totalTickets: Number(totalTickets),
@@ -434,7 +454,7 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
       }
 
       const bannerUrl = banner || originalEvent.banner;
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("events")
         .update({
           title,
@@ -447,6 +467,7 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
           ticket_types: ticketTypes,
           venue,
           category,
+          category_slug: req.body.categorySlug,
           banner: bannerUrl,
           total_tickets: Number(totalTickets),
           ...(scheduledOnsale !== undefined ? { scheduled_onsale: Boolean(scheduledOnsale) } : {})
@@ -454,6 +475,34 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
         .eq("id", id)
         .select()
         .single();
+
+      // Même prudence qu'à la création : sur une base où la section 27 n'a pas encore été
+      // jouée, on réécrit sans la clé de catégorie plutôt que de refuser la modification.
+      // Le libellé, lui, est déjà canonique — la validation s'en est chargée.
+      if (error && error.message.includes('category_slug')) {
+        const repli = await supabase
+          .from("events")
+          .update({
+            title,
+            description,
+            date,
+            time,
+            end_date: endDate || null,
+            end_time: endTime || null,
+            price: Number(price),
+            ticket_types: ticketTypes,
+            venue,
+            category,
+            banner: bannerUrl,
+            total_tickets: Number(totalTickets),
+            ...(scheduledOnsale !== undefined ? { scheduled_onsale: Boolean(scheduledOnsale) } : {})
+          })
+          .eq("id", id)
+          .select()
+          .single();
+        data = repli.data;
+        error = repli.error;
+      }
 
       if (error) throw error;
 
@@ -484,6 +533,7 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
         ticketTypes: data.ticket_types,
         venue: data.venue,
         category: data.category,
+        categorySlug: data.category_slug,
         banner: data.banner,
         ticketsSold: data.tickets_sold,
         totalTickets: data.total_tickets,
