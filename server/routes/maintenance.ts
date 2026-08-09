@@ -100,10 +100,12 @@ router.get("/api/cron/expire-pending-tickets", async (req: express.Request, res:
       console.log(`[Cron] Purge rétention : ${purgedTicketsCount || 0} billet(s) abandonné(s), ${purgedResetsCount || 0} jeton(s) de réinitialisation expiré(s).`);
     }
 
+    const purgedRateLimitWindows = await purgeRateLimitWindows();
     return res.json({
       expired: expiredCount,
       purgedAbandonedTickets: purgedTicketsCount || 0,
-      purgedExpiredResetTokens: purgedResetsCount || 0
+      purgedExpiredResetTokens: purgedResetsCount || 0,
+      purgedRateLimitWindows
     });
   }
 
@@ -157,6 +159,26 @@ router.get("/api/cron/expire-pending-tickets", async (req: express.Request, res:
     purgedExpiredResetTokens: purgedResetsCountLocal
   });
 });
+
+// Purge les fenêtres de limitation de débit périmées (cf. supabase_setup.sql section 24).
+//
+// Le comptage reste juste sans elle — une fenêtre expirée repart de zéro d'elle-même à la
+// première requête suivante. Elle ne sert qu'à borner la taille de la table, qui garderait
+// sinon une ligne par adresse IP et par route indéfiniment.
+async function purgeRateLimitWindows(): Promise<number> {
+  if (!isSupabaseEnabled || !supabase) return 0;
+  // Une journée de marge : bien au-delà de la plus longue fenêtre configurée (une heure).
+  const seuil = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { error, count } = await supabase
+    .from("rate_limit_hits")
+    .delete({ count: "exact" })
+    .lt("window_start", seuil);
+  if (error) {
+    console.warn("[RateLimit] Purge des fenêtres périmées impossible :", error.message);
+    return 0;
+  }
+  return count || 0;
+}
 
 // Vide la file des e-mails en attente (cf. supabase_setup.sql section 23).
 //

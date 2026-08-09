@@ -813,3 +813,71 @@ CREATE INDEX IF NOT EXISTS idx_email_outbox_due
 ALTER TABLE public.email_outbox ENABLE ROW LEVEL SECURITY;
 -- Aucune policy anon/authenticated : le contenu des messages (QR codes, liens de
 -- réinitialisation) ne doit être lisible que par le backend, via la clé service_role.
+
+-- ==========================================
+-- 24. LIMITATION DE DÉBIT À COMPTEUR PARTAGÉ
+-- ==========================================
+-- Les limiteurs express-rate-limit comptent en MÉMOIRE DU PROCESSUS. En serverless, chaque
+-- instance a la sienne : sous un pic, Vercel en lance des dizaines et une limite de 10
+-- tentatives de connexion par IP en devient 10 par instance. La protection s'évapore donc
+-- exactement au moment où elle sert — une attaque par force brute n'a qu'à ouvrir assez de
+-- connexions pour que chacune tombe sur une instance neuve.
+--
+-- Le compteur vit donc en base, partagé par toutes les instances. Fenêtre fixe plutôt que
+-- glissante : c'est la sémantique qu'appliquait déjà express-rate-limit, et elle tient en une
+-- seule instruction atomique — donc sans verrou ni transaction explicite, quel que soit le
+-- nombre de requêtes simultanées.
+CREATE TABLE IF NOT EXISTS public.rate_limit_hits (
+    bucket_key TEXT PRIMARY KEY,
+    hits INTEGER NOT NULL DEFAULT 0,
+    window_start TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Purge des fenêtres périmées (cf. /api/cron/expire-pending-tickets) : sans elle, la table
+-- garderait une ligne par IP et par route indéfiniment.
+CREATE INDEX IF NOT EXISTS idx_rate_limit_window ON public.rate_limit_hits (window_start);
+
+ALTER TABLE public.rate_limit_hits ENABLE ROW LEVEL SECURITY;
+-- Aucune policy anon/authenticated : le comptage passe exclusivement par le backend.
+
+-- Incrémente et tranche en UN SEUL aller-retour. L'INSERT ... ON CONFLICT est atomique : deux
+-- requêtes simultanées sur la même clé ne peuvent pas lire la même valeur puis l'écraser,
+-- contrairement à un SELECT suivi d'un UPDATE. C'est ce qui permet de se passer de verrou.
+--
+-- La fenêtre repart de zéro dès qu'elle est expirée, dans la même instruction : pas besoin
+-- d'une tâche de nettoyage pour que le comptage soit juste (la purge ne sert qu'à borner la
+-- taille de la table).
+CREATE OR REPLACE FUNCTION public.rate_limit_check(
+  p_key TEXT,
+  p_max INTEGER,
+  p_window_seconds INTEGER
+)
+RETURNS TABLE (allowed BOOLEAN, hits INTEGER, reset_at TIMESTAMPTZ)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_hits INTEGER;
+  v_start TIMESTAMPTZ;
+BEGIN
+  INSERT INTO public.rate_limit_hits AS r (bucket_key, hits, window_start)
+  VALUES (p_key, 1, now())
+  ON CONFLICT (bucket_key) DO UPDATE
+    SET hits = CASE
+                 WHEN r.window_start + (p_window_seconds || ' seconds')::interval <= now() THEN 1
+                 ELSE r.hits + 1
+               END,
+        window_start = CASE
+                 WHEN r.window_start + (p_window_seconds || ' seconds')::interval <= now() THEN now()
+                 ELSE r.window_start
+               END
+  RETURNING r.hits, r.window_start INTO v_hits, v_start;
+
+  RETURN QUERY SELECT
+    v_hits <= p_max,
+    v_hits,
+    v_start + (p_window_seconds || ' seconds')::interval;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.rate_limit_check(TEXT, INTEGER, INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.rate_limit_check(TEXT, INTEGER, INTEGER) TO service_role;
