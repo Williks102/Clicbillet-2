@@ -157,62 +157,50 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
         }
       }
 
-      const ticketsSold = Number(event.tickets_sold || 0);
-      const totalTickets = Number(event.total_tickets || 0);
-
-      // Réservation atomique de la capacité globale : le UPDATE ne s'applique que si la
-      // capacité est encore suffisante AU MOMENT de l'écriture (condition dans le WHERE,
-      // évaluée par Postgres sur la même ligne que l'incrément). Deux requêtes concurrentes
-      // sur le même événement ne peuvent plus toutes les deux passer un contrôle basé sur une
-      // lecture initiale devenue périmée — contrairement à un simple update({tickets_sold: x})
-      // après un select séparé, qui perdrait silencieusement l'une des deux incrémentations.
-      const { data: reservedEvent, error: reserveError } = await supabase
-        .from("events")
-        .update({ tickets_sold: ticketsSold + totalQuantity })
-        .eq("id", eventId)
-        .lte("tickets_sold", totalTickets - totalQuantity)
-        .select("tickets_sold")
-        .maybeSingle();
-
+      // Réservation du stock : un seul aller-retour, décidé ENTIÈREMENT en base
+      // (cf. supabase_setup.sql section 25). La capacité globale ET les plafonds par
+      // catégorie sont vérifiés puis avancés sous le verrou de la ligne de l'événement,
+      // dans la même transaction.
+      //
+      // La séquence précédente — lire tickets_sold, puis écrire "valeur lue + quantité" —
+      // paraissait atomique grâce à sa condition WHERE, mais la valeur ÉCRITE provenait
+      // d'une lecture périmée : chaque acheteur simultané effaçait le compte des autres.
+      // Une campagne de charge sur le schéma réel l'a mesuré : 200 acheteurs simultanés sur
+      // 100 places obtenaient 200 billets, compteur affiché à 1. C'est le scénario même
+      // d'une mise en vente très demandée — exactement quand il ne faut pas survendre.
+      const { data: reservation, error: reserveError } = await supabase.rpc("reserve_tickets", {
+        p_event_id: eventId,
+        p_qty: totalQuantity,
+        p_items: items.map((it: any) => ({ tier: it.tier, quantity: it.quantity }))
+      });
       if (reserveError) throw reserveError;
-      if (!reservedEvent) {
+
+      const verdict = Array.isArray(reservation) ? reservation[0] : reservation;
+      if (!verdict?.ok) {
+        if (verdict?.reason === "palier") {
+          return res.status(400).json({ error: `Il n'y a plus assez de places disponibles pour la catégorie "${verdict.tier_label}".` });
+        }
+        if (verdict?.reason === "introuvable") {
+          return res.status(404).json({ error: "Événement introuvable." });
+        }
         return res.status(409).json({ error: "Désolé, il n'y a plus assez de places disponibles." });
       }
 
+      // Rend les places retenues si la suite échoue : décrément relatif côté base, pour ne
+      // pas écraser les ventes conclues entre-temps.
+      const rendreLesPlaces = async () => {
+        try {
+          await supabase.rpc("release_tickets", {
+            p_event_id: eventId,
+            p_qty: totalQuantity,
+            p_items: items.map((it: any) => ({ tier: it.tier, quantity: it.quantity }))
+          });
+        } catch (e: any) {
+          console.error(`[Checkout] Places non rendues pour ${eventId} :`, e?.message);
+        }
+      };
+
       const ticketTypes = event.ticket_types || [];
-
-      // Contrôle par palier (tier) : une seule requête groupée au lieu d'une requête par
-      // palier commandé (évite le N+1). Reste du "best effort" (pas atomique comme la
-      // réservation globale ci-dessus, faute d'un compteur par palier en base) : en cas de
-      // dépassement détecté ici, on annule la réservation globale déjà posée juste au-dessus.
-      const tierDefsByName: Record<string, any> = {};
-      for (const item of items) {
-        const tierDef = ticketTypes.find((t: any) => typeof t.name === "string" && t.name.toLowerCase() === item.tier);
-        if (tierDef && Number(tierDef.total) > 0) tierDefsByName[item.tier] = tierDef;
-      }
-      if (Object.keys(tierDefsByName).length > 0) {
-        const { data: tierRows } = await supabase
-          .from("tickets")
-          .select("tier")
-          .eq("event_id", eventId)
-          .in("tier", Object.keys(tierDefsByName))
-          .not("transaction_ref", "like", "PENDING-%")
-          .not("transaction_ref", "like", "FAILED-%");
-
-        const soldByTier: Record<string, number> = {};
-        for (const row of tierRows || []) {
-          soldByTier[row.tier] = (soldByTier[row.tier] || 0) + 1;
-        }
-
-        for (const item of items) {
-          const tierDef = tierDefsByName[item.tier];
-          if (tierDef && (soldByTier[item.tier] || 0) + item.quantity > Number(tierDef.total)) {
-            // Rembourse la réservation globale posée plus haut avant de rejeter la commande.
-            await supabase.from("events").update({ tickets_sold: ticketsSold }).eq("id", eventId);
-            return res.status(400).json({ error: `Il n'y a plus assez de places disponibles pour la catégorie "${tierDef.name}".` });
-          }
-        }
-      }
       let totalPrice = 0;
       // Une ligne "tickets" = un QR code = une personne : on crée item.quantity lignes par
       // type de billet (pas une seule ligne avec quantity=N), sinon un seul scan à l'entrée
@@ -279,7 +267,7 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
         .select();
 
       if (tktError) {
-        await supabase.from("events").update({ tickets_sold: ticketsSold }).eq("id", eventId);
+        await rendreLesPlaces();
         throw tktError;
       }
 

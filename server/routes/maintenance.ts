@@ -48,15 +48,28 @@ router.get("/api/cron/expire-pending-tickets", async (req: express.Request, res:
     if (staleTickets && staleTickets.length > 0) {
       // Une décrémentation par événement (pas par billet) pour limiter les allers-retours,
       // sur le même modèle que l'incrémentation faite à la création de la commande.
-      const qtyByEvent: Record<string, number> = {};
+      // Le détail par catégorie est nécessaire : les plafonds par palier ont eux aussi leur
+      // compteur, qu'il faut créditer en même temps que la capacité globale.
+      const qtyByEvent: Record<string, { total: number; tiers: Record<string, number> }> = {};
       for (const t of staleTickets) {
-        qtyByEvent[t.event_id] = (qtyByEvent[t.event_id] || 0) + Number(t.quantity || 1);
+        const q = Number(t.quantity || 1);
+        const e = (qtyByEvent[t.event_id] ||= { total: 0, tiers: {} });
+        e.total += q;
+        const tier = String(t.tier || "").toLowerCase();
+        if (tier) e.tiers[tier] = (e.tiers[tier] || 0) + q;
       }
-      for (const [eventId, qty] of Object.entries(qtyByEvent)) {
-        const { data: event } = await supabase.from("events").select("tickets_sold").eq("id", eventId).maybeSingle();
-        if (event) {
-          const newCount = Math.max(0, Number(event.tickets_sold || 0) - qty);
-          await supabase.from("events").update({ tickets_sold: newCount }).eq("id", eventId);
+      for (const [eventId, { total, tiers }] of Object.entries(qtyByEvent)) {
+        // Décrément relatif côté base (cf. supabase_setup.sql section 25). Le lire-puis-
+        // réécrire d'avant effaçait les ventes conclues pendant le passage du cron : une
+        // place vendue entre la lecture et l'écriture disparaissait du compte, et l'événement
+        // se retrouvait à survendre d'autant.
+        const { error: releaseError } = await supabase.rpc("release_tickets", {
+          p_event_id: eventId,
+          p_qty: total,
+          p_items: Object.entries(tiers).map(([tier, quantity]) => ({ tier, quantity }))
+        });
+        if (releaseError) {
+          console.error(`[Cron] Places non rendues pour ${eventId} :`, releaseError.message);
         }
       }
 
