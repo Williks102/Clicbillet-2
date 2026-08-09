@@ -273,9 +273,10 @@ export default function EventPage({ event, loading, onBack, onBuyTicket, onViewO
             </div>
           </div>
 
-          {/* Prévenir de la file d'attente AVANT le clic : sans ça, l'acheteur choisit ses
-              billets puis découvre qu'il doit patienter, sans que son stock soit réservé. */}
-          {event.waitingRoomEnabled && !past && !soldOut && (
+          {/* Prévenir de la file AVANT le clic. Seule une mise en vente programmée est
+              annonçable à l'avance : une file armée par l'affluence dépend de l'instant, et
+              l'annoncer à tort découragerait des acheteurs sur un événement fluide. */}
+          {event.scheduledOnsale && !past && !soldOut && (
             <div className="mt-4 flex items-start gap-2.5 rounded-2xl border border-amber-100 bg-amber-50 p-3.5">
               <Hourglass className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
               <p className="text-[11px] leading-relaxed text-amber-800">

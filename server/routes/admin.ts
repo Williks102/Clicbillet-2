@@ -76,8 +76,7 @@ router.get("/api/admin/stats", async (req: express.Request, res: express.Respons
         organizerId: e.organizer_id,
         organizerName: e.organizer_name,
         status: e.status || "approved",
-        waitingRoomEnabled: e.waiting_room_enabled,
-        waitingRoomCapacity: e.waiting_room_capacity,
+        scheduledOnsale: e.scheduled_onsale,
         commissionRate: e.commission_rate != null ? Number(e.commission_rate) : null
       }));
       const mappedTickets = matchedTickets.map(t => ({

@@ -401,13 +401,12 @@ export default function App() {
     setActiveTab("home");
   }
 
-  // Route vers la salle d'attente si l'événement est en forte affluence, sinon checkout direct.
+  // Passe systématiquement par le portillon de la salle d'attente. Ce n'est plus un drapeau
+  // porté par l'événement : la file s'arme sur l'affluence mesurée à l'instant présent, donc
+  // seul le serveur peut trancher. Hors affluence il répond immédiatement "accès autorisé" et
+  // le composant enchaîne sur le paiement sans jamais s'afficher.
   function openCheckoutFlow(event: Event) {
-    if (event.waitingRoomEnabled) {
-      setWaitingRoomEvent(event);
-    } else {
-      setCheckoutEvent(event);
-    }
+    setWaitingRoomEvent(event);
   }
 
   function handleBuyTicketTrigger(event: Event, quantities: Record<string, number> = {}) {

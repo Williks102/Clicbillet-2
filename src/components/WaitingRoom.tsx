@@ -22,6 +22,11 @@ export default function WaitingRoom({ event, onGranted, onCancel }: WaitingRoomP
   const [estimatedActiveAt, setEstimatedActiveAt] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Tant que le serveur n'a pas tranché, on n'affiche RIEN. Ce composant est monté pour
+  // chaque achat désormais (lui seul sait si la file est armée à cet instant) : afficher
+  // l'écran d'attente par défaut ferait clignoter « forte affluence » devant tous les
+  // acheteurs d'un événement parfaitement fluide.
+  const [decide, setDecide] = useState(false);
   const grantedRef = useRef(false);
 
   // Compte à rebours local entre deux polls, dérivé de l'estimation renvoyée par le serveur.
@@ -62,11 +67,12 @@ export default function WaitingRoom({ event, onGranted, onCancel }: WaitingRoomP
         if (cancelled) return;
         applyStatus(initial);
       } catch (err: any) {
-        if (!cancelled) setError(err.message || "Impossible de rejoindre la salle d'attente.");
+        if (!cancelled) { setDecide(true); setError(err.message || "Impossible de rejoindre la salle d'attente."); }
       }
     }
 
     function applyStatus(data: WaitingRoomStatus) {
+      setDecide(true);
       if (data.status === "active") {
         if (!grantedRef.current) {
           grantedRef.current = true;
@@ -100,6 +106,9 @@ export default function WaitingRoom({ event, onGranted, onCancel }: WaitingRoomP
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [event.id]);
+
+  // Décision non rendue, ou accès accordé : le paiement s'ouvre directement.
+  if (!decide || grantedRef.current) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs" id="waiting-room-overlay">

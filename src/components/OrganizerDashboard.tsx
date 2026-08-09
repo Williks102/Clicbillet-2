@@ -169,8 +169,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [venue, setVenue] = useState("");
   const [category, setCategory] = useState("Concert");
   const [totalTickets, setTotalTickets] = useState("");
-  const [waitingRoomEnabled, setWaitingRoomEnabled] = useState(false);
-  const [waitingRoomCapacity, setWaitingRoomCapacity] = useState("50");
+  const [scheduledOnsale, setScheduledOnsale] = useState(false);
   const [selectedBanner, setSelectedBanner] = useState(BANNER_TEMPLATES[0].url);
   const [customBannerUrl, setCustomBannerUrl] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
@@ -190,8 +189,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [editVenue, setEditVenue] = useState("");
   const [editCategory, setEditCategory] = useState("Concert");
   const [editTotalTickets, setEditTotalTickets] = useState("");
-  const [editWaitingRoomEnabled, setEditWaitingRoomEnabled] = useState(false);
-  const [editWaitingRoomCapacity, setEditWaitingRoomCapacity] = useState("50");
+  const [editScheduledOnsale, setEditScheduledOnsale] = useState(false);
   const [editSelectedBanner, setEditSelectedBanner] = useState("");
   const [editCustomBannerUrl, setEditCustomBannerUrl] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
@@ -354,8 +352,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     setEditCategory(evt.category);
     setEditTotalTickets(String(evt.totalTickets));
     setEditTicketTypes((evt.ticketTypes || []).map(t => ({ name: t.name, price: String(t.price), total: String(t.total || '') })));
-    setEditWaitingRoomEnabled(Boolean(evt.waitingRoomEnabled));
-    setEditWaitingRoomCapacity(String(evt.waitingRoomCapacity || 50));
+    setEditScheduledOnsale(Boolean(evt.scheduledOnsale));
     if (BANNER_TEMPLATES.some(b => b.url === evt.banner)) {
       setEditSelectedBanner(evt.banner);
       setEditCustomBannerUrl("");
@@ -392,8 +389,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       banner: bannerPath,
       totalTickets: tierTotalSum > 0 ? tierTotalSum : Number(editTotalTickets),
       organizerId: user.id,
-      waitingRoomEnabled: editWaitingRoomEnabled,
-      waitingRoomCapacity: Number(editWaitingRoomCapacity) || 50
+      scheduledOnsale: editScheduledOnsale
     };
 
     try {
@@ -565,8 +561,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       totalTickets: ticketTypes.reduce((s, t) => s + (Number(t.total) || 0), 0) || Number(totalTickets),
       organizerId: user.id,
       organizerName: user.name,
-      waitingRoomEnabled,
-      waitingRoomCapacity: Number(waitingRoomCapacity) || 50
+      scheduledOnsale
     };
 
     try {
@@ -597,8 +592,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       setTicketTypes([{ name: 'Standard', price: '', total: '' }]);
       setVenue("");
       setTotalTickets("");
-      setWaitingRoomEnabled(false);
-      setWaitingRoomCapacity("50");
+      setScheduledOnsale(false);
       setCustomBannerUrl("");
 
       // Delay redirect to dashboard view
@@ -1192,29 +1186,18 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
               <label className="flex items-center gap-2 text-xs font-bold text-gray-700">
                 <input
                   type="checkbox"
-                  checked={waitingRoomEnabled}
-                  onChange={(e) => setWaitingRoomEnabled(e.target.checked)}
+                  checked={scheduledOnsale}
+                  onChange={(e) => setScheduledOnsale(e.target.checked)}
                   className="h-4 w-4 rounded border-gray-300 text-orange-600 focus:ring-orange-100"
                 />
-                Activer la salle d'attente virtuelle
+                Mise en vente programmée à heure fixe
               </label>
               <p className="text-[11px] text-gray-400">
-                À activer si vous attendez un fort pic de demande : les acheteurs patientent
-                dans une file avant d'accéder au paiement, pour éviter la surcharge.
+                À cocher uniquement si l'ouverture des ventes est annoncée à une heure précise et
+                que vous attendez une ruée dès la première seconde : la file d'attente démarre alors
+                immédiatement. Dans tous les autres cas, laissez décoché — elle s'active toute seule
+                si l'affluence le justifie, et reste invisible sinon.
               </p>
-              {waitingRoomEnabled && (
-                <div className="space-y-1 pt-1">
-                  <label className="text-xs font-bold text-gray-700">Capacité simultanée en checkout</label>
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="Ex : 50"
-                    value={waitingRoomCapacity}
-                    onChange={(e) => setWaitingRoomCapacity(e.target.value)}
-                    className="w-full rounded-xl border border-gray-200 py-3 px-4 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
-                  />
-                </div>
-              )}
             </div>
 
             <div className="space-y-1">
@@ -1749,24 +1732,16 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                   <label className="flex items-center gap-2 text-xs font-bold text-gray-700">
                     <input
                       type="checkbox"
-                      checked={editWaitingRoomEnabled}
-                      onChange={(e) => setEditWaitingRoomEnabled(e.target.checked)}
+                      checked={editScheduledOnsale}
+                      onChange={(e) => setEditScheduledOnsale(e.target.checked)}
                       className="h-4 w-4 rounded border-gray-300 text-orange-600 focus:ring-orange-100"
                     />
-                    Activer la salle d'attente virtuelle
+                    Mise en vente programmée à heure fixe
                   </label>
-                  {editWaitingRoomEnabled && (
-                    <div className="space-y-1 pt-1">
-                      <label className="text-xs font-bold text-gray-700">Capacité simultanée en checkout</label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={editWaitingRoomCapacity}
-                        onChange={(e) => setEditWaitingRoomCapacity(e.target.value)}
-                        className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-xs outline-none focus:border-orange-500"
-                      />
-                    </div>
-                  )}
+                  <p className="text-[11px] text-gray-400">
+                    Fait démarrer la file d'attente dès l'ouverture. Inutile autrement : elle s'active
+                    d'elle-même si l'affluence le justifie.
+                  </p>
                 </div>
 
                 <div className="space-y-1">

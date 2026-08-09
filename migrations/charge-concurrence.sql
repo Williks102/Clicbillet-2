@@ -6,7 +6,7 @@
 -- en deux et provoque une erreur de syntaxe sur le texte du commentaire lui-même
 -- (« syntax error at or near ... »).
 --
--- Ce fichier est un extrait de supabase_setup.sql : les trois blocs ci-dessous y
+-- Ce fichier est un extrait de supabase_setup.sql : les blocs ci-dessous y
 -- figurent à l'identique. Il est rejouable — le relancer ne casse rien et
 -- n'écrase aucun compteur de vente en cours.
 --
@@ -14,6 +14,7 @@
 --   1. Salle d'attente : capacité réellement respectée sous affluence
 --   2. Limitation de débit à compteur partagé (section 24)
 --   3. Réservation de places atomique (section 25)
+--   4. Salle d'attente armée par la mesure, plus par l'organisateur (section 26)
 -- ==========================================================================
 
 
@@ -302,3 +303,96 @@ REVOKE ALL ON FUNCTION public.reserve_tickets(TEXT, INTEGER, JSONB) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.release_tickets(TEXT, INTEGER, JSONB) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.reserve_tickets(TEXT, INTEGER, JSONB) TO service_role;
 GRANT EXECUTE ON FUNCTION public.release_tickets(TEXT, INTEGER, JSONB) TO service_role;
+
+-- ==========================================
+-- 26. SALLE D'ATTENTE ARMÉE PAR LA MESURE
+-- ==========================================
+-- La salle d'attente s'activait par une case cochée à la création de l'événement, avec une
+-- "capacité simultanée en checkout" saisie par l'organisateur. Deux problèmes :
+--
+--   C'était un PARI, pris au pire moment. À la création — souvent des semaines avant — nul ne
+--   sait si la demande explosera. Oubliée alors que la ruée arrive, la file ne protège rien :
+--   c'est précisément la panne qu'elle existe pour éviter, et il est trop tard pour réagir.
+--   Cochée sans ruée, des visiteurs patientent devant une salle vide — sur un événement qui
+--   vend trente billets, un écran d'attente ressemble à un site en panne et coûte des ventes.
+--   Ce second cas étant de loin le plus fréquent, la case était surtout un inconvénient.
+--
+--   La CAPACITÉ n'est pas une question sur l'événement. C'est une question sur ce que le
+--   backend et la passerelle de paiement encaissent en parallèle : l'organisateur n'a aucun
+--   moyen de la connaître. Un réglage dont personne ne peut deviner la bonne valeur est pire
+--   qu'aucun réglage — il est renseigné au hasard, avec assurance.
+--
+-- Depuis la réservation atomique (section 25), la file n'est plus un mécanisme de JUSTESSE :
+-- l'intégrité du stock est garantie par la base quelle que soit la charge. Il ne lui reste
+-- que le lissage. Elle peut donc être rare et automatique plutôt qu'imposée à l'avance.
+
+-- Réglages désormais tenus par la plateforme, pas par l'organisateur.
+--   waiting_room_threshold : nombre d'acheteurs distincts sur UN événement, dans la fenêtre
+--     de mesure, au-delà duquel la file s'arme d'elle-même.
+--   waiting_room_capacity : sessions de paiement simultanées autorisées une fois armée.
+--   waiting_room_window_seconds : durée de la fenêtre de mesure de l'affluence.
+INSERT INTO public.platform_config (key, value) VALUES
+  ('waiting_room_threshold', '80'),
+  ('waiting_room_capacity', '50'),
+  ('waiting_room_active_minutes', '10'),
+  ('waiting_room_window_seconds', '60')
+ON CONFLICT (key) DO NOTHING;
+
+-- Mise en vente programmée : le seul cas où prédire bat mesurer. Une ouverture annoncée à
+-- 10 h pile passe de zéro à des milliers d'acheteurs en deux secondes — trop vite pour
+-- qu'une mesure sur une fenêtre glissante ait le temps de réagir. La file démarre alors
+-- pré-armée. C'est une exception cochée sciemment, plus un arbitrage imposé à chacun.
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS scheduled_onsale BOOLEAN DEFAULT false;
+
+-- Reprend l'intention des organisateurs qui avaient coché l'ancienne case : s'ils attendaient
+-- une forte demande, ils voulaient bien une file dès la première seconde.
+UPDATE public.events SET scheduled_onsale = true
+ WHERE waiting_room_enabled = true AND scheduled_onsale IS DISTINCT FROM true;
+
+-- Affluence observée. Une ligne par acheteur et par événement, rafraîchie à chaque passage :
+-- compter des acheteurs DISTINCTS évite qu'un seul visiteur qui recharge sa page ne déclenche
+-- une file à lui tout seul.
+CREATE TABLE IF NOT EXISTS public.event_pressure (
+    event_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (event_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_event_pressure_seen ON public.event_pressure (event_id, seen_at);
+
+ALTER TABLE public.event_pressure ENABLE ROW LEVEL SECURITY;
+-- Aucune policy anon/authenticated : alimentée exclusivement par le backend.
+
+-- Enregistre le passage d'un acheteur et renvoie de quoi décider, en UN aller-retour.
+--
+-- Renvoie aussi le nombre de personnes en file : une fois armée, la salle d'attente le reste
+-- tant que quelqu'un patiente. Sans cette règle, une accalmie la désarmerait et les arrivants
+-- passeraient devant ceux qui attendent déjà — l'injustice exacte qu'une file existe pour
+-- empêcher.
+CREATE OR REPLACE FUNCTION public.waiting_room_gate(
+  p_event_id TEXT,
+  p_user_id TEXT,
+  p_window_seconds INTEGER
+)
+RETURNS TABLE (pressure INTEGER, waiting INTEGER)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  INSERT INTO public.event_pressure AS e (event_id, user_id, seen_at)
+  VALUES (p_event_id, p_user_id, now())
+  ON CONFLICT (event_id, user_id) DO UPDATE SET seen_at = now();
+
+  -- Purge bornée à cet événement : la table ne garde que la fenêtre courante.
+  DELETE FROM public.event_pressure
+   WHERE event_id = p_event_id
+     AND seen_at < now() - (p_window_seconds || ' seconds')::interval;
+
+  RETURN QUERY SELECT
+    (SELECT count(*)::int FROM public.event_pressure WHERE event_id = p_event_id),
+    (SELECT count(*)::int FROM public.waiting_room_entries
+      WHERE event_id = p_event_id AND status = 'waiting');
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.waiting_room_gate(TEXT, TEXT, INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.waiting_room_gate(TEXT, TEXT, INTEGER) TO service_role;

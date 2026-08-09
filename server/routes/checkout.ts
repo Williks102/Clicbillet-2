@@ -17,7 +17,7 @@ import { validateCheckout } from "../lib/validators.js";
 import { runInBackground, isEventPast, generateTicketQrCode } from "../lib/utils.js";
 import { sendOrganizerSaleEmail, sendTicketEmail } from "../lib/email.js";
 import { checkoutRateLimiter } from "../lib/rateLimiters.js";
-import { getWaitingRoomEventConfig, advanceAndGetWaitingRoomStatus } from "../lib/waitingRoom.js";
+import { evaluateWaitingRoomGate, advanceAndGetWaitingRoomStatus } from "../lib/waitingRoom.js";
 
 const router = express.Router();
 
@@ -28,11 +28,15 @@ router.post("/api/waiting-room/join", requireAuth, async (req: express.Request, 
     return res.status(400).json({ error: "eventId requis." });
   }
 
-  const config = await getWaitingRoomEventConfig(eventId);
-  if (!config || !config.enabled) {
-    // Pas de salle d'attente sur cet événement : accès direct au checkout.
+  // Le portillon enregistre le passage de cet acheteur ET décide. Il est appelé pour TOUS
+  // les événements, y compris hors affluence : c'est ce passage qui alimente la mesure, et
+  // c'est lui qui permet à la file de s'armer seule quand la ruée arrive.
+  const gate = await evaluateWaitingRoomGate(eventId, authUser.id);
+  if (!gate.queueActive) {
+    // Trafic normal : accès direct au paiement, aucune file affichée.
     return res.json({ status: "active", position: 0 });
   }
+  const config = { capacity: gate.capacity, activeMinutes: gate.activeMinutes };
   if (!supabase) {
     return res.status(503).json({ error: "Salle d'attente indisponible." });
   }
@@ -77,12 +81,12 @@ router.get("/api/waiting-room/status", requireAuth, async (req: express.Request,
     return res.status(400).json({ error: "eventId requis." });
   }
 
-  const config = await getWaitingRoomEventConfig(eventId);
-  if (!config || !config.enabled) {
+  const gate = await evaluateWaitingRoomGate(eventId, authUser.id);
+  if (!gate.queueActive) {
     return res.json({ status: "active", position: 0 });
   }
 
-  const status = await advanceAndGetWaitingRoomStatus(eventId, authUser.id, config);
+  const status = await advanceAndGetWaitingRoomStatus(eventId, authUser.id, { capacity: gate.capacity, activeMinutes: gate.activeMinutes });
   if (!status) {
     return res.status(404).json({ error: "Aucune entrée de salle d'attente trouvée. Rejoignez-la d'abord." });
   }
@@ -140,10 +144,16 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
         return res.status(400).json({ error: "Cet événement est terminé, l'achat de billets n'est plus possible." });
       }
 
-      // Si la salle d'attente est activée sur cet événement, l'acheteur doit avoir une
-      // entrée "active" non expirée (obtenue via /api/waiting-room/join puis /status) avant
-      // de pouvoir passer commande.
-      if (event.waiting_room_enabled) {
+      // Contrôle refait ici, et non d'après un drapeau porté par l'événement : la file
+      // s'armant sur l'affluence mesurée, son état n'est connu qu'à l'instant présent.
+      // Sans cette réévaluation, appeler /api/checkout directement contournerait la file.
+      //
+      // Conséquence assumée : un acheteur entré au calme mais qui met plusieurs minutes à
+      // valider peut se voir renvoyé vers la file si une ruée démarre entre-temps. Le
+      // navigateur l'y conduit alors normalement ; l'inverse — le laisser passer — reviendrait
+      // à le faire doubler tous ceux qui patientent.
+      const gateAchat = await evaluateWaitingRoomGate(eventId, buyerId);
+      if (gateAchat.queueActive) {
         const { data: wrEntry } = await supabase
           .from("waiting_room_entries")
           .select("status, active_until")

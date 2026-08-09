@@ -52,8 +52,7 @@ export interface Event {
   organizerName: string;
   organizerAlias?: string | null; // Alias public (page /o/:alias) — absent si l'organisateur n'en a pas défini
   status?: "pending" | "approved" | "rejected";
-  waitingRoomEnabled?: boolean;
-  waitingRoomCapacity?: number;
+  scheduledOnsale?: boolean;
   commissionRate?: number | null; // Taux négocié pour cet événement (null = taux plateforme par défaut)
 }
 
