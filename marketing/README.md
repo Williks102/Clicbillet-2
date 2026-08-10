@@ -3,11 +3,28 @@
 `email-organisateurs.html` — version HTML, à coller dans l'outil d'envoi.
 `email-organisateurs.txt` — version texte, à coller dans le champ prévu à cet effet.
 
-## Avant d'envoyer
+## Envoi via Resend Broadcasts
 
-**Remplacer `{{lien_desinscription}}`** par la balise de votre outil d'envoi (Brevo, Mailchimp,
-Resend…). Un lien de désinscription est obligatoire pour un envoi commercial, et c'est aussi
-le premier facteur qui décide si vous arrivez en boîte de réception ou en indésirables.
+Le fichier est prêt pour Resend : le pied de page contient `{{{RESEND_UNSUBSCRIBE_URL}}}`
+(trois accolades), que Resend remplace par le lien de désinscription en ajoutant les en-têtes
+`List-Unsubscribe` exigés par Gmail et Yahoo pour l'envoi de masse. Sur une autre plateforme,
+remplacer par la balise correspondante.
+
+**Ne PAS envoyer avec `sendEmail()` de l'application.** Cette fonction sert au transactionnel :
+ni désinscription, ni en-têtes de masse, ni liste de suppression. Un envoi commercial par ce
+chemin abîme la réputation du domaine qui achemine les billets payés.
+
+Étapes :
+
+1. **Domaine d'envoi séparé.** Dans Resend, ajouter un sous-domaine dédié au marketing
+   (`mail.clicbillet.com`) et publier ses enregistrements DNS. La réputation d'expéditeur se
+   joue au niveau du domaine : une campagne qui génère des plaintes ne doit pas pouvoir
+   dégrader la délivrabilité des e-mails de billets.
+2. **Audience** : créer l'audience, importer les contacts.
+3. **Broadcast** : coller le HTML, coller la version texte, choisir l'audience.
+4. **Expéditeur** : un nom de personne sur le sous-domaine, et une adresse de réponse
+   réellement relevée — le message invite explicitement à répondre.
+5. **Test** avant diffusion : s'envoyer le message et le contrôler sur Gmail ET Outlook.
 
 **Coller les deux versions.** Un e-mail envoyé en HTML seul est un signal de courrier
 indésirable pour la plupart des filtres. La version texte n'est presque jamais lue par un

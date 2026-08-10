@@ -238,10 +238,12 @@
           </tr>
           <tr>
             <td class="pad-lat" align="center" style="padding:6px 40px 30px 40px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:11px; line-height:18px; color:#b6bfcc;">
-              <!-- REMPLACER par le lien de désinscription de votre outil d'envoi. Obligatoire
-                   pour un envoi commercial, et déterminant pour ne pas finir en indésirable. -->
+              <!-- Variable Resend Broadcasts (trois accolades) : Resend y place le lien de
+                   désinscription et ajoute les en-têtes List-Unsubscribe exigés par Gmail et
+                   Yahoo pour l'envoi de masse. Un contact désinscrit est ensuite ignoré des
+                   diffusions suivantes. Sur une autre plateforme, remplacer par sa balise. -->
               Vous recevez ce message car votre structure organise des événements en Côte d'Ivoire.<br />
-              <a href="{{lien_desinscription}}" style="color:#b6bfcc; text-decoration:underline;">Se désinscrire</a>
+              <a href="{{{RESEND_UNSUBSCRIBE_URL}}}" style="color:#b6bfcc; text-decoration:underline;">Se désinscrire</a>
             </td>
           </tr>
         </table>

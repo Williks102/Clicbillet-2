@@ -51,4 +51,4 @@ ClicBillet — Billetterie en ligne, Côte d'Ivoire
 contacts@clicbillet.com · www.clicbillet.com
 
 Vous recevez ce message car votre structure organise des événements en Côte
-d'Ivoire. Se désinscrire : {{lien_desinscription}}
+d'Ivoire. Se désinscrire : {{{RESEND_UNSUBSCRIBE_URL}}}
