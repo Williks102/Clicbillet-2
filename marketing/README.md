@@ -1,4 +1,25 @@
-# E-mail de prospection organisateurs
+# Prospection organisateurs
+
+Deux approches, pour deux usages différents. Ne les confondez pas : envoyer le HTML depuis une
+boîte personnelle produit le pire des deux mondes — un message qui a l'air d'une campagne,
+sans les outils d'une campagne.
+
+| | Campagne | Prospection individuelle |
+|---|---|---|
+| Fichiers | `email-organisateurs.html` + `.txt` | `prospection-individuelle.md` |
+| Envoi | Plateforme (Resend, Brevo…) | Boîte normale, un par un |
+| Mise en forme | HTML mis en page | Texte brut |
+| Destinataires | Liste d'inscrits volontaires | Contacts qu'on sait nommer |
+| Volume | Illimité | 10-15 par jour |
+| Désinscription | Lien obligatoire | Sans objet (correspondance individuelle) |
+
+**À 290 contacts, la prospection individuelle rend davantage** : 10-20 % de réponses contre
+quelques pour cent, et aucun risque pour la réputation du domaine qui achemine vos billets.
+La campagne devient pertinente quand vous aurez une liste d'inscrits.
+
+---
+
+## Campagne
 
 `email-organisateurs.html` — version HTML, à coller dans l'outil d'envoi.
 `email-organisateurs.txt` — version texte, à coller dans le champ prévu à cet effet.
