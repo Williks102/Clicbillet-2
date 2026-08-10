@@ -68,6 +68,37 @@ reste à votre disposition » n'appelle rien du tout.
 signalements en indésirable. C'est aussi ce qui remplace le lien de désinscription, inutile
 ici puisqu'il s'agit de correspondance individuelle.
 
+## Où trouver les contacts
+
+Un annuaire d'entreprises générique ne convient pas — l'expérience a été faite : une campagne
+envoyée à un fichier de ce type a produit 17,5 % de rejets, et les adresses valides
+appartenaient à des banques, des transporteurs et des industriels qui ne vendent pas de
+billets. Le problème n'était pas la validité des adresses mais leur pertinence.
+
+Un organisateur d'événements se trouve là où il communique :
+
+**Les réseaux sociaux, en premier.** Instagram et Facebook sont l'endroit où les promoteurs
+ivoiriens annoncent leurs dates. Les affiches y portent presque toujours un numéro WhatsApp
+et parfois une adresse. Remontez aussi les comptes des artistes : leurs dates sont montées par
+quelqu'un, et ce quelqu'un est votre prospect.
+
+**Les salles.** Palais de la Culture, Institut français, Sofitel Ivoire, Radisson Blu, les
+complexes de Cocody et de Marcory. Elles connaissent tous ceux qui louent chez elles. Un appel
+au service commercial vaut mieux qu'un fichier acheté.
+
+**Les billetteries concurrentes.** Leurs catalogues en ligne listent publiquement les
+événements à venir et leurs organisateurs. C'est une liste de prospects déjà qualifiés : ils
+vendent déjà des billets en ligne, la question du « pourquoi » ne se pose donc pas.
+
+**Les associations et fédérations** — culturelles, sportives, étudiantes, confessionnelles.
+Elles organisent régulièrement et cherchent à réduire leurs coûts.
+
+**Vos organisateurs actuels.** Ceux qui vendent déjà sur la plateforme connaissent d'autres
+promoteurs. C'est de loin la meilleure source : une recommandation vaut cinquante e-mails
+froids.
+
+Cinquante contacts qualifiés trouvés ainsi valent mieux que trois cents adresses achetées.
+
 ## Rythme
 
 **10 à 15 par jour, pas plus.** Au-delà, la boîte adopte un profil d'envoi de masse et les
