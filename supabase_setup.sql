@@ -1270,3 +1270,49 @@ SELECT
 FROM public.events;
 
 GRANT SELECT ON public.events_public TO anon, authenticated;
+
+-- ==========================================
+-- 28. CONTRÔLE D'ACCÈS HORS LIGNE
+-- ==========================================
+-- Le contrôle à l'entrée exigeait une connexion : chaque scan appelait /api/verify-ticket et
+-- attendait la réponse. À l'entrée d'une salle, quand deux mille personnes arrivent en même
+-- temps avec leur téléphone, le réseau mobile sature — c'est le régime normal d'une soirée,
+-- pas l'incident rare. Le contrôle s'arrêtait alors net.
+--
+-- Le scanner télécharge désormais la liste des billets avant l'ouverture des portes, valide
+-- localement quand le réseau manque, et resynchronise au retour. Ces colonnes tracent ce qui
+-- s'est passé et où.
+
+-- Appareil ayant enregistré le passage, et régime dans lequel il l'a fait. Sans ces deux
+-- informations, un doublon constaté à la synchronisation est inexploitable : on sait qu'un
+-- billet est passé deux fois, sans pouvoir dire à quelle porte ni dans quelles conditions.
+ALTER TABLE public.tickets ADD COLUMN IF NOT EXISTS scanned_device TEXT;
+ALTER TABLE public.tickets ADD COLUMN IF NOT EXISTS scan_source TEXT; -- 'online' | 'offline'
+
+-- Doublons constatés à la synchronisation.
+--
+-- Deux portes, deux téléphones hors ligne, le même billet présenté aux deux : les deux
+-- acceptent, puisque aucun ne sait ce que l'autre a vu. C'est inhérent à la validation hors
+-- ligne, et le parti pris est ASSUMÉ : on laisse entrer et on signale. Bloquer la file pour
+-- un doublon rare coûterait plus cher que la fraude qu'on éviterait — un porteur légitime
+-- refoulé à la porte est un incident bien plus fréquent et bien plus grave.
+--
+-- Cette table est donc la contrepartie de ce choix : elle rend la fraude visible après coup,
+-- avec de quoi l'instruire.
+CREATE TABLE IF NOT EXISTS public.scan_conflicts (
+    id TEXT PRIMARY KEY,
+    ticket_id TEXT NOT NULL,
+    event_id TEXT,
+    -- Appareil et instant du passage refusé (le second)
+    device_id TEXT,
+    attempted_at TIMESTAMPTZ NOT NULL,
+    -- Appareil et instant du passage retenu (le premier)
+    existing_device TEXT,
+    existing_scanned_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_scan_conflicts_event ON public.scan_conflicts (event_id, created_at DESC);
+
+ALTER TABLE public.scan_conflicts ENABLE ROW LEVEL SECURITY;
+-- Aucune policy anon/authenticated : alimentée et lue exclusivement par le backend.

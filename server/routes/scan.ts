@@ -3,6 +3,7 @@
 // différentes — sur le téléphone d'un contrôleur, à l'entrée d'un lieu, souvent en réseau
 // dégradé, et sur une rafale de scans en quelques minutes.
 import express from "express";
+import crypto from "crypto";
 import { isSupabaseEnabled, supabase } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { requireAuth, requireRole } from "../lib/auth.js";
@@ -205,6 +206,207 @@ router.post("/api/verify-ticket", requireAuth, requireRole("organizer", "admin")
     alreadyScanned: false,
     ticket
   });
+});
+
+// ==========================================
+// CONTRÔLE HORS LIGNE (cf. supabase_setup.sql section 28)
+// ==========================================
+
+// Empreinte du code QR. Le manifeste ne descend JAMAIS les codes en clair sur les appareils :
+// un téléphone perdu ou volé permettrait sinon de fabriquer des billets valides. Le scanner
+// hache le code présenté et cherche l'empreinte — la validation est identique, la fuite ne
+// l'est pas.
+function empreinte(qrCodeData: string): string {
+  return crypto.createHash("sha256").update(String(qrCodeData)).digest("hex");
+}
+
+// Événements que ce compte peut contrôler, pour choisir lequel préparer. Volontairement
+// minimal — id, titre, date — plutôt que de réutiliser le catalogue public et de filtrer
+// côté navigateur.
+router.get("/api/scan/events", requireAuth, requireRole("organizer", "admin"), async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
+  res.set("Cache-Control", "no-store");
+
+  if (!isSupabaseEnabled || !supabase) {
+    const db = getDB();
+    const liste = (db.events || [])
+      .filter((e: any) => authUser.role === "admin" || e.organizerId === authUser.id)
+      .map((e: any) => ({ id: e.id, title: e.title, date: e.date, time: e.time }));
+    return res.json(liste);
+  }
+
+  let requete = supabase.from("events").select("id, title, date, time").order("date", { ascending: true });
+  if (authUser.role !== "admin") requete = requete.eq("organizer_id", authUser.id);
+
+  const { data, error } = await requete;
+  if (error) return res.status(500).json({ error: "Impossible de lister les événements." });
+  res.json(data || []);
+});
+
+// Liste des billets d'un événement, à charger dans l'appareil AVANT l'ouverture des portes.
+router.get("/api/scan/manifest", requireAuth, requireRole("organizer", "admin"), async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
+  const eventId = String(req.query.eventId || "");
+  if (!eventId) return res.status(400).json({ error: "eventId requis." });
+
+  // Jamais de cache intermédiaire : un manifeste périmé fait refouler des acheteurs récents.
+  res.set("Cache-Control", "no-store");
+
+  if (!isSupabaseEnabled || !supabase) {
+    const db = getDB();
+    const evt = (db.events || []).find((e: any) => e.id === eventId);
+    if (!evt) return res.status(404).json({ error: "Événement introuvable." });
+    if (authUser.role !== "admin" && evt.organizerId !== authUser.id) {
+      return res.status(403).json({ error: "Cet événement ne vous appartient pas." });
+    }
+    const billets = (db.tickets || []).filter((t: any) => t.eventId === eventId);
+    return res.json(construireManifeste(evt, billets.map((t: any) => ({
+      id: t.id, qr_code_data: t.qrCodeData, tier: t.tier, buyer_name: t.buyerName,
+      scanned: t.scanned, transaction_ref: t.transactionRef
+    }))));
+  }
+
+  const { data: evt } = await supabase
+    .from("events")
+    .select("id, title, organizer_id, date, time, end_date, end_time")
+    .eq("id", eventId)
+    .maybeSingle();
+
+  if (!evt) return res.status(404).json({ error: "Événement introuvable." });
+  if (authUser.role !== "admin" && evt.organizer_id !== authUser.id) {
+    return res.status(403).json({ error: "Cet événement ne vous appartient pas." });
+  }
+
+  const { data: billets, error } = await supabase
+    .from("tickets")
+    .select("id, qr_code_data, tier, buyer_name, scanned, transaction_ref")
+    .eq("event_id", eventId);
+
+  if (error) return res.status(500).json({ error: "Impossible de constituer le manifeste." });
+
+  res.json(construireManifeste({
+    id: evt.id, title: evt.title, date: evt.date, time: evt.time,
+    endDate: evt.end_date, endTime: evt.end_time
+  }, billets || []));
+});
+
+function construireManifeste(evt: any, billets: any[]) {
+  const fenetre = getScanWindow({
+    date: evt.date, time: evt.time,
+    endDate: evt.endDate ?? evt.end_date, endTime: evt.endTime ?? evt.end_time
+  });
+
+  return {
+    eventId: evt.id,
+    eventTitle: evt.title,
+    generatedAt: new Date().toISOString(),
+    // La fenêtre part avec le manifeste : hors ligne aussi, un billet présenté trop tôt ou
+    // après la fin doit être refusé. Sans elle, le mode dégradé serait plus permissif que le
+    // mode connecté — une incohérence que le contrôleur ne pourrait pas expliquer.
+    scanWindow: { opensAt: fenetre.opensAt.toISOString(), closesAt: fenetre.closesAt.toISOString() },
+    tickets: billets.map((t: any) => ({
+      id: t.id,
+      h: empreinte(t.qr_code_data),
+      tier: t.tier,
+      buyerName: t.buyer_name || null,
+      // Les billets non payés figurent au manifeste avec leur état, plutôt que d'en être
+      // absents : hors ligne, le contrôleur doit pouvoir dire « paiement non confirmé »
+      // plutôt que « billet inconnu », qui enverrait la personne au mauvais interlocuteur.
+      st: String(t.transaction_ref || "").startsWith("PENDING-") ? "unpaid" : (t.scanned ? "scanned" : "ok")
+    }))
+  };
+}
+
+// Remontée du journal local à la reconnexion.
+router.post("/api/scan/sync", requireAuth, requireRole("organizer", "admin"), async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
+  const { deviceId, passages } = req.body || {};
+
+  if (!Array.isArray(passages)) {
+    return res.status(400).json({ error: "Journal de passages invalide." });
+  }
+  if (passages.length > 5000) {
+    return res.status(413).json({ error: "Journal trop volumineux : synchronisez plus souvent." });
+  }
+
+  const applique: string[] = [];
+  const conflits: any[] = [];
+
+  if (!isSupabaseEnabled || !supabase) {
+    const db = getDB();
+    for (const p of passages) {
+      const t = (db.tickets || []).find((x: any) => x.id === p.ticketId);
+      if (!t) continue;
+      if (t.scanned) {
+        conflits.push({ ticketId: t.id, existingScannedAt: t.scannedAt, existingDevice: t.scannedDevice || null });
+        continue;
+      }
+      t.scanned = true;
+      t.scannedAt = p.at;
+      t.scannedDevice = deviceId || null;
+      t.scanSource = "offline";
+      applique.push(t.id);
+    }
+    saveDB(db);
+    return res.json({ applied: applique.length, conflicts: conflits });
+  }
+
+  for (const p of passages) {
+    const ticketId = String(p?.ticketId || "");
+    const at = String(p?.at || "");
+    if (!ticketId || !at) continue;
+
+    const { data: t } = await supabase
+      .from("tickets")
+      .select("id, event_id, scanned, scanned_at, scanned_device")
+      .eq("id", ticketId)
+      .maybeSingle();
+    if (!t) continue;
+
+    // Même contrôle de propriété qu'au scan en ligne : un organisateur ne consomme que les
+    // billets de ses propres événements, y compris par cette voie.
+    if (authUser.role !== "admin") {
+      const { data: evt } = await supabase.from("events").select("organizer_id").eq("id", t.event_id).maybeSingle();
+      if (!evt || evt.organizer_id !== authUser.id) continue;
+    }
+
+    if (t.scanned) {
+      // Doublon : on l'enregistre plutôt que de l'écraser. Le premier passage fait foi — la
+      // personne est déjà entrée, réécrire l'horodatage effacerait la trace de la fraude.
+      conflits.push({
+        ticketId: t.id,
+        existingScannedAt: t.scanned_at,
+        existingDevice: t.scanned_device || null,
+        attemptedAt: at
+      });
+      await supabase.from("scan_conflicts").insert({
+        id: `sc-${crypto.randomUUID()}`,
+        ticket_id: t.id,
+        event_id: t.event_id,
+        device_id: deviceId || null,
+        attempted_at: at,
+        existing_device: t.scanned_device || null,
+        existing_scanned_at: t.scanned_at
+      });
+      continue;
+    }
+
+    // La condition sur "scanned" est reportée dans le WHERE : deux appareils qui
+    // synchronisent en même temps ne peuvent pas valider tous les deux le même billet en se
+    // fondant sur une lecture devenue périmée.
+    const { data: maj } = await supabase
+      .from("tickets")
+      .update({ scanned: true, scanned_at: at, scanned_device: deviceId || null, scan_source: "offline" })
+      .eq("id", t.id)
+      .eq("scanned", false)
+      .select("id")
+      .maybeSingle();
+
+    if (maj) applique.push(t.id);
+    else conflits.push({ ticketId: t.id, existingScannedAt: t.scanned_at, attemptedAt: at });
+  }
+
+  res.json({ applied: applique.length, conflicts: conflits });
 });
 
 export default router;

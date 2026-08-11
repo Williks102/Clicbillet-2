@@ -1,9 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Camera, CheckCircle, XCircle, AlertTriangle, RefreshCw, Smartphone, Key, Ticket as TicketIcon } from "lucide-react";
+import { Camera, CheckCircle, XCircle, AlertTriangle, RefreshCw, Smartphone, Key, Ticket as TicketIcon, WifiOff, Wifi, Download, CloudUpload } from "lucide-react";
 import { Html5QrcodeScanner } from "html5-qrcode";
 import { User } from "../types";
 import { authFetch } from "../lib/apiClient";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
+import {
+  telechargerManifeste, lireManifeste, validerHorsLigne, synchroniser,
+  passagesEnAttente, ageEnMinutes, type Manifeste
+} from "../lib/scanOffline";
 
 interface QrScannerTabProps {
   user: User;
@@ -32,6 +36,73 @@ export default function QrScannerTab({ user }: QrScannerTabProps) {
   // fois la caméra confirmée disponible, pour que la sonde ci-dessous et html5-qrcode ne se
   // disputent jamais le périphérique (une caméra déjà ouverte fait échouer l'autre).
   const [cameraState, setCameraState] = useState<"checking" | "ready" | "error">("checking");
+
+  // --- Contrôle hors ligne (cf. src/lib/scanOffline.ts) ---
+  const [evenements, setEvenements] = useState<{ id: string; title: string }[]>([]);
+  const [evenementPrepare, setEvenementPrepare] = useState("");
+  const [manifeste, setManifeste] = useState<Manifeste | null>(null);
+  const [chargement, setChargement] = useState(false);
+  const [enAttente, setEnAttente] = useState(0);
+  const [horsLigne, setHorsLigne] = useState(false);
+  const [messageSync, setMessageSync] = useState<string | null>(null);
+  // Le dernier verdict est-il issu du mode dégradé ? Le contrôleur doit le savoir : un
+  // « validé » hors ligne n'a pas la même garantie qu'un « validé » confirmé par le serveur.
+  const [verdictLocal, setVerdictLocal] = useState(false);
+
+  useEffect(() => {
+    authFetch("/api/scan/events")
+      .then((r) => r.json())
+      .then((d) => Array.isArray(d) && setEvenements(d))
+      .catch(() => {});
+    passagesEnAttente().then((p) => setEnAttente(p.length));
+  }, []);
+
+  // Recharge le manifeste déjà présent quand on choisit un événement.
+  useEffect(() => {
+    if (!evenementPrepare) { setManifeste(null); return; }
+    lireManifeste(evenementPrepare).then(setManifeste);
+  }, [evenementPrepare]);
+
+  async function preparerControle() {
+    if (!evenementPrepare) return;
+    setChargement(true);
+    setMessageSync(null);
+    try {
+      const m = await telechargerManifeste(evenementPrepare);
+      setManifeste(m);
+      setMessageSync(`${m.tickets.length} billet(s) chargés sur cet appareil.`);
+      setHorsLigne(false);
+    } catch (e: any) {
+      setMessageSync(e.message || "Téléchargement impossible.");
+    } finally {
+      setChargement(false);
+    }
+  }
+
+  async function lancerSync() {
+    try {
+      const r = await synchroniser();
+      setEnAttente((await passagesEnAttente()).length);
+      if (!r) { setMessageSync("Aucun passage en attente."); return; }
+      setHorsLigne(false);
+      setMessageSync(
+        r.conflicts.length > 0
+          ? `${r.applied} passage(s) enregistrés — ⚠️ ${r.conflicts.length} billet(s) déjà scannés ailleurs.`
+          : `${r.applied} passage(s) enregistrés.`
+      );
+    } catch (e: any) {
+      setMessageSync(e.message || "Synchronisation impossible.");
+    }
+  }
+
+  // Tentative de remontée dès que le navigateur se déclare de nouveau en ligne. On ne s'y fie
+  // pas pour BASCULER en mode dégradé — navigator.onLine annonce souvent une connexion qui ne
+  // porte aucun trafic — mais comme signal d'essai, il fait l'affaire.
+  useEffect(() => {
+    function auRetour() { passagesEnAttente().then((p) => { if (p.length > 0) lancerSync(); }); }
+    window.addEventListener("online", auRetour);
+    return () => window.removeEventListener("online", auRetour);
+  }, []);
 
   function failCamera(message: string) {
     setCameraError(message);
@@ -155,8 +226,39 @@ export default function QrScannerTab({ user }: QrScannerTabProps) {
       }
 
       setScanResult(data);
+      setVerdictLocal(false);
+      setHorsLigne(false);
     } catch (err: any) {
-      setErrorResult(err.message || "Impossible de décoder ce ticket.");
+      // Distinction essentielle : une PANNE RÉSEAU fait basculer en validation locale, alors
+      // qu'un refus explicite du serveur (billet inconnu, déjà scanné) doit être montré tel
+      // quel. Confondre les deux ferait accepter localement un billet que le serveur venait
+      // de refuser.
+      const panneReseau = err instanceof TypeError || /network|failed to fetch|load failed/i.test(err?.message || "");
+      if (panneReseau && manifeste) {
+        setHorsLigne(true);
+        try {
+          const verdict = await validerHorsLigne(manifeste.eventId, token);
+          setEnAttente((await passagesEnAttente()).length);
+          setVerdictLocal(true);
+          if (verdict.ok) {
+            setScanResult({
+              success: true,
+              ticket: {
+                id: verdict.billet?.id,
+                buyerName: verdict.billet?.buyerName,
+                tier: verdict.billet?.tier,
+                eventTitle: manifeste.eventTitle,
+              },
+            });
+          } else {
+            setErrorResult(verdict.message);
+          }
+        } catch {
+          setErrorResult("Validation hors ligne impossible sur cet appareil.");
+        }
+      } else {
+        setErrorResult(err.message || "Impossible de décoder ce ticket.");
+      }
     } finally {
       setVerifying(false);
     }
@@ -176,6 +278,74 @@ export default function QrScannerTab({ user }: QrScannerTabProps) {
   return (
     <div className="space-y-6 py-6" id="qr-scanner-wrapper">
       
+      {/* Préparation du contrôle : télécharger la liste des billets AVANT l'ouverture des
+          portes, pour que le contrôle survive à la saturation du réseau à l'entrée. */}
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-black text-gray-900">Préparation du contrôle</h3>
+          <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${
+            horsLigne ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"
+          }`}>
+            {horsLigne ? <><WifiOff className="h-3 w-3" /> Hors ligne</> : <><Wifi className="h-3 w-3" /> Connecté</>}
+          </span>
+        </div>
+
+        <p className="text-[11px] leading-relaxed text-gray-500">
+          Chargez la liste des billets avant d'ouvrir les portes. Si le réseau vient à manquer,
+          le contrôle continue sur cet appareil et les passages remontent au retour de la connexion.
+        </p>
+
+        <div className="flex flex-wrap items-end gap-2">
+          <select
+            value={evenementPrepare}
+            onChange={(e) => setEvenementPrepare(e.target.value)}
+            className="flex-1 min-w-[180px] rounded-xl border border-gray-200 bg-white py-2.5 px-3 text-xs outline-none focus:border-green-500"
+          >
+            <option value="">Choisir l'événement…</option>
+            {evenements.map((e) => <option key={e.id} value={e.id}>{e.title}</option>)}
+          </select>
+          <button
+            type="button"
+            onClick={preparerControle}
+            disabled={!evenementPrepare || chargement}
+            className="flex items-center gap-1.5 rounded-xl bg-green-600 px-4 py-2.5 text-xs font-black text-white transition-colors hover:bg-green-700 disabled:opacity-40"
+          >
+            <Download className={`h-3.5 w-3.5 ${chargement ? "animate-pulse" : ""}`} />
+            {chargement ? "Chargement…" : "Charger les billets"}
+          </button>
+        </div>
+
+        {manifeste && (
+          <div className="rounded-xl bg-gray-50 px-3 py-2.5 text-[11px] text-gray-600">
+            <strong className="text-gray-900">{manifeste.tickets.length} billet(s)</strong> chargés
+            {" · "}
+            {/* L'âge est affiché en permanence : un agent qui voit « il y a 3 h » sait qu'un
+                refus « billet introuvable » peut venir d'un achat récent, pas d'une fraude. */}
+            <span className={ageEnMinutes(manifeste) > 30 ? "font-black text-amber-700" : ""}>
+              il y a {ageEnMinutes(manifeste)} min
+            </span>
+            {ageEnMinutes(manifeste) > 30 && " — rechargez pour inclure les ventes récentes"}
+          </div>
+        )}
+
+        {enAttente > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
+            <span className="text-[11px] font-bold text-amber-900">
+              {enAttente} passage(s) enregistrés hors ligne, en attente d'envoi
+            </span>
+            <button
+              type="button"
+              onClick={lancerSync}
+              className="flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-[11px] font-black text-white hover:bg-amber-700"
+            >
+              <CloudUpload className="h-3.5 w-3.5" /> Synchroniser
+            </button>
+          </div>
+        )}
+
+        {messageSync && <p className="text-[11px] font-bold text-gray-700">{messageSync}</p>}
+      </section>
+
       {/* Dynamic welcome headers */}
       <section className="rounded-2xl border border-green-100 bg-green-50/50 p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
         <div>
@@ -261,6 +431,15 @@ export default function QrScannerTab({ user }: QrScannerTabProps) {
                     <CheckCircle className="mx-auto h-12 w-12 text-green-600 animate-bounce" />
                     <h4 className="text-sm font-black text-green-800">ACCÈS AUTORISÉ (VALIDE)</h4>
                     <p className="text-xs text-green-700 font-bold leading-none">Profitez bien de l'événement !</p>
+                    {/* Un « validé » hors ligne n'offre pas la même garantie qu'un « validé »
+                        confirmé par le serveur : le contrôleur doit pouvoir faire la
+                        différence, notamment si un doublon est constaté plus tard. */}
+                    {verdictLocal && (
+                      <p className="flex items-center justify-center gap-1.5 rounded-lg bg-amber-100 px-2 py-1.5 text-[10px] font-black text-amber-900">
+                        <WifiOff className="h-3 w-3" />
+                        Validé hors ligne — sera confirmé à la synchronisation
+                      </p>
+                    )}
                   </div>
                 )}
 
