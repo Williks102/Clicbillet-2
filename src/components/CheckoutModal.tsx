@@ -3,6 +3,7 @@ import { X, Check, ArrowRight, ShieldCheck, CreditCard, MessageSquare, Ticket, S
 import { Event, User, PaymentMethod, PaymentDetails } from "../types";
 import ResponsiveSheet from "./ResponsiveSheet";
 import { GuestInfo } from "./GuestOrAuthModal";
+import { getSaleState } from "../lib/ticketTier";
 
 interface CheckoutModalProps {
   event: Event;
@@ -27,8 +28,12 @@ export default function CheckoutModal({ event, user, guestInfo, initialQuantitie
   const [step, setStep] = useState<"configure" | "details" | "processing" | "success">(
     preselected ? "details" : "configure"
   );
+  // Seuls les tarifs actuellement dans leur fenêtre de vente peuvent entrer dans la commande :
+  // un tarif fermé (early bird expiré, pass pas encore ouvert) serait refusé par /api/checkout,
+  // autant ne pas le proposer ni le laisser traîner dans une sélection reçue de la page
+  // événement.
   const activeTicketTypes = (event.ticketTypes && event.ticketTypes.length > 0)
-    ? event.ticketTypes
+    ? event.ticketTypes.filter((t) => getSaleState(t) === "ouverte")
     : [{ name: "Standard", price: event.price }, { name: "VIP", price: event.price * 2 }];
 
   // Panier : quantité indépendante par type de billet, plusieurs types peuvent être

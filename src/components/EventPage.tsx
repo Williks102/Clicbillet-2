@@ -3,7 +3,7 @@ import { ArrowLeft, Calendar, MapPin, Tag, Users, Share2, Check, Minus, Plus, Ho
 import { Event } from "../types";
 import { isEventPast } from "../lib/eventStatus";
 import { EventPageSkeleton } from "./Skeleton";
-import { formatTierLabel } from "../lib/ticketTier";
+import { formatTierLabel, getSaleState, formatSaleWindowLabel } from "../lib/ticketTier";
 
 // Page d'un événement, adressable par /e/:id.
 //
@@ -123,14 +123,23 @@ export default function EventPage({ event, loading, onBack, onBuyTicket, onViewO
   // l'événement. Les deux écrans doivent annoncer les mêmes disponibilités.
   const soldByTier = event.ticketsSoldByTier ?? {};
   const hasTierQuotas = rawTiers.some((t) => (t.total ?? 0) > 0);
-  const tiers = rawTiers.map((t) => ({
-    ...t,
-    available: hasTierQuotas
+  const tiers = rawTiers.map((t) => {
+    // Fenêtre de vente propre au tarif : hors de sa période, il reste affiché (avec sa date
+    // d'ouverture) mais n'est pas sélectionnable — /api/checkout le refuserait de toute façon.
+    const saleState = getSaleState(t);
+    const quota = hasTierQuotas
       ? Math.max(0, (t.total ?? 0) - (soldByTier[t.name.toLowerCase()] ?? 0))
-      : remaining,
-  }));
+      : remaining;
+    return {
+      ...t,
+      saleState,
+      saleLabel: formatSaleWindowLabel(t),
+      available: saleState === "ouverte" ? quota : 0,
+    };
+  });
 
   const selected = tiers
+    .filter((t) => t.saleState === "ouverte")
     .map((t) => ({ name: t.name, price: Number(t.price) || 0, qty: quantities[t.name] || 0 }))
     .filter((item) => item.qty > 0);
   const totalQuantity = selected.reduce((sum, i) => sum + i.qty, 0);
@@ -225,7 +234,8 @@ export default function EventPage({ event, loading, onBack, onBuyTicket, onViewO
             <div className="mt-3 space-y-2">
               {tiers.map((tier) => {
                 const qty = quantities[tier.name] || 0;
-                const tierSoldOut = tier.available <= 0;
+                const enVente = tier.saleState === "ouverte";
+                const tierSoldOut = enVente && tier.available <= 0;
                 return (
                   <div
                     key={tier.name}
@@ -240,9 +250,26 @@ export default function EventPage({ event, loading, onBack, onBuyTicket, onViewO
                       </p>
                       <p className="mt-0.5 font-mono text-[11px] font-bold text-gray-500">
                         {Number(tier.price).toLocaleString("fr-FR")} FCFA
-                        {tierSoldOut
-                          ? <span className="ml-2 font-sans font-bold text-red-500">Épuisé</span>
-                          : <span className="ml-2 font-sans font-semibold text-gray-400">{tier.available} place(s)</span>}
+                        {!enVente
+                          ? (
+                            <span
+                              className={`ml-2 font-sans font-bold ${
+                                tier.saleState === "a-venir" ? "text-amber-600" : "text-gray-400"
+                              }`}
+                            >
+                              {tier.saleLabel}
+                            </span>
+                          )
+                          : tierSoldOut
+                            ? <span className="ml-2 font-sans font-bold text-red-500">Épuisé</span>
+                            : (
+                              <>
+                                <span className="ml-2 font-sans font-semibold text-gray-400">{tier.available} place(s)</span>
+                                {tier.saleLabel && (
+                                  <span className="ml-2 font-sans font-semibold text-amber-600">{tier.saleLabel}</span>
+                                )}
+                              </>
+                            )}
                       </p>
                     </div>
 
@@ -261,7 +288,7 @@ export default function EventPage({ event, loading, onBack, onBuyTicket, onViewO
                         type="button"
                         aria-label={`Ajouter un billet ${formatTierLabel(tier.name)}`}
                         onClick={() => adjustQuantity(tier.name, 1, tier.available)}
-                        disabled={tierSoldOut || past}
+                        disabled={!enVente || tierSoldOut || past}
                         className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-600 text-white transition-colors hover:bg-orange-700 disabled:bg-gray-200 disabled:text-gray-400"
                       >
                         <Plus className="h-3.5 w-3.5" />

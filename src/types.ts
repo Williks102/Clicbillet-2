@@ -41,7 +41,10 @@ export interface Event {
   endDate?: string | null;
   endTime?: string | null;
   price: number; // Base price in XOF
-  ticketTypes?: { name: string; price: number; total?: number }[]; // Custom ticket types (e.g. VIP, Standard)
+  // Types de billets définis par l'organisateur (ex: VIP, Standard). salesStart/salesEnd
+  // bornent facultativement la vente de CE tarif ("YYYY-MM-DDTHH:MM"), indépendamment de la
+  // date de l'événement : c'est ce qui permet un early bird ou un pass de dernière minute.
+  ticketTypes?: { name: string; price: number; total?: number; salesStart?: string | null; salesEnd?: string | null }[];
   ticketsSoldByTier?: Record<string, number>; // Sold count per tier name (computed server-side)
   venue: string; // Event location, e.g., "Palais de la Culture, Treichville"
   category: string;

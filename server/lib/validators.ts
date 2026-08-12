@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import express from "express";
 import { resoudreCategorie } from "./categories.js";
+import { normaliserTypesDeBillets } from "./ticketTypes.js";
 
 const MIN_PASSWORD_LENGTH = 10;
 
@@ -224,6 +225,17 @@ export const validateEvent = async (req: express.Request, res: express.Response,
   // L'aval ne manipule plus que des valeurs canoniques.
   req.body.category = categorieResolue.label;
   req.body.categorySlug = categorieResolue.slug;
+
+  // Grille tarifaire : jusqu'ici recopiée telle quelle en base par POST/PUT /api/events, donc
+  // libre de contenir n'importe quel JSON (noms vides ou en double, prix négatifs, quotas
+  // fantaisistes, liste sans fin). Le formulaire organisateur filtrait bien les lignes vides,
+  // mais un appel direct à l'API ne passe pas par lui.
+  const tarifs = normaliserTypesDeBillets(req.body.ticketTypes, { totalTickets: Number(totalTickets) });
+  if ("erreur" in tarifs) {
+    return res.status(400).json({ error: tarifs.erreur });
+  }
+  // L'aval écrit la version nettoyée (champs inconnus retirés, nombres convertis).
+  req.body.ticketTypes = tarifs.types;
 
   next();
 };

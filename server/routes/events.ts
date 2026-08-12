@@ -4,6 +4,7 @@ import { isSupabaseEnabled, supabase, supabaseAdmin } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { requireAuth, requireRole } from "../lib/auth.js";
 import { validateEvent, validateContactMessage } from "../lib/validators.js";
+import { compterVendusParTarif, refusModificationTarifs } from "../lib/ticketTypes.js";
 import { getCategories } from "../lib/categories.js";
 import { runInBackground } from "../lib/utils.js";
 import { sendOrganizerEventStatusEmail, sendAdminContactMessageEmail } from "../lib/email.js";
@@ -425,6 +426,33 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
   res.status(201).json(newEvent);
 });
 
+// Ventes par tarif d'un événement, telles qu'elles font foi pour protéger une modification
+// de grille tarifaire. La colonne `tier_sold` est la référence : c'est elle que reserve_tickets
+// avance sous le verrou de la ligne, donc elle inclut les places retenues par un paiement en
+// cours. Sur une base où la section 25 n'a pas encore été jouée, on recompte depuis les
+// billets — au mieux (l'API REST plafonne à 1 000 lignes), ce qui ne peut qu'assouplir le
+// garde-fou, jamais bloquer à tort une modification légitime.
+async function vendusParTarifSupabase(eventId: string, originalEvent: any): Promise<Record<string, number>> {
+  const tierSold = originalEvent?.tier_sold;
+  if (tierSold && typeof tierSold === "object" && !Array.isArray(tierSold)) {
+    const compte: Record<string, number> = {};
+    for (const [cle, valeur] of Object.entries(tierSold)) {
+      compte[String(cle).toLowerCase()] = Number(valeur) || 0;
+    }
+    return compte;
+  }
+
+  const { data, error } = await supabase!
+    .from("tickets")
+    .select("tier, transaction_ref")
+    .eq("event_id", eventId);
+  if (error) {
+    console.warn(`[Events] Ventes par tarif indisponibles pour ${eventId} (${error.message}).`);
+    return {};
+  }
+  return compterVendusParTarif(data || []);
+}
+
 // Update/Modify Event Endpoint
 router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), validateEvent, async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
@@ -451,6 +479,16 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
       // fourni par le client (qui pourrait sinon usurper n'importe quel organisateur).
       if (authUser.role !== "admin" && originalEvent.organizer_id !== authUser.id) {
         return res.status(403).json({ error: "Vous n'êtes pas autorisé à modifier cet événement." });
+      }
+
+      const refusTarifs = refusModificationTarifs(
+        originalEvent.ticket_types,
+        ticketTypes,
+        await vendusParTarifSupabase(id, originalEvent),
+        { totalTickets: Number(totalTickets), ticketsSold: Number(originalEvent.tickets_sold) || 0 }
+      );
+      if (refusTarifs) {
+        return res.status(409).json({ error: refusTarifs });
       }
 
       const bannerUrl = banner || originalEvent.banner;
@@ -558,6 +596,16 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
   // Security check: must belong to correct organizer unless it is admin
   if (authUser.role !== "admin" && event.organizerId !== authUser.id) {
     return res.status(403).json({ error: "Vous n'êtes pas autorisé à modifier cet événement." });
+  }
+
+  const refusTarifsLocal = refusModificationTarifs(
+    event.ticketTypes,
+    ticketTypes,
+    compterVendusParTarif((db.tickets || []).filter((t: any) => t.eventId === id)),
+    { totalTickets: Number(totalTickets), ticketsSold: Number(event.ticketsSold) || 0 }
+  );
+  if (refusTarifsLocal) {
+    return res.status(409).json({ error: refusTarifsLocal });
   }
 
   event.title = title;
