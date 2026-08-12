@@ -2,6 +2,7 @@ import crypto from "crypto";
 import express from "express";
 import { resoudreCategorie } from "./categories.js";
 import { normaliserTypesDeBillets } from "./ticketTypes.js";
+import { normaliserPassDesign } from "./passDesign.js";
 
 const MIN_PASSWORD_LENGTH = 10;
 
@@ -236,6 +237,22 @@ export const validateEvent = async (req: express.Request, res: express.Response,
   }
   // L'aval écrit la version nettoyée (champs inconnus retirés, nombres convertis).
   req.body.ticketTypes = tarifs.types;
+
+  // Habillage du pass. Validation par liste blanche stricte : ces valeurs sont interpolées
+  // dans des attributs `style` du billet imprimable, où une couleur libre suffirait à injecter
+  // du CSS sans jamais ouvrir de balise (cf. server/lib/passDesign.ts).
+  //
+  // Champ absent = l'appelant ne touche pas à l'habillage ; il reste alors `undefined`, et
+  // c'est la route qui décide (thème par défaut à la création, valeur conservée à la
+  // modification). Le réinitialiser ici ferait perdre son habillage à tout organisateur
+  // modifiant son événement depuis un client qui ignore ce champ.
+  if (req.body.passDesign !== undefined) {
+    const habillage = normaliserPassDesign(req.body.passDesign);
+    if ("erreur" in habillage) {
+      return res.status(400).json({ error: habillage.erreur });
+    }
+    req.body.passDesign = habillage.design;
+  }
 
   next();
 };

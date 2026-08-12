@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Plus, LayoutDashboard, BarChart3, Calendar, MapPin, Tag, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X, AtSign, CheckCircle2, AlertCircle, Receipt, Download } from "lucide-react";
-import { Event, User, SalesStatus } from "../types";
+import { Event, User, SalesStatus, PassDesign } from "../types";
 import { authFetch } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
 import { isEventPast, EVENT_SCAN_GRACE_HOURS, EVENT_DEFAULT_DURATION_HOURS } from "../lib/eventStatus";
@@ -9,6 +9,8 @@ import { fetchCategories, cleDeLEvenement, type Category } from "../lib/categori
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import { isVipTier, formatTierLabel, formatSaleWindowLabel } from "../lib/ticketTier";
 import { isPaidTicket } from "../lib/ticketPayment";
+import PassDesignEditor from "./PassDesignEditor";
+import { PASS_DESIGN_PAR_DEFAUT, resolvePassDesign } from "../lib/passDesign";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 import AccountCodeBadge from "./AccountCodeBadge";
 import WeeklySalesChart from "./WeeklySalesChart";
@@ -185,6 +187,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   // salesStart/salesEnd : fenêtre de vente facultative propre au tarif (early bird, pass
   // tardif), saisie en datetime-local et envoyée telle quelle ("YYYY-MM-DDTHH:MM").
   const [ticketTypes, setTicketTypes] = useState<TierDraft[]>([{ name: 'Standard', price: '', total: '', salesStart: '', salesEnd: '' }]);
+  const [passDesign, setPassDesign] = useState<PassDesign>({ ...PASS_DESIGN_PAR_DEFAUT });
   const [venue, setVenue] = useState("");
   const [category, setCategory] = useState("concert");
   const [totalTickets, setTotalTickets] = useState("");
@@ -214,6 +217,11 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [editEndTime, setEditEndTime] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [editTicketTypes, setEditTicketTypes] = useState<TierDraft[]>([]);
+  // Habillage du pass : chargé à l'ouverture de la fenêtre de modification via son endpoint
+  // dédié, et non lu depuis l'événement du catalogue — le logo et l'image de fond n'y sont
+  // volontairement pas embarqués (cf. GET /api/events/:id/pass-design).
+  const [editPassDesign, setEditPassDesign] = useState<PassDesign>({ ...PASS_DESIGN_PAR_DEFAUT });
+  const [editPassDesignLoading, setEditPassDesignLoading] = useState(false);
   const [editVenue, setEditVenue] = useState("");
   const [editCategory, setEditCategory] = useState("concert");
   const [editTotalTickets, setEditTotalTickets] = useState("");
@@ -367,8 +375,25 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       }
     }
 
+    // Habillage du pass de l'événement à modifier. En cas d'échec on repart du thème par
+    // défaut plutôt que de bloquer la fenêtre : l'organisateur peut vouloir corriger un tout
+    // autre champ, et rien n'est écrasé tant qu'il n'enregistre pas.
+    async function chargerPassDesign(eventId: string) {
+      setEditPassDesignLoading(true);
+      try {
+        const response = await authFetch(`/api/events/${eventId}/pass-design`);
+        if (!response.ok) throw new Error("Habillage indisponible.");
+        setEditPassDesign(resolvePassDesign(await response.json()));
+      } catch {
+        setEditPassDesign({ ...PASS_DESIGN_PAR_DEFAUT });
+      } finally {
+        setEditPassDesignLoading(false);
+      }
+    }
+
     function openEdit(evt: Event) {
       setEditingEvent(evt);
+      chargerPassDesign(evt.id);
       setEditTitle(evt.title);
     setEditDescription(evt.description);
     setEditDate(evt.date);
@@ -421,7 +446,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       banner: bannerPath,
       totalTickets: tierTotalSum > 0 ? tierTotalSum : Number(editTotalTickets),
       organizerId: user.id,
-      scheduledOnsale: editScheduledOnsale
+      scheduledOnsale: editScheduledOnsale,
+      passDesign: editPassDesign
     };
 
     try {
@@ -597,7 +623,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       totalTickets: cleanedTiers.reduce((s, t) => s + t.total, 0) || Number(totalTickets),
       organizerId: user.id,
       organizerName: user.name,
-      scheduledOnsale
+      scheduledOnsale,
+      passDesign
     };
 
     try {
@@ -626,6 +653,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       setEndTime("");
       setPrice("");
       setTicketTypes([{ name: 'Standard', price: '', total: '', salesStart: '', salesEnd: '' }]);
+      setPassDesign({ ...PASS_DESIGN_PAR_DEFAUT });
       setVenue("");
       setTotalTickets("");
       setScheduledOnsale(false);
@@ -1252,6 +1280,13 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
               />
             </div>
 
+            <PassDesignEditor
+              value={passDesign}
+              onChange={setPassDesign}
+              onError={setFormError}
+              idPrefix="create"
+            />
+
             <div className="space-y-2 rounded-xl border border-gray-200 p-4">
               <label className="flex items-center gap-2 text-xs font-bold text-gray-700">
                 <input
@@ -1836,6 +1871,19 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                     </button>
                   </div>
                 </div>
+
+                {editPassDesignLoading ? (
+                  <div className="rounded-2xl border border-gray-200 p-4 text-[11px] font-semibold text-gray-400">
+                    Chargement de l'habillage du pass…
+                  </div>
+                ) : (
+                  <PassDesignEditor
+                    value={editPassDesign}
+                    onChange={setEditPassDesign}
+                    onError={setEditError}
+                    idPrefix="edit"
+                  />
+                )}
 
                 <div className="space-y-2 rounded-xl border border-gray-200 p-4">
                   <label className="flex items-center gap-2 text-xs font-bold text-gray-700">

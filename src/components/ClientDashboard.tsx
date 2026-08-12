@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Ticket as TicketIcon, Calendar, MapPin, Download, CheckCircle2, AlertTriangle, ExternalLink, Printer, Sparkles, Receipt, Lock, Send, Gift } from "lucide-react";
 import { Ticket, TicketTransfer, User } from "../types";
 import { authFetch } from "../lib/apiClient";
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
+import { buildPassTheme } from "../lib/passDesign";
 import { isPaidTicket } from "../lib/ticketPayment";
 import { hasEventStarted } from "../lib/eventStatus";
 import { TicketListSkeleton } from "./Skeleton";
@@ -95,6 +96,11 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
   const [transferSending, setTransferSending] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
   const [transferSuccess, setTransferSuccess] = useState<string | null>(null);
+
+  // Habillage choisi par l'organisateur pour CET événement (couleurs, logo, image de fond).
+  // Retombe sur le thème ClicBillet quand rien n'a été personnalisé, ou qu'une valeur stockée
+  // ne passe pas la validation.
+  const passTheme = useMemo(() => buildPassTheme(selectedTicket?.passDesign), [selectedTicket]);
 
   // Fetch tickets for this user from backend
   async function fetchTickets() {
@@ -204,28 +210,54 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
   }, [tickets, selectedTicket, user.id]);
 
   function handlePrintTicket() {
-    const ticketHtml = document.getElementById("printable-ticket-content")?.innerHTML || "";
+    // Copie de travail : le calque d'image de fond est retiré avant recopie, car le document
+    // imprimé le repose au niveau du cadre du pass. Le laisser ici le ferait apparaître deux
+    // fois, la version recopiée ne couvrant que le bloc central (son parent positionné change).
+    const source = document.getElementById("printable-ticket-content");
+    const copie = source?.cloneNode(true) as HTMLElement | null;
+    copie?.querySelector("#pass-background-layer")?.remove();
+    const ticketHtml = copie?.innerHTML || "";
+
+    // L'habillage est réappliqué ici parce que seul l'INTÉRIEUR du pass est recopié : les
+    // styles portés par le conteneur #printable-ticket-content lui-même (fond, position
+    // relative dont dépend le calque d'image) ne suivent pas l'innerHTML.
+    //
+    // Les valeurs viennent de buildPassTheme, qui n'accepte qu'un #RRGGBB et une URL sans
+    // guillemet ni parenthèse : c'est ce qui rend sûre leur interpolation dans ces attributs
+    // `style`, où l'échappement HTML ne protégerait de rien.
+    const fondImprime = passTheme.backgroundImageUrl
+      ? `<div style="position: absolute; inset: 0; background-image: url(${passTheme.backgroundImageUrl}); background-size: cover; background-position: center; opacity: ${passTheme.backgroundOpacity};"></div>`
+      : "";
+
+    const enTeteImprime = passTheme.logoUrl
+      ? `<img src="${escapeHtml(passTheme.logoUrl)}" alt="" style="max-height: 56px; max-width: 60%; margin: 0 auto 8px; display: block; object-fit: contain;" />`
+      : `<span style="font-family: sans-serif; font-size: 18px; font-weight: 900; color: ${passTheme.textColor};">
+            CLIC<span style="color: ${passTheme.primaryColor};">BILLET</span> COUPOUN
+          </span>`;
 
     const bodyHtml = `
-      <div style="max-width: 360px; margin: 10px auto; border: 1px dashed #ea580c; padding: 20px; border-radius: 16px; background-color: #ffffff;">
-        <div style="text-align: center; margin-bottom: 20px;">
-          <span style="font-family: sans-serif; font-size: 18px; font-weight: 900; color: #111827;">
-            CLIC<span style="color: #ea580c;">BILLET</span> COUPOUN
-          </span>
-          <span style="display: block; font-size: 8px; font-weight: 700; letter-spacing: 0.15em; color: #9ca3af; margin-top: 2px; text-transform: uppercase;">
+      <div style="position: relative; max-width: 360px; margin: 10px auto; border: 1px dashed ${passTheme.primaryColor}; padding: 20px; border-radius: 16px; background-color: ${passTheme.backgroundColor}; color: ${passTheme.textColor}; overflow: hidden;">
+        ${fondImprime}
+        <div style="position: relative; text-align: center; margin-bottom: 20px;">
+          ${enTeteImprime}
+          <span style="display: block; font-size: 8px; font-weight: 700; letter-spacing: 0.15em; color: ${passTheme.mutedColor}; margin-top: 2px; text-transform: uppercase;">
             Pass de Réservation Sécurisé
           </span>
         </div>
 
-        ${ticketHtml}
+        <div style="position: relative;">${ticketHtml}</div>
 
-        <div style="text-align: center; font-size: 8px; color: #9ca3af; margin-top: 24px; border-top: 1px solid #f3f4f6; padding-top: 10px;">
+        <div style="position: relative; text-align: center; font-size: 8px; color: ${passTheme.mutedColor}; margin-top: 24px; border-top: 1px solid ${passTheme.borderColor}; padding-top: 10px;">
           © 2026 ClicBillet CI. Réseau national de billetterie mobile décentralisé.
         </div>
       </div>
     `;
 
     const ticketStyles = `
+      /* Les fonds et couleurs du pass viennent de l'habillage de l'organisateur, posés en
+         ligne sur les éléments. Sans print-color-adjust, les navigateurs les suppriment à
+         l'impression (économie d'encre par défaut) et le pass ressort en noir et blanc. */
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       body {
         font-family: 'Inter', system-ui, -apple-system, sans-serif;
         color: #111827;
@@ -237,16 +269,10 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
       .space-y-2 > * + * { margin-top: 8px; }
       .space-y-6 > * + * { margin-top: 24px; }
 
-      /* Theme Colors & Layout styling matching original ticket aesthetics */
-      .bg-gray-50\\/70 {
-        background-color: #f9fafb;
-        border: 1px solid #f3f4f6;
-        border-radius: 16px;
-        padding: 16px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-      }
+      /* Mise en page du bloc QR : son fond et son liseré sont désormais portés en ligne par
+         l'habillage, il ne reste ici que les dimensions. */
+      .py-6 { padding-top: 16px; padding-bottom: 16px; }
+      .rounded-2xl { border-radius: 16px; }
       .relative { position: relative; }
       .h-44 { height: 176px; }
       .w-44 { width: 176px; }
@@ -277,11 +303,9 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
       .border-dashed { border-style: dashed; }
       .pt-5 { padding-top: 16px; }
       .col-span-2 { grid-column: span 2 / span 2; }
-      .text-orange-600 { color: #ea580c; }
-      .text-amber-900 { color: #78350f; }
-      .bg-amber-100 { background-color: #fef3c7; }
-      .bg-blue-100 { background-color: #dbeafe; }
-      .text-blue-900 { color: #1e3a8a; }
+      /* Les couleurs du pass (accent, texte, pastille du tarif) ne sont plus déclarées ici :
+         elles viennent de l'habillage de l'organisateur et voyagent en ligne avec le HTML
+         recopié. Les figer en dur ici les écraserait pour tous les événements. */
       .truncate {
         overflow: hidden;
         text-overflow: ellipsis;
@@ -578,39 +602,80 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
           panelClassName="max-w-md sm:my-8 border border-orange-50 overflow-x-hidden overflow-y-auto max-h-[92vh] sm:max-h-none print:p-0 print:border-none print:shadow-none"
         >
             {/* Modal header details */}
-            <div className="bg-orange-600 px-6 py-5 text-white flex justify-between items-center print:hidden">
+            <div
+              className="px-6 py-5 flex justify-between items-center print:hidden"
+              style={{ backgroundColor: passTheme.primaryColor, color: passTheme.onPrimaryColor }}
+            >
               <span className="text-sm font-extrabold flex items-center space-x-1">
                 <TicketIcon className="h-4 w-4" />
                 <span>Mon Billet Securisé</span>
               </span>
               <button
                 onClick={() => setSelectedTicket(null)}
-                className="rounded-lg bg-white/10 p-1.5 hover:bg-white/20 text-white transition-all text-xs font-extrabold"
+                className="rounded-lg bg-black/10 p-1.5 hover:bg-black/20 transition-all text-xs font-extrabold"
+                style={{ color: passTheme.onPrimaryColor }}
               >
                 Fermer
               </button>
             </div>
 
-            {/* Simulated Printed Pass Paper */}
-            <div className="p-6 md:p-8 space-y-6" id="printable-ticket-content">
+            {/* Simulated Printed Pass Paper.
+                Les styles de l'habillage sont posés EN LIGNE, et non via des classes : le
+                bouton "Télécharger PDF" recopie l'innerHTML de ce bloc dans un document
+                d'impression isolé (cf. handlePrintTicket), qui n'a pas la feuille Tailwind de
+                l'application. Seul l'inline suit. */}
+            <div
+              className="relative p-6 md:p-8 space-y-6"
+              id="printable-ticket-content"
+              style={{ backgroundColor: passTheme.backgroundColor, color: passTheme.textColor }}
+            >
+              {/* Image de fond, atténuée : le QR code et les mentions doivent rester lisibles,
+                  quelle que soit l'image choisie. */}
+              {passTheme.backgroundImageUrl && (
+                <div
+                  id="pass-background-layer"
+                  aria-hidden="true"
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    backgroundImage: `url(${passTheme.backgroundImageUrl})`,
+                    backgroundSize: "cover",
+                    backgroundPosition: "center",
+                    opacity: passTheme.backgroundOpacity,
+                    pointerEvents: "none"
+                  }}
+                />
+              )}
+
               {/* Event Badge and Title */}
-              <div className="text-center space-y-2">
-                <span className={`inline-flex items-center space-x-1 rounded-sm px-2.5 py-0.5 text-[10px] font-black uppercase ${
-                  isVipTier(selectedTicket.tier)
-                    ? "bg-amber-100 text-amber-900 border border-amber-200"
-                    : "bg-blue-100 text-blue-900 border border-blue-200"
-                }`}>
-                  <Sparkles className="h-3 w-3 text-amber-600 shrink-0" />
+              <div className="relative text-center space-y-2">
+                {passTheme.logoUrl && (
+                  <img
+                    src={passTheme.logoUrl}
+                    alt=""
+                    style={{ maxHeight: "56px", maxWidth: "60%", margin: "0 auto 10px", display: "block", objectFit: "contain" }}
+                  />
+                )}
+                <span
+                  className="inline-flex items-center space-x-1 rounded-sm px-2.5 py-0.5 text-[10px] font-black uppercase"
+                  style={{ backgroundColor: passTheme.primaryColor, color: passTheme.onPrimaryColor }}
+                >
+                  {isVipTier(selectedTicket.tier) && <Sparkles className="h-3 w-3 shrink-0" />}
                   <span>Pass {formatTierLabel(selectedTicket.tier)}</span>
                 </span>
-                
-                <h3 className="text-lg font-black text-gray-900 leading-tight">
+
+                <h3 className="text-lg font-black leading-tight" style={{ color: passTheme.textColor }}>
                   {selectedTicket.eventTitle}
                 </h3>
               </div>
 
-              {/* Secure QR Code Section */}
-              <div className="flex flex-col items-center justify-center space-y-2 bg-gray-50/70 py-6 rounded-2xl border border-gray-100">
+              {/* Secure QR Code Section.
+                  Le cadre du QR reste blanc quel que soit le thème : un lecteur optique a
+                  besoin du contraste noir sur blanc, un fond sombre le rendrait illisible. */}
+              <div
+                className="relative flex flex-col items-center justify-center space-y-2 py-6 rounded-2xl"
+                style={{ backgroundColor: passTheme.surfaceColor, border: `1px solid ${passTheme.borderColor}` }}
+              >
                 <div className="relative h-44 w-44 rounded-xl bg-white p-2 border border-gray-200 shadow-md flex items-center justify-center">
                   {selectedTicket.paymentStatus === "pending" && (
                     <div className="absolute inset-0 bg-white/95 flex flex-col items-center justify-center p-3 text-center rounded-xl z-10">
@@ -649,8 +714,8 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
                   )}
                 </div>
                 <div className="text-center">
-                  <p className="text-[10px] font-black tracking-widest text-gray-400 uppercase font-mono">ID: {selectedTicket.id}</p>
-                  <p className="text-[9px] text-gray-400 mt-1">
+                  <p className="text-[10px] font-black tracking-widest uppercase font-mono" style={{ color: passTheme.mutedColor }}>ID: {selectedTicket.id}</p>
+                  <p className="text-[9px] mt-1" style={{ color: passTheme.mutedColor }}>
                     {selectedTicket.qrCodeData
                       ? "Présentez ce QR Code à l'entrée de l'événement."
                       : "Revenez sur cette page le jour J pour afficher votre QR Code."}
@@ -659,37 +724,40 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
               </div>
 
               {/* Metadata Details Grid */}
-              <div className="grid grid-cols-2 gap-4 border-t border-dashed border-gray-200 pt-5 text-xs text-gray-700">
+              <div
+                className="relative grid grid-cols-2 gap-4 pt-5 text-xs"
+                style={{ borderTop: `1px dashed ${passTheme.borderColor}`, color: passTheme.textColor }}
+              >
                 <div>
-                  <span className="text-gray-400 font-bold block mb-0.5">Acheteur</span>
-                  <span className="font-extrabold text-gray-900 block truncate">{selectedTicket.buyerName}</span>
-                  <span className="text-[10px] text-gray-400 truncate block">{selectedTicket.buyerEmail}</span>
+                  <span className="font-bold block mb-0.5" style={{ color: passTheme.mutedColor }}>Acheteur</span>
+                  <span className="font-extrabold block truncate" style={{ color: passTheme.textColor }}>{selectedTicket.buyerName}</span>
+                  <span className="text-[10px] truncate block" style={{ color: passTheme.mutedColor }}>{selectedTicket.buyerEmail}</span>
                 </div>
                 <div>
-                  <span className="text-gray-400 font-bold block mb-0.5">Quantité</span>
-                  <span className="font-extrabold text-gray-900 font-sans block">{selectedTicket.quantity} Personne(s)</span>
+                  <span className="font-bold block mb-0.5" style={{ color: passTheme.mutedColor }}>Quantité</span>
+                  <span className="font-extrabold font-sans block" style={{ color: passTheme.textColor }}>{selectedTicket.quantity} Personne(s)</span>
                 </div>
                 <div>
-                  <span className="text-gray-400 font-bold block mb-0.5">Date et Heure</span>
-                  <span className="font-extrabold text-gray-900 block leading-tight">
+                  <span className="font-bold block mb-0.5" style={{ color: passTheme.mutedColor }}>Date et Heure</span>
+                  <span className="font-extrabold block leading-tight" style={{ color: passTheme.textColor }}>
                     {new Date(selectedTicket.eventDate).toLocaleDateString("fr-FR", {
                       day: "numeric",
                       month: "long",
                       year: "numeric"
                     })}
                   </span>
-                  <span className="text-[10px] text-gray-400 block font-semibold mt-0.5">Débute à {selectedTicket.eventTime}</span>
+                  <span className="text-[10px] block font-semibold mt-0.5" style={{ color: passTheme.mutedColor }}>Débute à {selectedTicket.eventTime}</span>
                 </div>
                 <div>
-                  <span className="text-gray-400 font-bold block mb-0.5 font-sans">Lieu de l'événement</span>
-                  <span className="font-extrabold text-gray-900 block leading-tight truncate" title={selectedTicket.eventVenue}>
+                  <span className="font-bold block mb-0.5 font-sans" style={{ color: passTheme.mutedColor }}>Lieu de l'événement</span>
+                  <span className="font-extrabold block leading-tight truncate" title={selectedTicket.eventVenue} style={{ color: passTheme.textColor }}>
                     {selectedTicket.eventVenue}
                   </span>
                 </div>
-                <div className="col-span-2 border-t border-gray-50 pt-3">
-                  <div className="flex justify-between items-center text-[10px] text-gray-400 font-semibold font-mono">
+                <div className="col-span-2 pt-3" style={{ borderTop: `1px solid ${passTheme.borderColor}` }}>
+                  <div className="flex justify-between items-center text-[10px] font-semibold font-mono" style={{ color: passTheme.mutedColor }}>
                     <span>REF DE PAIEMENT: {selectedTicket.transactionRef}</span>
-                    <span className="font-extrabold text-orange-600 text-xs">{selectedTicket.pricePaid.toLocaleString("fr-FR")} XOF</span>
+                    <span className="font-extrabold text-xs" style={{ color: passTheme.primaryColor }}>{selectedTicket.pricePaid.toLocaleString("fr-FR")} XOF</span>
                   </div>
                 </div>
               </div>
@@ -697,7 +765,7 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
               {/* Transfert officiel du billet : alternative légitime au partage d'une capture
                   d'écran, seulement pour un billet payé, pas encore scanné, événement à venir. */}
               {selectedTicket.paymentStatus !== "pending" && !selectedTicket.scanned && !hasEventStarted({ date: selectedTicket.eventDate, time: selectedTicket.eventTime }) && (
-                <div className="border-t border-dashed border-gray-200 pt-5 print:hidden" id="ticket-transfer-section">
+                <div className="relative pt-5 print:hidden" id="ticket-transfer-section" style={{ borderTop: `1px dashed ${passTheme.borderColor}` }}>
                   {!transferOpen ? (
                     <button
                       id="open-transfer-form-btn"

@@ -3,7 +3,11 @@
 // gonfle chaque événement de plusieurs Mo, et cette bannière est renvoyée telle quelle dans
 // la réponse JSON de /api/events à CHAQUE visiteur de la page d'accueil — c'est la cause la
 // plus probable d'un chargement des événements perçu comme lent.
-export function compressImageToDataUrl(file: File, maxWidth = 1280, quality = 0.8): Promise<string> {
+//
+// mimeType : le JPEG n'a pas de canal alpha — un logo transparent en ressortirait sur fond
+// noir. Les appelants qui doivent préserver la transparence (logo du pass) demandent donc du
+// PNG, au prix d'un fichier plus lourd à dimensions égales.
+export function compressImageToDataUrl(file: File, maxWidth = 1280, quality = 0.8, mimeType: "image/jpeg" | "image/png" = "image/jpeg"): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(reader.error ?? new Error("Lecture du fichier impossible."));
@@ -21,7 +25,7 @@ export function compressImageToDataUrl(file: File, maxWidth = 1280, quality = 0.
           return;
         }
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
+        resolve(canvas.toDataURL(mimeType, quality));
       };
       img.src = reader.result as string;
     };
