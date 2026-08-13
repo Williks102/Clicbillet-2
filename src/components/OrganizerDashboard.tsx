@@ -31,12 +31,18 @@ type OrganizerSubTab = "dashboard" | "reports" | "create" | "simulator" | "payou
 type TierDraft = { name: string; price: string; total: string; salesStart: string; salesEnd: string };
 
 // Un tarif vide ne part pas au serveur ; on ne conserve que ce qui est réellement renseigné.
-function nettoyerTarifs(brouillons: TierDraft[]) {
+//
+// prixDeBase : un champ prix laissé vide signifie « le prix de base de l'événement », pas
+// « gratuit ». Le convertir en 0 mettait le billet en distribution gratuite sans que rien ne
+// le signale — l'événement affichait son prix de base au catalogue, la page de l'événement
+// annonçait 0 F, et l'achat court-circuitait la passerelle de paiement pour émettre un billet
+// gratuit. Un organisateur pouvait ainsi donner toute sa salle sans jamais s'en apercevoir.
+function nettoyerTarifs(brouillons: TierDraft[], prixDeBase: number) {
   return brouillons
     .filter((t) => t.name.trim() !== "")
     .map((t) => ({
       name: t.name.trim(),
-      price: Number(t.price) || 0,
+      price: t.price.trim() === "" ? prixDeBase : Number(t.price) || 0,
       total: Number(t.total) || 0,
       salesStart: t.salesStart ? t.salesStart.slice(0, 16) : null,
       salesEnd: t.salesEnd ? t.salesEnd.slice(0, 16) : null,
@@ -222,6 +228,11 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   // volontairement pas embarqués (cf. GET /api/events/:id/pass-design).
   const [editPassDesign, setEditPassDesign] = useState<PassDesign>({ ...PASS_DESIGN_PAR_DEFAUT });
   const [editPassDesignLoading, setEditPassDesignLoading] = useState(false);
+
+  // Tarifs qui partiraient à 0 F : un billet gratuit est parfaitement légitime, mais il court-
+  // circuite le paiement, donc il ne doit jamais résulter d'un champ oublié.
+  const tarifsGratuits = nettoyerTarifs(ticketTypes, Number(price) || 0).filter((t) => t.price === 0).map((t) => t.name);
+  const tarifsGratuitsEdition = nettoyerTarifs(editTicketTypes, Number(editPrice) || 0).filter((t) => t.price === 0).map((t) => t.name);
   const [editVenue, setEditVenue] = useState("");
   const [editCategory, setEditCategory] = useState("concert");
   const [editTotalTickets, setEditTotalTickets] = useState("");
@@ -430,7 +441,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
 
     const bannerPath = editCustomBannerUrl.trim() !== "" ? editCustomBannerUrl.trim() : editSelectedBanner;
 
-    const cleanedEditTiers = nettoyerTarifs(editTicketTypes);
+    const cleanedEditTiers = nettoyerTarifs(editTicketTypes, Number(editPrice) || 0);
     const tierTotalSum = cleanedEditTiers.reduce((s, t) => s + t.total, 0);
     const payload = {
       title: editTitle,
@@ -603,7 +614,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     setSubmitting(true);
 
     const bannerPath = customBannerUrl.trim() !== "" ? customBannerUrl.trim() : selectedBanner;
-    const cleanedTiers = nettoyerTarifs(ticketTypes);
+    const cleanedTiers = nettoyerTarifs(ticketTypes, Number(price) || 0);
 
     const payload = {
       title,
@@ -1265,6 +1276,15 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                   <Plus className="w-3 h-3 mr-1" /> Ajouter un type de billet
                 </button>
               </div>
+              <p className="text-[10px] text-gray-400">
+                Prix laissé vide = le prix de base ci-dessus. Saisissez 0 pour un billet réellement gratuit.
+              </p>
+              {tarifsGratuits.length > 0 && (
+                <p className="rounded-lg bg-amber-50 p-2 text-[11px] font-semibold text-amber-700" id="create-free-tier-warning">
+                  {tarifsGratuits.join(", ")} {tarifsGratuits.length > 1 ? "sont gratuits" : "est gratuit"} : ces billets
+                  seront délivrés sans paiement.
+                </p>
+              )}
             </div>
 
             <div className="space-y-1">
@@ -1870,6 +1890,15 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                       <Plus className="w-3 h-3 mr-1" /> Ajouter un type
                     </button>
                   </div>
+                  <p className="text-[10px] text-gray-400">
+                    Prix laissé vide = le prix de base ci-dessus. Saisissez 0 pour un billet réellement gratuit.
+                  </p>
+                  {tarifsGratuitsEdition.length > 0 && (
+                    <p className="rounded-lg bg-amber-50 p-2 text-[11px] font-semibold text-amber-700" id="edit-free-tier-warning">
+                      {tarifsGratuitsEdition.join(", ")} {tarifsGratuitsEdition.length > 1 ? "sont gratuits" : "est gratuit"} :
+                      ces billets seront délivrés sans paiement.
+                    </p>
+                  )}
                 </div>
 
                 {editPassDesignLoading ? (
