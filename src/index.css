@@ -1,1 +1,31 @@
 @import "tailwindcss";
+
+/* Champs des formulaires longs présentés en fenêtre (création / modification d'événement).
+   iOS Safari zoome d'autorité sur tout champ dont la police fait moins de 16 px : la page se
+   décale à chaque prise de focus, et l'utilisateur doit dézoomer à la main entre deux saisies.
+   C'est la raison la plus fréquente pour laquelle un formulaire correct au clavier devient
+   pénible au doigt.
+
+   La règle vit ici plutôt que sur chaque champ : l'appliquer à une trentaine d'entrées les
+   ferait diverger à la première modification.
+
+   Elle est volontairement HORS de toute `@layer`. Tailwind v4 range ses utilitaires dans la
+   couche `utilities`, qui l'emporte sur `components` quelle que soit la spécificité — une
+   règle placée dans `components` restait donc sans effet face au `text-xs` des champs. Le CSS
+   sans couche prime sur tout CSS en couche : c'est la seule position qui gagne ici.
+
+   L'échelle compacte de l'interface revient dès le premier point d'arrêt, là où le zoom
+   automatique n'existe pas. */
+.form-fields input,
+.form-fields select,
+.form-fields textarea {
+  font-size: 16px;
+}
+
+@media (min-width: 640px) {
+  .form-fields input,
+  .form-fields select,
+  .form-fields textarea {
+    font-size: 0.75rem;
+  }
+}

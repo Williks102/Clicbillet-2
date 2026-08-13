@@ -48,7 +48,7 @@ export default function PassDesignEditor({ value, onChange, onError, idPrefix }:
           <button
             type="button"
             onClick={() => onChange({ ...PASS_DESIGN_PAR_DEFAUT })}
-            className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+            className="flex min-h-11 shrink-0 items-center gap-1 rounded-lg px-2 text-[10px] font-bold text-gray-500 hover:bg-gray-50 hover:text-gray-700 sm:min-h-0 sm:py-1"
           >
             <RotateCcw className="h-3 w-3" />
             Réinitialiser
@@ -238,7 +238,7 @@ function ChampImage({
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
-            className="text-[11px] font-bold text-orange-600 hover:text-orange-700"
+            className="flex min-h-9 items-center text-[11px] font-bold text-orange-600 hover:text-orange-700 sm:min-h-0"
           >
             {value ? "Remplacer" : "Importer une image"}
           </button>

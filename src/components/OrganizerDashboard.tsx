@@ -1680,31 +1680,49 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       {editingEvent && (
         <ResponsiveSheet
           onClose={() => setEditingEvent(null)}
-          panelClassName="max-w-2xl border border-gray-100 max-h-[90vh] overflow-y-auto p-6 space-y-6"
+          panelClassName="max-w-2xl border border-gray-100 max-h-[92dvh] sm:max-h-[88vh] flex flex-col overflow-hidden"
         >
-            <button
-              onClick={() => setEditingEvent(null)}
-              className="absolute top-10 right-4 sm:top-4 h-8 w-8 rounded-full border border-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition"
-              title="Fermer"
-            >
-              <X className="h-4 w-4" />
-            </button>
+          {/* Trois zones distinctes plutôt qu'un seul bloc défilant : le formulaire est long
+              (une dizaine de sections), et faire défiler l'ensemble emportait le titre ET le
+              bouton de fermeture hors de l'écran. Sur mobile, il n'y avait alors plus aucun
+              moyen visible de sortir de la fenêtre, ni de savoir ce qu'on modifiait. */}
+          <form onSubmit={handleUpdateEvent} className="form-fields flex min-h-0 flex-1 flex-col">
 
-            <div className="border-b border-gray-50 pb-4">
-              <h3 className="text-base font-black text-gray-900 flex items-center space-x-1">
-                <SlidersHorizontal className="h-5 w-5 text-orange-600" />
-                <span>Modifier l'événement : {editingEvent.title}</span>
-              </h3>
-              <p className="text-xs text-gray-400 mt-0.5 font-medium">Ajustez les paramètres de votre événement. Les modifications se synchroniseront avec les ventes actifs.</p>
-            </div>
-
-            {editError && (
-              <div className="rounded-lg bg-red-50 p-3.5 text-xs font-semibold text-red-600 border border-red-100">
-                {editError}
+            <header className="flex shrink-0 items-start gap-3 border-b border-gray-100 px-5 py-4 sm:px-6">
+              <div className="min-w-0 flex-1">
+                <h3 className="flex items-center gap-1.5 text-sm font-black text-gray-900 sm:text-base">
+                  <SlidersHorizontal className="h-4 w-4 shrink-0 text-orange-600" />
+                  <span>Modifier l'événement</span>
+                </h3>
+                {/* Le titre de l'événement passe sur sa propre ligne, tronqué : accolé au
+                    libellé, il faisait déborder l'en-tête sous le bouton de fermeture dès
+                    qu'il dépassait quelques mots. */}
+                <p className="mt-0.5 truncate text-xs font-bold text-gray-500" title={editingEvent.title}>
+                  {editingEvent.title}
+                </p>
               </div>
-            )}
+              <button
+                type="button"
+                onClick={() => setEditingEvent(null)}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-gray-100 text-gray-400 transition hover:bg-gray-50 hover:text-gray-600"
+                title="Fermer"
+                aria-label="Fermer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </header>
 
-            <form onSubmit={handleUpdateEvent} className="space-y-5">
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4 sm:px-6">
+              <p className="text-xs font-medium text-gray-400">
+                Ajustez les paramètres de votre événement. Les modifications se synchronisent avec les ventes en cours.
+              </p>
+
+              {editError && (
+                <div className="rounded-lg border border-red-100 bg-red-50 p-3.5 text-xs font-semibold text-red-600">
+                  {editError}
+                </div>
+              )}
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1 sm:col-span-2">
                   <label className="text-xs font-bold text-gray-700">Titre de l'événement</label>
@@ -1794,61 +1812,86 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                   />
                 </div>
 
-                <div className="space-y-1">
+                {/* Sur deux colonnes, ce bloc n'occupait qu'une demi-largeur : ses trois
+                    champs et le bouton de suppression s'y retrouvaient plus à l'étroit qu'au
+                    téléphone, « 15000 » n'y tenant même pas. Il prend la largeur entière. */}
+                <div className="space-y-1 sm:col-span-2">
                   <label className="text-xs font-bold text-gray-700">Types de billets &amp; places</label>
                   <p className="text-[10px] font-semibold leading-relaxed text-gray-400">
                     Un type de billet déjà vendu ne peut plus être renommé ni supprimé : les billets
                     émis y sont rattachés par son nom. Créez plutôt un nouveau type à côté.
                   </p>
-                  <div className="grid grid-cols-3 gap-1 mb-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1">
+                  {/* En-têtes de colonnes masqués sur mobile : les champs y sont empilés, des
+                      titres alignés en trois colonnes ne désignaient plus rien. */}
+                  <div className="mb-1 hidden grid-cols-3 gap-1 px-1 text-[10px] font-bold uppercase tracking-wider text-gray-400 sm:grid">
                     <span>Catégorie</span><span>Prix (XOF)</span><span>Places</span>
                   </div>
                   <div className="space-y-2">
                     {editTicketTypes.map((tier, idx) => (
                       <div key={idx} className="space-y-2 rounded-2xl border border-gray-100 p-2">
-                      <div className="flex space-x-2">
-                        <input
-                          type="text"
-                          placeholder="Ex: VIP"
-                          value={tier.name}
-                          onChange={(e) => {
-                            const t = [...editTicketTypes];
-                            t[idx].name = e.target.value;
-                            setEditTicketTypes(t);
-                          }}
-                          className="flex-1 rounded-xl border border-gray-200 py-2.5 px-3 text-xs outline-none focus:border-orange-500"
-                        />
-                        <input
-                          type="number"
-                          min="0"
-                          step="500"
-                          placeholder="15000"
-                          value={tier.price}
-                          onChange={(e) => {
-                            const t = [...editTicketTypes];
-                            t[idx].price = e.target.value;
-                            setEditTicketTypes(t);
-                          }}
-                          className="flex-1 rounded-xl border border-gray-200 py-2.5 px-3 text-xs outline-none focus:border-orange-500"
-                        />
-                        <input
-                          type="number"
-                          min="0"
-                          placeholder="100"
-                          value={tier.total}
-                          onChange={(e) => {
-                            const t = [...editTicketTypes];
-                            t[idx].total = e.target.value;
-                            setEditTicketTypes(t);
-                          }}
-                          className="flex-1 rounded-xl border border-gray-200 py-2.5 px-3 text-xs outline-none focus:border-orange-500"
-                        />
+                      {/* Trois champs côte à côte sur une largeur de téléphone laissaient ~90 px
+                          par saisie, bouton de suppression compris : « 15000 » n'y tenait pas.
+                          Ils s'empilent donc sous le premier point d'arrêt, avec leur libellé. */}
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+                        {/* Le nom occupe toute la largeur ; le prix et les places, courts et
+                            numériques, restent côte à côte. Tout empiler donnait un bloc d'un
+                            écran entier par tarif, où l'on perdait de vue qu'ils vont ensemble. */}
+                        <label className="col-span-2 space-y-1 sm:col-span-1">
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 sm:hidden">Catégorie</span>
+                          <input
+                            type="text"
+                            placeholder="Ex: VIP"
+                            value={tier.name}
+                            onChange={(e) => {
+                              const t = [...editTicketTypes];
+                              t[idx].name = e.target.value;
+                              setEditTicketTypes(t);
+                            }}
+                            className="w-full min-w-0 rounded-xl border border-gray-200 py-3 px-3 text-xs outline-none focus:border-orange-500"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 sm:hidden">Prix (XOF)</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            step="500"
+                            placeholder="15000"
+                            value={tier.price}
+                            onChange={(e) => {
+                              const t = [...editTicketTypes];
+                              t[idx].price = e.target.value;
+                              setEditTicketTypes(t);
+                            }}
+                            className="w-full min-w-0 rounded-xl border border-gray-200 py-3 px-3 text-xs outline-none focus:border-orange-500"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 sm:hidden">Places</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            placeholder="100"
+                            value={tier.total}
+                            onChange={(e) => {
+                              const t = [...editTicketTypes];
+                              t[idx].total = e.target.value;
+                              setEditTicketTypes(t);
+                            }}
+                            className="w-full min-w-0 rounded-xl border border-gray-200 py-3 px-3 text-xs outline-none focus:border-orange-500"
+                          />
+                        </label>
                         <button
                           type="button"
                           onClick={() => setEditTicketTypes(editTicketTypes.filter((_, i) => i !== idx))}
-                          className="px-2 rounded-xl bg-red-50 text-red-500 font-bold hover:bg-red-100"
+                          title="Supprimer ce type de billet"
+                          aria-label="Supprimer ce type de billet"
+                          className="col-span-2 flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-red-50 px-3 font-bold text-red-500 hover:bg-red-100 sm:col-span-1 sm:self-end"
                         >
-                          <X className="w-4 h-4" />
+                          <X className="h-4 w-4" />
+                          <span className="text-xs sm:hidden">Supprimer ce type</span>
                         </button>
                       </div>
 
@@ -1885,7 +1928,9 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                     <button
                       type="button"
                       onClick={() => setEditTicketTypes([...editTicketTypes, { name: '', price: '', total: '', salesStart: '', salesEnd: '' }])}
-                      className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center mt-1"
+                      // Un lien textuel nu ne fait que 17 px de haut : impossible à viser au
+                      // doigt sans zoomer. min-h-11 lui donne les 44 px recommandés.
+                      className="mt-1 flex min-h-11 items-center text-xs font-bold text-orange-600 hover:text-orange-700"
                     >
                       <Plus className="w-3 h-3 mr-1" /> Ajouter un type
                     </button>
@@ -1901,18 +1946,20 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                   )}
                 </div>
 
-                {editPassDesignLoading ? (
-                  <div className="rounded-2xl border border-gray-200 p-4 text-[11px] font-semibold text-gray-400">
-                    Chargement de l'habillage du pass…
-                  </div>
-                ) : (
-                  <PassDesignEditor
-                    value={editPassDesign}
-                    onChange={setEditPassDesign}
-                    onError={setEditError}
-                    idPrefix="edit"
-                  />
-                )}
+                <div className="sm:col-span-2">
+                  {editPassDesignLoading ? (
+                    <div className="rounded-2xl border border-gray-200 p-4 text-[11px] font-semibold text-gray-400">
+                      Chargement de l'habillage du pass…
+                    </div>
+                  ) : (
+                    <PassDesignEditor
+                      value={editPassDesign}
+                      onChange={setEditPassDesign}
+                      onError={setEditError}
+                      idPrefix="edit"
+                    />
+                  )}
+                </div>
 
                 <div className="space-y-2 rounded-xl border border-gray-200 p-4">
                   <label className="flex items-center gap-2 text-xs font-bold text-gray-700">
@@ -1973,7 +2020,9 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                     <div className="flex-grow border-t border-gray-100"></div>
                   </div>
 
-                  <div className="grid grid-cols-5 gap-2">
+                  {/* Cinq vignettes sur une largeur de téléphone donnaient des visuels de
+                      ~60 px, trop petits pour être reconnus comme pour être visés au doigt. */}
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
                     {BANNER_TEMPLATES.map((tmpl, index) => (
                       <img
                         key={index}
@@ -1983,7 +2032,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                           setEditSelectedBanner(tmpl.url);
                           setEditCustomBannerUrl("");
                         }}
-                        className={`relative cursor-pointer h-12 rounded-xl object-cover border transition-all ${
+                        className={`relative h-16 cursor-pointer rounded-xl border object-cover transition-all sm:h-12 ${
                           editSelectedBanner === tmpl.url && editCustomBannerUrl === ""
                             ? "border-orange-500 ring-2 ring-orange-400/30 scale-95"
                             : "border-gray-200"
@@ -2008,24 +2057,33 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                   />
                 </div>
               </div>
+            </div>
 
-              <div className="border-t border-gray-100 pt-4 flex items-center justify-end space-x-2">
+            {/* Actions ancrées hors de la zone défilante : elles se trouvaient auparavant tout
+                en bas du formulaire, soit une dizaine d'écrans de défilement après la première
+                modification. L'ordre est inversé sur mobile — l'action principale en bas, sous
+                le pouce — et les boutons prennent toute la largeur pour être visés sans viser.
+                pb-[env(safe-area-inset-bottom)] tient compte de la barre gestuelle des iPhone,
+                qui recouvrait sinon le bouton d'enregistrement. */}
+            <footer className="shrink-0 border-t border-gray-100 bg-white px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
                 <button
                   type="button"
                   onClick={() => setEditingEvent(null)}
-                  className="rounded-xl px-4 py-2 text-xs font-bold text-gray-400 hover:text-gray-600"
+                  className="min-h-11 rounded-xl px-4 text-xs font-bold text-gray-500 hover:text-gray-700 sm:min-h-0 sm:py-2"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
                   disabled={editSubmitting}
-                  className="rounded-xl bg-orange-600 text-white px-5 py-2.5 text-xs font-black transition shadow-md disabled:bg-gray-200"
+                  className="min-h-11 rounded-xl bg-orange-600 px-5 text-xs font-black text-white shadow-md transition disabled:bg-gray-200 sm:min-h-0 sm:py-2.5"
                 >
                   {editSubmitting ? "Enregistrement..." : "Sauvegarder les modifications"}
                 </button>
               </div>
-            </form>
+            </footer>
+          </form>
         </ResponsiveSheet>
       )}
 
