@@ -4,6 +4,10 @@ import { User, UserRole } from "../types";
 
 type AuthMode = "login" | "register" | "forgot" | "reset";
 
+// Doit rester aligné sur MIN_PASSWORD_LENGTH (server/lib/validators.ts), seul juge en dernier
+// ressort : cette constante ne sert qu'à annoncer la règle au bon moment.
+const MIN_PASSWORD_LENGTH = 10;
+
 interface AuthPageProps {
   onSuccess: (user: User) => void;
   onCancel: () => void;
@@ -39,6 +43,7 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
   const [loading, setLoading] = useState(false);
   const [forgotPasswordSent, setForgotPasswordSent] = useState(false);
   const [confirmationEmailSentTo, setConfirmationEmailSentTo] = useState<string | null>(null);
+  const [resendState, setResendState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   // Double authentification (TOTP) : posée par le serveur quand le compte l'a activée (cf.
   // /api/auth/login qui renvoie mfaRequired:true au lieu d'ouvrir directement la session).
   const [mfaRequired, setMfaRequired] = useState(false);
@@ -109,6 +114,24 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
     }
   }
 
+  async function handleResendConfirmation() {
+    if (!confirmationEmailSentTo) return;
+    setResendState("sending");
+    try {
+      const response = await fetch("/api/auth/resend-confirmation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Requested-With": "ClicBillet" },
+        credentials: "include",
+        body: JSON.stringify({ email: confirmationEmailSentTo }),
+      });
+      // Le serveur répond volontairement la même chose que le compte existe ou non ; seul un
+      // refus franc (limite de débit atteinte) mérite d'être signalé ici.
+      setResendState(response.ok ? "sent" : "error");
+    } catch {
+      setResendState("error");
+    }
+  }
+
   async function handleMfaSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -138,6 +161,7 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
     setError(null);
     setForgotPasswordSent(false);
     setConfirmationEmailSentTo(null);
+    setResendState("idle");
     setMfaRequired(false);
     setMfaCode("");
     setPassword("");
@@ -218,23 +242,59 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
             </button>
           </form>
         ) : mode === "register" && confirmationEmailSentTo ? (
-          <div className="space-y-5 text-center" id="registration-confirmation-sent-view">
+          <div className="space-y-4 text-center" id="registration-confirmation-sent-view">
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-              <CheckCircle2 className="h-6 w-6" />
+              <Mail className="h-6 w-6" />
             </div>
+            <p className="text-sm font-black text-gray-900">Votre compte est créé. Une dernière étape.</p>
             <p className="text-sm font-semibold text-gray-700">
-              Un e-mail de confirmation vient d'être envoyé à <span className="text-orange-600">{confirmationEmailSentTo}</span>.
+              Ouvrez l'e-mail envoyé à <span className="text-orange-600">{confirmationEmailSentTo}</span> et cliquez
+              sur le lien qu'il contient : <strong>vous ne pourrez pas vous connecter avant</strong>.
             </p>
-            <p className="text-xs text-gray-400">
-              Cliquez sur le lien qu'il contient avant de vous connecter (vérifiez aussi vos spams).
-            </p>
+
+            {/* Étapes explicites : sur mobile, l'utilisateur doit quitter le site pour aller
+                dans sa boîte mail. Sans lui dire où il en est ni où il revient, il croit que
+                l'inscription a échoué et ferme l'onglet — c'est la fuite principale du tunnel. */}
+            <ol className="mx-auto max-w-xs space-y-1.5 text-left text-xs text-gray-500">
+              <li className="flex gap-2"><span className="font-black text-orange-600">1.</span> Ouvrez votre application e-mail</li>
+              <li className="flex gap-2"><span className="font-black text-orange-600">2.</span> Cliquez sur le lien de confirmation (pensez aux spams et à l'onglet « Promotions »)</li>
+              <li className="flex gap-2"><span className="font-black text-orange-600">3.</span> Revenez ici pour vous connecter</li>
+            </ol>
+
+            <div className="rounded-xl bg-gray-50 p-3">
+              {resendState === "sent" ? (
+                <p className="flex items-center justify-center gap-1.5 text-xs font-bold text-emerald-600">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Nouvel e-mail envoyé. Vérifiez votre boîte de réception.
+                </p>
+              ) : (
+                <>
+                  <p className="text-[11px] text-gray-500">E-mail non reçu après une minute ?</p>
+                  <button
+                    type="button"
+                    id="resend-confirmation-btn"
+                    onClick={handleResendConfirmation}
+                    disabled={resendState === "sending"}
+                    className="mt-1 text-xs font-black text-orange-600 hover:underline disabled:text-gray-400 disabled:no-underline"
+                  >
+                    {resendState === "sending" ? "Envoi en cours..." : "Renvoyer le lien de confirmation"}
+                  </button>
+                  {resendState === "error" && (
+                    <p className="mt-1 text-[11px] font-semibold text-red-500">
+                      Renvoi impossible pour le moment. Réessayez dans quelques minutes.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+
             <button
               id="back-to-login-btn"
               onClick={() => switchMode("login")}
-              className="inline-flex items-center space-x-1 text-xs font-bold text-orange-600 hover:underline"
+              className="inline-flex min-h-11 items-center space-x-1 rounded-lg px-2 text-xs font-bold text-orange-600 hover:underline sm:min-h-0 sm:px-0"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              <span>Retour à la connexion</span>
+              <span>J'ai confirmé, je me connecte</span>
             </button>
           </div>
         ) : mode === "forgot" && forgotPasswordSent ? (
@@ -251,7 +311,7 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
             <button
               id="back-to-login-btn"
               onClick={() => switchMode("login")}
-              className="inline-flex items-center space-x-1 text-xs font-bold text-orange-600 hover:underline"
+              className="inline-flex min-h-11 items-center space-x-1 rounded-lg px-2 text-xs font-bold text-orange-600 hover:underline sm:min-h-0 sm:px-0"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               <span>Retour à la connexion</span>
@@ -307,13 +367,31 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
                   <input
                     type="password"
                     required
-                    minLength={mode === "reset" ? 6 : undefined}
+                    // Le serveur impose MIN_PASSWORD_LENGTH (server/lib/validators.ts). Cette
+                    // borne valait 6 côté navigateur : le formulaire acceptait donc une saisie
+                    // que l'API refusait ensuite, et l'utilisateur découvrait la vraie règle
+                    // par un message d'erreur, mot de passe déjà choisi.
+                    minLength={mode === "login" ? undefined : MIN_PASSWORD_LENGTH}
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full rounded-xl border border-gray-200 py-3 pr-4 pl-10 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
                   />
                 </div>
+
+                {/* Règles annoncées AVANT la saisie, jamais après le refus : la vérification
+                    anti-fuite du serveur peut rejeter un mot de passe pourtant assez long, et
+                    ce refus surprise en fin de parcours mobile fait abandonner. */}
+                {mode !== "login" && (
+                  <ul className="space-y-0.5 pt-1 text-[11px]" id="password-rules-hint">
+                    <li className={password.length >= MIN_PASSWORD_LENGTH ? "font-semibold text-emerald-600" : "text-gray-400"}>
+                      {password.length >= MIN_PASSWORD_LENGTH ? "✓" : "•"} Au moins {MIN_PASSWORD_LENGTH} caractères
+                    </li>
+                    <li className="text-gray-400">
+                      • Évitez un mot de passe déjà utilisé ailleurs : ceux apparus dans une fuite connue sont refusés
+                    </li>
+                  </ul>
+                )}
               </div>
             )}
 
@@ -385,6 +463,17 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
                     <span className="text-[10px] text-gray-500 font-semibold mt-0.5">Créer et vendre</span>
                   </button>
                 </div>
+
+                {/* Ce choix n'est pas symétrique : s'inscrire directement comme organisateur
+                    est immédiat, alors que passer d'acheteur à organisateur ensuite passe par
+                    une demande validée par un administrateur (cf. BecomeOrganizerCard). Il
+                    n'était signalé nulle part — un organisateur qui cochait « Acheteur » par
+                    réflexe se retrouvait bloqué en file d'attente humaine sans l'avoir voulu. */}
+                <p className="text-[11px] leading-relaxed text-gray-500" id="auth-role-hint">
+                  {role === "organizer"
+                    ? "Vous pourrez créer votre premier événement dès la connexion. Sa publication passe par une validation de notre équipe."
+                    : "Vous voulez vendre des billets ? Choisissez « Organisateur » maintenant : basculer plus tard demande une validation de notre équipe."}
+                </p>
               </div>
             )}
 
@@ -429,7 +518,7 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
               <button
                 id="back-to-login-btn"
                 onClick={() => switchMode("login")}
-                className="inline-flex items-center space-x-1 text-xs font-bold text-orange-600 hover:underline"
+                className="inline-flex min-h-11 items-center space-x-1 rounded-lg px-2 text-xs font-bold text-orange-600 hover:underline sm:min-h-0 sm:px-0"
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
                 <span>Retour à la connexion</span>
@@ -438,7 +527,7 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
               <button
                 id="toggle-auth-mode-btn"
                 onClick={() => switchMode(mode === "login" ? "register" : "login")}
-                className="inline-flex items-center space-x-1 text-xs font-bold text-orange-600 hover:underline"
+                className="inline-flex min-h-11 items-center space-x-1 rounded-lg px-2 text-xs font-bold text-orange-600 hover:underline sm:min-h-0 sm:px-0"
               >
                 <span>{mode === "login" ? "Nouveau sur ClicBillet ? Créer un compte" : "Déjà membre ? Se connecter"}</span>
                 <ArrowRight className="h-3.5 w-3.5" />
@@ -451,7 +540,7 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
         <button
           onClick={onCancel}
           id="auth-cancel-btn"
-          className="mt-4 w-full text-center text-xs font-bold text-gray-400 hover:text-gray-600"
+          className="mt-2 min-h-11 w-full rounded-lg text-center text-xs font-bold text-gray-400 hover:text-gray-600 sm:mt-4 sm:min-h-0"
         >
           Retourner à l'accueil
         </button>

@@ -294,7 +294,7 @@ export default function CheckoutModal({ event, user, guestInfo, initialQuantitie
           </div>
           <button
             onClick={onClose}
-            className="rounded-full bg-white p-1 border border-gray-100 text-gray-400 hover:text-gray-600 transition shadow-xs active:scale-95"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-gray-100 bg-white text-gray-400 shadow-xs transition hover:text-gray-600 active:scale-95 sm:h-8 sm:w-8"
             id="close-checkout-btn"
           >
             <X className="h-4 w-4" />

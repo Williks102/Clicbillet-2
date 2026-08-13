@@ -1,1 +1,31 @@
 @import "tailwindcss";
+
+/* ==========================================================================
+   Règles mobiles transverses
+   ==========================================================================
+   Elles sont volontairement HORS de toute `@layer`. Tailwind v4 range ses utilitaires dans la
+   couche `utilities`, qui l'emporte sur `components` quelle que soit la spécificité : une
+   règle placée en couche resterait sans effet face aux classes des composants. Le CSS sans
+   couche prime sur tout CSS en couche — c'est la seule position qui gagne ici. */
+
+/* Taille des champs de saisie sous le premier point d'arrêt.
+
+   iOS Safari zoome d'autorité sur tout champ dont la police fait moins de 16 px : la page se
+   décale à chaque prise de focus, et il faut dézoomer à la main entre deux saisies. C'est la
+   raison la plus fréquente pour laquelle un formulaire correct au clavier devient pénible au
+   doigt, et l'interface utilise `text-xs` (12 px) ou `text-sm` (14 px) sur à peu près tous ses
+   champs — recherche du catalogue, connexion, inscription, contact, tableaux de bord, scanner.
+
+   La règle est globale plutôt que posée champ par champ : une centaine d'entrées finiraient
+   par diverger, et un nouveau formulaire naîtrait forcément sans la classe. L'échelle compacte
+   revient au-delà de 640 px, où le zoom automatique n'existe pas.
+
+   Les cases à cocher, boutons radio, sélecteurs de couleur et curseurs sont exclus : leur
+   rendu ne dépend pas de la taille de police, et la forcer déforme certains d'entre eux. */
+@media (max-width: 639px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}

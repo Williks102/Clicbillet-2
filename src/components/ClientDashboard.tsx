@@ -359,7 +359,7 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
       <div className="flex flex-wrap gap-2 rounded-xl bg-gray-50 p-1.5 w-fit" id="client-dashboard-subtabs">
         <button
           onClick={() => setDashTab("tickets")}
-          className={`flex items-center space-x-1.5 rounded-lg px-4 py-2 text-xs font-bold transition-all ${
+          className={`flex min-h-11 items-center space-x-1.5 rounded-lg px-4 text-xs font-bold transition-all sm:min-h-0 sm:py-2 ${
             dashTab === "tickets" ? "bg-white text-orange-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
           }`}
         >
@@ -368,7 +368,7 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
         </button>
         <button
           onClick={() => setDashTab("invoices")}
-          className={`flex items-center space-x-1.5 rounded-lg px-4 py-2 text-xs font-bold transition-all ${
+          className={`flex min-h-11 items-center space-x-1.5 rounded-lg px-4 text-xs font-bold transition-all sm:min-h-0 sm:py-2 ${
             dashTab === "invoices" ? "bg-white text-orange-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
           }`}
         >
@@ -378,7 +378,7 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
         <button
           id="dashtab-transferred-btn"
           onClick={() => setDashTab("transferred")}
-          className={`flex items-center space-x-1.5 rounded-lg px-4 py-2 text-xs font-bold transition-all ${
+          className={`flex min-h-11 items-center space-x-1.5 rounded-lg px-4 text-xs font-bold transition-all sm:min-h-0 sm:py-2 ${
             dashTab === "transferred" ? "bg-white text-orange-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
           }`}
         >
@@ -388,7 +388,7 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
         <button
           id="dashtab-received-btn"
           onClick={() => setDashTab("received")}
-          className={`flex items-center space-x-1.5 rounded-lg px-4 py-2 text-xs font-bold transition-all ${
+          className={`flex min-h-11 items-center space-x-1.5 rounded-lg px-4 text-xs font-bold transition-all sm:min-h-0 sm:py-2 ${
             dashTab === "received" ? "bg-white text-orange-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
           }`}
         >
@@ -612,7 +612,7 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
               </span>
               <button
                 onClick={() => setSelectedTicket(null)}
-                className="rounded-lg bg-black/10 p-1.5 hover:bg-black/20 transition-all text-xs font-extrabold"
+                className="flex min-h-11 items-center rounded-lg bg-black/10 px-3 text-xs font-extrabold transition-all hover:bg-black/20 sm:min-h-0 sm:px-2 sm:py-1.5"
                 style={{ color: passTheme.onPrimaryColor }}
               >
                 Fermer
@@ -830,7 +830,7 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
                 onClick={handlePrintTicket}
                 id="print-ticket-action-btn"
                 disabled={selectedTicket.paymentStatus === "pending"}
-                className={`flex items-center justify-center space-x-1.5 rounded-xl border border-gray-200 px-4 py-2 text-xs font-bold ${
+                className={`flex min-h-11 items-center justify-center space-x-1.5 rounded-xl border border-gray-200 px-4 text-xs font-bold sm:min-h-0 sm:py-2 ${
                   selectedTicket.paymentStatus === "pending"
                     ? "bg-gray-50 text-gray-400 cursor-not-allowed opacity-50"
                     : "bg-white text-gray-700 hover:bg-gray-50 active:scale-95"
@@ -841,7 +841,7 @@ export default function ClientDashboard({ user }: ClientDashboardProps) {
               </button>
               <button
                 onClick={() => setSelectedTicket(null)}
-                className="flex items-center justify-center rounded-xl bg-orange-600 px-4 py-2 text-xs font-black text-white hover:bg-orange-700 active:scale-95"
+                className="flex min-h-11 items-center justify-center rounded-xl bg-orange-600 px-4 text-xs font-black text-white hover:bg-orange-700 active:scale-95 sm:min-h-0 sm:py-2"
               >
                 Tout est bon !
               </button>

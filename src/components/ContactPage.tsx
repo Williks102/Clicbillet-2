@@ -61,7 +61,7 @@ export default function ContactPage({ onBack }: { onBack: () => void }) {
     <div className="mx-auto max-w-4xl">
       <button
         onClick={onBack}
-        className="mb-6 flex items-center space-x-1.5 text-xs font-bold text-gray-500 transition-colors hover:text-orange-600"
+        className="mb-4 flex min-h-11 items-center space-x-1.5 text-xs sm:mb-6 sm:min-h-0 font-bold text-gray-500 transition-colors hover:text-orange-600"
       >
         <ArrowLeft className="h-4 w-4" />
         <span>Retour à l'accueil</span>

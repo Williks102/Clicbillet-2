@@ -6,7 +6,7 @@ sans les outils d'une campagne.
 
 | | Campagne | Prospection individuelle |
 |---|---|---|
-| Fichiers | `email-organisateurs.html` + `.txt` | `prospection-individuelle.md` |
+| Fichiers | `email-organisateurs.html` + `.txt` | `prospection-individuelle.md`, `relance-organisateurs.md` |
 | Envoi | Plateforme (Resend, Brevo…) | Boîte normale, un par un |
 | Mise en forme | HTML mis en page | Texte brut |
 | Destinataires | Liste d'inscrits volontaires | Contacts qu'on sait nommer |
@@ -18,6 +18,17 @@ quelques pour cent, et aucun risque pour la réputation du domaine qui achemine 
 La campagne devient pertinente quand vous aurez une liste d'inscrits.
 
 ---
+
+## Relance après un premier envoi
+
+`relance-organisateurs.md` — trois segments (n'ont pas cliqué / ont cliqué sans s'inscrire /
+compte créé mais jamais confirmé), en texte brut. Le premier envoi a montré que le clic n'est
+pas le problème : ces messages appellent une réponse, pas une visite, et n'ont donc pas de
+version HTML.
+
+Le troisième segment est le plus rentable — ces personnes ont rempli le formulaire et se sont
+arrêtées à la confirmation d'adresse. Pour les identifier, comptez en base les comptes créés
+et jamais confirmés.
 
 ## Campagne
 

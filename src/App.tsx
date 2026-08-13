@@ -80,6 +80,8 @@ export default function App() {
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [checkoutEvent, setCheckoutEvent] = useState<Event | null>(null);
   const [waitingRoomEvent, setWaitingRoomEvent] = useState<Event | null>(null);
+  // Onglet à ouvrir APRÈS la fermeture de la modale de paiement (cf. handleCheckoutSuccess).
+  const [postCheckoutTab, setPostCheckoutTab] = useState<string | null>(null);
   const [pendingEvent, setPendingEvent] = useState<Event | null>(null);
   const [authModalVisible, setAuthModalVisible] = useState(Boolean(initialAuthScreen));
   // Écran d'authentification courant. Il pilote l'URL (/connexion ou /inscription) et suit les
@@ -406,7 +408,16 @@ export default function App() {
   // seul le serveur peut trancher. Hors affluence il répond immédiatement "accès autorisé" et
   // le composant enchaîne sur le paiement sans jamais s'afficher.
   function openCheckoutFlow(event: Event) {
-    setWaitingRoomEvent(event);
+    // La salle d'attente exige une session : POST /api/waiting-room/join est en requireAuth,
+    // et le composant n'était de toute façon monté que si `user` existe. Un acheteur invité
+    // arrivait donc ici après avoir saisi ses coordonnées, et RIEN ne s'ouvrait — le tunnel
+    // s'arrêtait net, sans erreur ni explication. Il va désormais droit au paiement ; si la
+    // file est réellement armée sur cet événement, c'est /api/checkout qui le lui dira.
+    if (user) {
+      setWaitingRoomEvent(event);
+    } else {
+      setCheckoutEvent(event);
+    }
   }
 
   function handleBuyTicketTrigger(event: Event, quantities: Record<string, number> = {}) {
@@ -433,18 +444,29 @@ export default function App() {
   }
 
   function handleCheckoutSuccess(_tickets: any[]) {
-    setCheckoutEvent(null);
     // Refresh events lists to reflect decremented ticket inventory instantly (force=true
     // pour contourner le cache client, sinon l'inventaire affiché resterait obsolète
     // jusqu'à expiration du TTL).
     fetchEvents(true);
+    // La destination est seulement MÉMORISÉE ici. Fermer la modale à cet instant la
+    // démontait avant que son écran de confirmation n'ait pu s'afficher : l'acheteur voyait
+    // la fenêtre disparaître et se retrouvait sur l'accueil, ce qui donne exactement
+    // l'impression que l'achat a échoué — y compris quand les billets ont bien été émis.
+    //
     // Les invités n'ont pas d'espace "Mes billets" connecté : les renvoyer vers l'accueil
     // évite une page blanche, leurs QR codes étant envoyés par email. Un organisateur, lui,
     // achète des billets comme tout le monde et dispose bien de cet espace.
-    if (user && user.role !== "admin") {
-      setActiveTab("client-dashboard");
-    } else {
-      setActiveTab("home");
+    setPostCheckoutTab(user && user.role !== "admin" ? "client-dashboard" : "home");
+  }
+
+  // Fermeture de la modale de paiement, qu'un achat ait abouti ou non : la navigation
+  // d'après-achat n'a lieu qu'ici, une fois la confirmation réellement vue.
+  function handleCheckoutClose() {
+    setCheckoutEvent(null);
+    setGuestInfo(null);
+    if (postCheckoutTab) {
+      setActiveTab(postCheckoutTab);
+      setPostCheckoutTab(null);
     }
   }
 
@@ -640,7 +662,7 @@ export default function App() {
           user={user}
           guestInfo={guestInfo ?? undefined}
           initialQuantities={pendingQuantities}
-          onClose={() => { setCheckoutEvent(null); setGuestInfo(null); }}
+          onClose={handleCheckoutClose}
           onSuccess={handleCheckoutSuccess}
           onOpenAuth={() => {
             openAuthScreen("login");
@@ -660,22 +682,25 @@ export default function App() {
         <footer className="mt-auto border-t border-gray-100 bg-white py-6 text-center text-xs text-gray-400 font-semibold uppercase tracking-wider print:hidden">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
             <p>© {new Date().getFullYear()} clicbillet. Tous droits réservés.</p>
-            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
-              <button onClick={() => navigateToTab("pricing")} className="hover:text-gray-600">
-                Tarifs
-              </button>
-              <span>•</span>
-              <button onClick={() => navigateToTab("contact")} className="hover:text-gray-600">
-                Contact
-              </button>
-              <span>•</span>
-              <button onClick={() => navigateToTab("terms")} className="hover:text-gray-600">
-                Conditions Générales de Vente
-              </button>
-              <span>•</span>
-              <button onClick={() => navigateToTab("privacy")} className="hover:text-gray-600">
-                Confidentialité
-              </button>
+            {/* Les séparateurs « • » disparaissent au profit d'un espacement : ces quatre
+                liens ne faisaient que 16 px de haut, soit la hauteur du texte, et ils sont
+                présents au bas de CHAQUE écran. Les puces les collaient les uns aux autres,
+                si bien qu'au doigt on ouvrait les CGV en visant Contact. */}
+            <div className="flex flex-wrap items-center justify-center gap-x-1 gap-y-1">
+              {([
+                ["pricing", "Tarifs"],
+                ["contact", "Contact"],
+                ["terms", "Conditions Générales de Vente"],
+                ["privacy", "Confidentialité"],
+              ] as const).map(([tab, libelle]) => (
+                <button
+                  key={tab}
+                  onClick={() => navigateToTab(tab)}
+                  className="flex min-h-11 items-center rounded-lg px-3 hover:bg-gray-50 hover:text-gray-600 sm:min-h-0 sm:px-2 sm:py-1"
+                >
+                  {libelle}
+                </button>
+              ))}
             </div>
           </div>
         </footer>

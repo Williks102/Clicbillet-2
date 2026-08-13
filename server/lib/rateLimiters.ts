@@ -83,6 +83,7 @@ export const registerRateLimiter = makeSharedRateLimiter("register", 10, 15 * 60
 export const resetPasswordRateLimiter = makeSharedRateLimiter("reset-password", 10, 15 * 60 * 1000, "Trop de tentatives. Réessayez dans quelques minutes.");
 export const mfaVerifyRateLimiter = makeSharedRateLimiter("mfa-verify", 10, 15 * 60 * 1000, "Trop de tentatives de vérification. Réessayez dans quelques minutes.");
 export const forgotPasswordRateLimiter = makeSharedRateLimiter("forgot-password", 5, 15 * 60 * 1000, "Trop de demandes de réinitialisation. Réessayez dans quelques minutes.");
+export const resendConfirmationRateLimiter = makeSharedRateLimiter("resend-confirmation", 5, 15 * 60 * 1000, "Trop de renvois demandés. Réessayez dans quelques minutes.");
 export const checkoutRateLimiter = makeSharedRateLimiter("checkout", 20, 10 * 60 * 1000, "Trop de tentatives d'achat. Réessayez dans quelques minutes.");
 export const contactRateLimiter = makeSharedRateLimiter("contact", 5, 15 * 60 * 1000, "Trop de messages envoyés. Réessayez dans quelques minutes.");
 export const transferTicketRateLimiter = makeSharedRateLimiter("transfer-ticket", 10, 15 * 60 * 1000, "Trop de transferts de billets. Réessayez dans quelques minutes.");

@@ -21,6 +21,17 @@ export default function EventCard({ event: evt, onViewEvent, userRole, onViewOrg
         saleLabel: formatSaleWindowLabel(t)
       }))
     : null;
+  // Prix annoncé sur la carte : le plus bas des tarifs RÉELLEMENT en vente, et non le prix de
+  // base de l'événement. Les deux divergent dès qu'un type de billet est défini — c'est le
+  // tarif du billet qui est facturé, et lui seul qui s'affiche sur la page de l'événement. La
+  // carte pouvait donc annoncer 10 000 XOF là où la page d'à côté et le paiement disaient 0.
+  const tousLesTarifs = evt.ticketTypes ?? [];
+  const tarifsEnVente = tousLesTarifs.filter((t) => getSaleState(t) !== "close");
+  const tarifsRetenus = tarifsEnVente.length > 0 ? tarifsEnVente : tousLesTarifs;
+  const prixAffiche = tarifsRetenus.length > 0
+    ? Math.min(...tarifsRetenus.map((t) => Number(t.price) || 0))
+    : Number(evt.price) || 0;
+
   const globalRemains = evt.totalTickets - evt.ticketsSold;
   // Un tarif qui n'a pas encore ouvert n'est pas « épuisé » : annoncer l'événement complet
   // alors que des places arrivent demain découragerait des acheteurs pour rien. Seul un tarif
@@ -108,7 +119,11 @@ export default function EventCard({ event: evt, onViewEvent, userRole, onViewOrg
         </div>
 
         <p className="text-sm text-gray-500">
-          À partir de <span className="text-lg font-black text-orange-600">{evt.price.toLocaleString("fr-FR")} XOF</span>
+          {prixAffiche === 0 ? (
+            <span className="text-lg font-black text-emerald-600">Gratuit</span>
+          ) : (
+            <>À partir de <span className="text-lg font-black text-orange-600">{prixAffiche.toLocaleString("fr-FR")} XOF</span></>
+          )}
         </p>
 
         {/* Stock tracker footer indicators */}
