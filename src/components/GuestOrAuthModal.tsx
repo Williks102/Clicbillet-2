@@ -39,22 +39,29 @@ export default function GuestOrAuthModal({ onGuestContinue, onOpenAuth, onClose 
       id="guest-or-auth-modal-overlay"
       panelId="guest-or-auth-modal-panel"
       onClose={onClose}
-      panelClassName="max-w-sm overflow-hidden border border-gray-100"
+      // Le panneau n'était borné ni en hauteur ni en défilement. Sur un téléphone court —
+      // et surtout clavier ouvert, ce qui est le cas dès qu'on saisit l'e-mail — le bas du
+      // formulaire, donc le bouton de validation, devenait inatteignable : le tunnel d'achat
+      // s'arrêtait là sans que rien ne l'explique.
+      panelClassName="max-w-sm overflow-hidden border border-gray-100 flex flex-col max-h-[92dvh] sm:max-h-[90vh]"
     >
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-gray-50 bg-gray-50/50 px-6 py-4">
-        <h3 className="text-sm font-black text-gray-900">
-          {step === "choice" ? "Comment souhaitez-vous continuer ?" : "Vos coordonnées"}
+      <div className="flex shrink-0 items-center justify-between border-b border-gray-50 bg-gray-50/50 px-6 py-4">
+        {/* Espace insécable avant le point d'interrogation : c'est la règle typographique
+            française, et elle règle au passage l'orphelin observé sur écran étroit, où le
+            « ? » se retrouvait seul sur sa ligne une fois le bouton de fermeture élargi. */}
+        <h3 className="min-w-0 flex-1 pr-2 text-sm font-black text-gray-900">
+          {step === "choice" ? "Comment souhaitez-vous continuer ?" : "Vos coordonnées"}
         </h3>
         <button
           onClick={onClose}
-          className="rounded-full bg-white p-1 border border-gray-100 text-gray-400 hover:text-gray-600 shadow-xs active:scale-95"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-gray-100 bg-white text-gray-400 shadow-xs transition hover:text-gray-600 active:scale-95 sm:h-8 sm:w-8"
         >
           <X className="h-4 w-4" />
         </button>
       </div>
 
-      <div className="p-6">
+      <div className="min-h-0 flex-1 overflow-y-auto p-6">
         {step === "choice" ? (
           <div className="space-y-3">
             <p className="text-xs text-gray-500 font-medium mb-5">
