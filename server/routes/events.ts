@@ -4,6 +4,8 @@ import { isSupabaseEnabled, supabase, supabaseAdmin } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { requireAuth, requireRole } from "../lib/auth.js";
 import { validateEvent, validateContactMessage } from "../lib/validators.js";
+import { compterVendusParTarif, refusModificationTarifs } from "../lib/ticketTypes.js";
+import { PASS_DESIGN_PAR_DEFAUT, fusionnerPassDesign } from "../lib/passDesign.js";
 import { getCategories } from "../lib/categories.js";
 import { runInBackground } from "../lib/utils.js";
 import { sendOrganizerEventStatusEmail, sendAdminContactMessageEmail } from "../lib/email.js";
@@ -298,7 +300,7 @@ router.get("/api/organizers/:alias", async (req: express.Request, res: express.R
 // Create Event Endpoint for Organizers
 router.post("/api/events", requireAuth, requireRole("organizer", "admin"), validateEvent, async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
-  const { title, description, date, time, endDate, endTime, price, ticketTypes, venue, category, banner, totalTickets, organizerName, scheduledOnsale } = req.body;
+  const { title, description, date, time, endDate, endTime, price, ticketTypes, venue, category, banner, totalTickets, organizerName, scheduledOnsale, passDesign } = req.body;
   // Un organisateur ne peut créer un événement que pour lui-même ; un admin peut le créer
   // au nom d'un organisateur précis (organizerId du body), sinon pour lui-même par défaut.
   const organizerId = authUser.role === "admin" ? (req.body.organizerId || authUser.id) : authUser.id;
@@ -334,15 +336,16 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
           organizer_id: organizerId,
           organizer_name: organizerName || "Organisateur ClicBillet",
           status: 'pending',
-          scheduled_onsale: Boolean(scheduledOnsale)
+          scheduled_onsale: Boolean(scheduledOnsale),
+          pass_design: passDesign ?? PASS_DESIGN_PAR_DEFAUT
         })
         .select()
         .single();
-        
-      // Repli pour les bases antérieures aux migrations : 'status' (section 5) ou
-      // 'end_date'/'end_time' (section 20). On réinsère sans ces colonnes plutôt que
-      // de renvoyer une 500 à l'organisateur.
-      if (error && (error.message.includes('status') || error.message.includes('end_date') || error.message.includes('end_time') || error.message.includes('category_slug'))) {
+
+      // Repli pour les bases antérieures aux migrations : 'status' (section 5),
+      // 'end_date'/'end_time' (section 20) ou 'pass_design' (section 29). On réinsère sans
+      // ces colonnes plutôt que de renvoyer une 500 à l'organisateur.
+      if (error && (error.message.includes('status') || error.message.includes('end_date') || error.message.includes('end_time') || error.message.includes('category_slug') || error.message.includes('pass_design'))) {
         const fallback = await supabase
           .from("events")
           .insert({
@@ -389,7 +392,8 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
         totalTickets: data.total_tickets,
         organizerId: data.organizer_id,
         organizerName: data.organizer_name,
-        scheduledOnsale: data.scheduled_onsale
+        scheduledOnsale: data.scheduled_onsale,
+        passDesign: fusionnerPassDesign(data.pass_design)
       };
 
       return res.status(201).json(mappedEvent);
@@ -416,7 +420,8 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
     ticketsSold: 0,
     totalTickets: Number(totalTickets),
     organizerId,
-    organizerName: organizerName || "Organisateur ClicBillet"
+    organizerName: organizerName || "Organisateur ClicBillet",
+    passDesign: passDesign ?? PASS_DESIGN_PAR_DEFAUT
   };
 
   db.events.unshift(newEvent); // put on top
@@ -425,11 +430,80 @@ router.post("/api/events", requireAuth, requireRole("organizer", "admin"), valid
   res.status(201).json(newEvent);
 });
 
+// Ventes par tarif d'un événement, telles qu'elles font foi pour protéger une modification
+// de grille tarifaire. La colonne `tier_sold` est la référence : c'est elle que reserve_tickets
+// avance sous le verrou de la ligne, donc elle inclut les places retenues par un paiement en
+// cours. Sur une base où la section 25 n'a pas encore été jouée, on recompte depuis les
+// billets — au mieux (l'API REST plafonne à 1 000 lignes), ce qui ne peut qu'assouplir le
+// garde-fou, jamais bloquer à tort une modification légitime.
+async function vendusParTarifSupabase(eventId: string, originalEvent: any): Promise<Record<string, number>> {
+  const tierSold = originalEvent?.tier_sold;
+  if (tierSold && typeof tierSold === "object" && !Array.isArray(tierSold)) {
+    const compte: Record<string, number> = {};
+    for (const [cle, valeur] of Object.entries(tierSold)) {
+      compte[String(cle).toLowerCase()] = Number(valeur) || 0;
+    }
+    return compte;
+  }
+
+  const { data, error } = await supabase!
+    .from("tickets")
+    .select("tier, transaction_ref")
+    .eq("event_id", eventId);
+  if (error) {
+    console.warn(`[Events] Ventes par tarif indisponibles pour ${eventId} (${error.message}).`);
+    return {};
+  }
+  return compterVendusParTarif(data || []);
+}
+
+// Habillage du pass d'un événement, pour le formulaire de modification de l'organisateur.
+//
+// Endpoint dédié plutôt qu'un champ de plus sur /api/events : le logo et l'image de fond sont
+// des data: URI, et le catalogue public renvoie TOUS les événements à chaque visiteur de
+// l'accueil. Les y embarquer alourdirait la page la plus visitée du site pour une donnée dont
+// seuls l'organisateur (ici) et l'acheteur (via /api/my-tickets) ont besoin.
+router.get("/api/events/:id/pass-design", requireAuth, requireRole("organizer", "admin"), async (req: express.Request, res: express.Response) => {
+  const authUser = (req as any).user;
+  const { id } = req.params;
+  res.set("Cache-Control", "no-store");
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("events")
+        .select("organizer_id, pass_design")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: "Événement introuvable." });
+      if (authUser.role !== "admin" && data.organizer_id !== authUser.id) {
+        return res.status(403).json({ error: "Vous n'êtes pas autorisé à consulter cet événement." });
+      }
+      return res.json(fusionnerPassDesign(data.pass_design));
+    } catch (err: any) {
+      // Colonne absente (section 29 non jouée) : l'organisateur repart du thème par défaut
+      // plutôt que de voir le formulaire refuser de s'ouvrir.
+      console.warn(`[Events] Habillage du pass indisponible pour ${id} (${err.message}).`);
+      return res.json(PASS_DESIGN_PAR_DEFAUT);
+    }
+  }
+
+  const db = getDB();
+  const event = (db.events || []).find((e: any) => e.id === id);
+  if (!event) return res.status(404).json({ error: "Événement introuvable." });
+  if (authUser.role !== "admin" && event.organizerId !== authUser.id) {
+    return res.status(403).json({ error: "Vous n'êtes pas autorisé à consulter cet événement." });
+  }
+  res.json(fusionnerPassDesign((event as any).passDesign));
+});
+
 // Update/Modify Event Endpoint
 router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), validateEvent, async (req: express.Request, res: express.Response) => {
   const authUser = (req as any).user;
   const { id } = req.params;
-  const { title, description, date, time, endDate, endTime, price, ticketTypes, venue, category, banner, totalTickets, scheduledOnsale } = req.body;
+  const { title, description, date, time, endDate, endTime, price, ticketTypes, venue, category, banner, totalTickets, scheduledOnsale, passDesign } = req.body;
 
   if (!title || !date || !time || isNaN(price) || !venue || !category || !totalTickets) {
     return res.status(400).json({ error: "Veuillez remplir tous les champs obligatoires correctement." });
@@ -453,6 +527,16 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
         return res.status(403).json({ error: "Vous n'êtes pas autorisé à modifier cet événement." });
       }
 
+      const refusTarifs = refusModificationTarifs(
+        originalEvent.ticket_types,
+        ticketTypes,
+        await vendusParTarifSupabase(id, originalEvent),
+        { totalTickets: Number(totalTickets), ticketsSold: Number(originalEvent.tickets_sold) || 0 }
+      );
+      if (refusTarifs) {
+        return res.status(409).json({ error: refusTarifs });
+      }
+
       const bannerUrl = banner || originalEvent.banner;
       let { data, error } = await supabase
         .from("events")
@@ -470,16 +554,19 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
           category_slug: req.body.categorySlug,
           banner: bannerUrl,
           total_tickets: Number(totalTickets),
-          ...(scheduledOnsale !== undefined ? { scheduled_onsale: Boolean(scheduledOnsale) } : {})
+          ...(scheduledOnsale !== undefined ? { scheduled_onsale: Boolean(scheduledOnsale) } : {}),
+          // Habillage absent du corps de la requête = inchangé (cf. validateEvent).
+          ...(passDesign !== undefined ? { pass_design: passDesign } : {})
         })
         .eq("id", id)
         .select()
         .single();
 
-      // Même prudence qu'à la création : sur une base où la section 27 n'a pas encore été
-      // jouée, on réécrit sans la clé de catégorie plutôt que de refuser la modification.
-      // Le libellé, lui, est déjà canonique — la validation s'en est chargée.
-      if (error && error.message.includes('category_slug')) {
+      // Même prudence qu'à la création : sur une base où la section 27 (category_slug) ou 29
+      // (pass_design) n'a pas encore été jouée, on réécrit sans ces clés plutôt que de refuser
+      // la modification. Le libellé de catégorie, lui, est déjà canonique — la validation s'en
+      // est chargée.
+      if (error && (error.message.includes('category_slug') || error.message.includes('pass_design'))) {
         const repli = await supabase
           .from("events")
           .update({
@@ -539,7 +626,8 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
         totalTickets: data.total_tickets,
         organizerId: data.organizer_id,
         organizerName: data.organizer_name,
-        scheduledOnsale: data.scheduled_onsale
+        scheduledOnsale: data.scheduled_onsale,
+        passDesign: fusionnerPassDesign(data.pass_design)
       };
 
       return res.json({ success: true, message: "Événement modifié avec succès !", event: mappedEvent });
@@ -560,6 +648,16 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
     return res.status(403).json({ error: "Vous n'êtes pas autorisé à modifier cet événement." });
   }
 
+  const refusTarifsLocal = refusModificationTarifs(
+    event.ticketTypes,
+    ticketTypes,
+    compterVendusParTarif((db.tickets || []).filter((t: any) => t.eventId === id)),
+    { totalTickets: Number(totalTickets), ticketsSold: Number(event.ticketsSold) || 0 }
+  );
+  if (refusTarifsLocal) {
+    return res.status(409).json({ error: refusTarifsLocal });
+  }
+
   event.title = title;
   event.description = description || "Aucune description fournie.";
   event.date = date;
@@ -572,6 +670,9 @@ router.put("/api/events/:id", requireAuth, requireRole("organizer", "admin"), va
   event.category = category;
   if (banner) {
     event.banner = banner;
+  }
+  if (passDesign !== undefined) {
+    event.passDesign = passDesign;
   }
   event.totalTickets = Number(totalTickets);
 

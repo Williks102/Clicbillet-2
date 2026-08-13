@@ -1316,3 +1316,31 @@ CREATE INDEX IF NOT EXISTS idx_scan_conflicts_event ON public.scan_conflicts (ev
 
 ALTER TABLE public.scan_conflicts ENABLE ROW LEVEL SECURITY;
 -- Aucune policy anon/authenticated : alimentée et lue exclusivement par le backend.
+
+-- ==========================================
+-- 29. HABILLAGE DU PASS PAR L'ORGANISATEUR
+-- ==========================================
+-- Le billet remis à l'acheteur portait l'identité de la plateforme et rien d'autre : même
+-- liseré orange, même en-tête, quel que soit l'événement. Pour un organisateur, le pass est
+-- pourtant un support de marque — c'est ce que le public garde, photographie et présente à
+-- l'entrée.
+--
+-- Une seule colonne JSONB plutôt que cinq colonnes typées : l'habillage est lu et écrit
+-- toujours d'un bloc, jamais filtré ni agrégé en base. Sa forme est validée côté serveur
+-- (server/lib/passDesign.ts), par liste blanche stricte — ces valeurs sont interpolées dans
+-- des attributs `style` du billet imprimable.
+--
+--   {
+--     "primaryColor": "#ea580c",        -- accents : liseré, prix, pastille du tarif
+--     "backgroundColor": "#ffffff",
+--     "textColor": "#111827",
+--     "logoUrl": null,                  -- data: URI ou URL http(s)
+--     "backgroundImageUrl": null,
+--     "backgroundOpacity": 0.12         -- voile qui garde le QR code lisible
+--   }
+--
+-- Volontairement ABSENTE de la vue events_public : le logo et l'image de fond sont des
+-- data: URI, et le catalogue public renvoie tous les événements à chaque visiteur de
+-- l'accueil. L'organisateur la lit via GET /api/events/:id/pass-design, l'acheteur la reçoit
+-- avec ses billets (GET /api/my-tickets).
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS pass_design JSONB;

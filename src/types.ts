@@ -41,7 +41,10 @@ export interface Event {
   endDate?: string | null;
   endTime?: string | null;
   price: number; // Base price in XOF
-  ticketTypes?: { name: string; price: number; total?: number }[]; // Custom ticket types (e.g. VIP, Standard)
+  // Types de billets définis par l'organisateur (ex: VIP, Standard). salesStart/salesEnd
+  // bornent facultativement la vente de CE tarif ("YYYY-MM-DDTHH:MM"), indépendamment de la
+  // date de l'événement : c'est ce qui permet un early bird ou un pass de dernière minute.
+  ticketTypes?: { name: string; price: number; total?: number; salesStart?: string | null; salesEnd?: string | null }[];
   ticketsSoldByTier?: Record<string, number>; // Sold count per tier name (computed server-side)
   venue: string; // Event location, e.g., "Palais de la Culture, Treichville"
   category: string;
@@ -55,6 +58,22 @@ export interface Event {
   status?: "pending" | "approved" | "rejected";
   scheduledOnsale?: boolean;
   commissionRate?: number | null; // Taux négocié pour cet événement (null = taux plateforme par défaut)
+  // Habillage du pass remis à l'acheteur. Absent du catalogue public (logo et image de fond
+  // sont des data: URI) : l'organisateur le lit via GET /api/events/:id/pass-design.
+  passDesign?: PassDesign | null;
+}
+
+// Couleurs, logo et image de fond du pass, choisis par l'organisateur. Les valeurs sont
+// validées côté serveur (couleurs #RRGGBB uniquement) avant d'être stockées : elles finissent
+// dans des attributs `style`, y compris dans le document d'impression construit par
+// concaténation de chaînes.
+export interface PassDesign {
+  primaryColor: string;
+  backgroundColor: string;
+  textColor: string;
+  logoUrl: string | null;
+  backgroundImageUrl: string | null;
+  backgroundOpacity: number;
 }
 
 export interface WaitingRoomStatus {
@@ -105,6 +124,9 @@ export interface Ticket {
   purchaseDate: string;
   quantity: number;
   paymentStatus?: 'pending' | 'paid' | 'failed';
+  // Habillage hérité de l'événement (cf. GET /api/my-tickets) : porté par l'événement et non
+  // figé à l'achat, pour qu'une retouche des couleurs s'applique aussi aux billets déjà vendus.
+  passDesign?: PassDesign | null;
 }
 
 // Historique en lecture seule d'un transfert de billet (cf. GET /api/my-transfers) : une ligne

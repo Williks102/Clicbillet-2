@@ -14,6 +14,7 @@ import { isSupabaseEnabled, supabase, isProduction } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { requireAuth, optionalAuth } from "../lib/auth.js";
 import { validateCheckout } from "../lib/validators.js";
+import { refusFenetreDeVente } from "../lib/ticketTypes.js";
 import { runInBackground, isEventPast, generateTicketQrCode } from "../lib/utils.js";
 import { sendOrganizerSaleEmail, sendTicketEmail } from "../lib/email.js";
 import { checkoutRateLimiter } from "../lib/rateLimiters.js";
@@ -142,6 +143,15 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
 
       if (isEventPast({ date: event.date, time: event.time, endDate: event.end_date, endTime: event.end_time })) {
         return res.status(400).json({ error: "Cet événement est terminé, l'achat de billets n'est plus possible." });
+      }
+
+      // Fenêtre de vente propre au tarif (early bird, pass tardif…). Vérifiée avant la
+      // réservation : un tarif fermé ne doit pas entamer le compteur, sinon il faudrait
+      // rendre les places aussitôt. Le sélecteur de la page événement grise déjà ces tarifs,
+      // mais lui seul ne protège rien — un appel direct à /api/checkout le contourne.
+      const refusFenetre = refusFenetreDeVente(event.ticket_types, items);
+      if (refusFenetre) {
+        return res.status(400).json({ error: refusFenetre });
       }
 
       // Contrôle refait ici, et non d'après un drapeau porté par l'événement : la file
@@ -364,6 +374,11 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
 
   if (event.ticketsSold + totalQuantity > event.totalTickets) {
     return res.status(400).json({ error: "Désolé, il n'y a plus assez de places disponibles." });
+  }
+
+  const refusFenetreLocal = refusFenetreDeVente(event.ticketTypes, items);
+  if (refusFenetreLocal) {
+    return res.status(400).json({ error: refusFenetreLocal });
   }
 
   const ticketTypes = event.ticketTypes || [];

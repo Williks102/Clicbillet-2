@@ -1,5 +1,6 @@
 import { Calendar, Clock, MapPin, Ticket, User as UserIcon } from "lucide-react";
 import { Event } from "../types";
+import { getSaleState, formatSaleWindowLabel } from "../lib/ticketTier";
 
 interface EventCardProps {
   event: Event;
@@ -15,12 +16,17 @@ export default function EventCard({ event: evt, onViewEvent, userRole, onViewOrg
   const tierAvailability = hasTiers
     ? evt.ticketTypes!.map(t => ({
         name: t.name,
-        available: Math.max(0, (t.total ?? 0) - ((evt.ticketsSoldByTier ?? {})[t.name.toLowerCase()] ?? 0))
+        available: Math.max(0, (t.total ?? 0) - ((evt.ticketsSoldByTier ?? {})[t.name.toLowerCase()] ?? 0)),
+        saleState: getSaleState(t),
+        saleLabel: formatSaleWindowLabel(t)
       }))
     : null;
   const globalRemains = evt.totalTickets - evt.ticketsSold;
+  // Un tarif qui n'a pas encore ouvert n'est pas « épuisé » : annoncer l'événement complet
+  // alors que des places arrivent demain découragerait des acheteurs pour rien. Seul un tarif
+  // clos, ou ouvert mais sans place, est définitivement indisponible.
   const isSoldOut = hasTiers
-    ? tierAvailability!.every(t => t.available <= 0)
+    ? tierAvailability!.every(t => t.saleState === "close" || (t.saleState === "ouverte" && t.available <= 0))
     : globalRemains <= 0;
 
   return (
@@ -110,21 +116,28 @@ export default function EventCard({ event: evt, onViewEvent, userRole, onViewOrg
           {/* Per-tier availability pills */}
           {hasTiers ? (
             <div className="flex flex-wrap gap-1.5">
-              {tierAvailability!.map(t => (
-                <span
-                  key={t.name}
-                  className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold ${
-                    t.available <= 0
-                      ? "bg-red-50 text-red-500"
-                      : "bg-orange-50 text-orange-700"
-                  }`}
-                >
-                  {t.name}
-                  <span className={`rounded px-1 text-[10px] font-black ${t.available <= 0 ? "text-red-400" : "text-orange-600"}`}>
-                    {t.available <= 0 ? "Épuisé" : `${t.available} places`}
+              {tierAvailability!.map(t => {
+                const enVente = t.saleState === "ouverte";
+                const epuise = enVente && t.available <= 0;
+                const indisponible = epuise || t.saleState === "close";
+                return (
+                  <span
+                    key={t.name}
+                    className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold ${
+                      epuise
+                        ? "bg-red-50 text-red-500"
+                        : !enVente
+                          ? "bg-gray-50 text-gray-500"
+                          : "bg-orange-50 text-orange-700"
+                    }`}
+                  >
+                    {t.name}
+                    <span className={`rounded px-1 text-[10px] font-black ${indisponible ? "text-red-400" : !enVente ? "text-amber-600" : "text-orange-600"}`}>
+                      {!enVente ? t.saleLabel : epuise ? "Épuisé" : `${t.available} places`}
+                    </span>
                   </span>
-                </span>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="text-xs">

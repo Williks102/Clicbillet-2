@@ -12,9 +12,30 @@ import { requireAuth } from "../lib/auth.js";
 import { validateTransferTicket } from "../lib/validators.js";
 import { runInBackground, hasEventStarted, isQrUnlocked, getQrUnlockTime, generateTicketQrCode } from "../lib/utils.js";
 import { sendTicketTransferredEmail, sendTicketTransferConfirmationEmail } from "../lib/email.js";
+import { PASS_DESIGN_PAR_DEFAUT, fusionnerPassDesign, type PassDesign } from "../lib/passDesign.js";
 import { transferTicketRateLimiter } from "../lib/rateLimiters.js";
 
 const router = express.Router();
+
+// Habillages de pass des événements donnés, indexés par identifiant d'événement. Best-effort :
+// sur une base où la section 29 n'a pas été jouée, l'acheteur voit ses billets au thème par
+// défaut plutôt qu'une erreur.
+async function chargerPassDesigns(eventIds: string[]): Promise<Record<string, PassDesign>> {
+  if (eventIds.length === 0 || !supabase) return {};
+  const { data, error } = await supabase
+    .from("events")
+    .select("id, pass_design")
+    .in("id", eventIds);
+  if (error) {
+    console.warn(`[Tickets] Habillage des pass indisponible (${error.message}) : thème par défaut appliqué.`);
+    return {};
+  }
+  const parEvenement: Record<string, PassDesign> = {};
+  for (const e of data || []) {
+    parEvenement[e.id] = fusionnerPassDesign(e.pass_design);
+  }
+  return parEvenement;
+}
 
 // Fetch User Purchased Tickets Endpoint
 router.get("/api/my-tickets", requireAuth, async (req: express.Request, res: express.Response) => {
@@ -34,6 +55,11 @@ router.get("/api/my-tickets", requireAuth, async (req: express.Request, res: exp
         .order("purchase_date", { ascending: false });
 
       if (error) throw error;
+
+      // Habillage du pass, porté par l'événement et non par le billet : un organisateur qui
+      // retouche ses couleurs doit voir le changement sur les billets DÉJÀ vendus, pas
+      // seulement sur les prochains. Une seule requête pour tous les événements concernés.
+      const passDesignParEvenement = await chargerPassDesigns([...new Set((data || []).map((t: any) => t.event_id))]);
 
       const mappedTickets = (data || []).map((t: any) => {
         const unlocked = isQrUnlocked({ date: t.event_date, time: t.event_time });
@@ -56,7 +82,8 @@ router.get("/api/my-tickets", requireAuth, async (req: express.Request, res: exp
           transactionRef: t.transaction_ref,
           purchaseDate: t.purchase_date,
           quantity: t.quantity,
-          paymentStatus: t.transaction_ref?.startsWith("PENDING-") ? "pending" : "paid"
+          paymentStatus: t.transaction_ref?.startsWith("PENDING-") ? "pending" : "paid",
+          passDesign: passDesignParEvenement[t.event_id] ?? PASS_DESIGN_PAR_DEFAUT
         };
       });
       return res.json(mappedTickets);
@@ -68,11 +95,13 @@ router.get("/api/my-tickets", requireAuth, async (req: express.Request, res: exp
   const db = getDB();
   const filtered = db.tickets.filter((t: any) => t.buyerId === buyerId).map((t: any) => {
     const unlocked = isQrUnlocked({ date: t.eventDate, time: t.eventTime });
+    const evenement = (db.events || []).find((e: any) => e.id === t.eventId);
     return {
       ...t,
       qrCodeData: unlocked ? t.qrCodeData : null,
       qrUnlocksAt: unlocked ? null : getQrUnlockTime({ date: t.eventDate, time: t.eventTime }).toISOString(),
-      paymentStatus: t.transactionRef?.startsWith("PENDING-") ? "pending" : "paid"
+      paymentStatus: t.transactionRef?.startsWith("PENDING-") ? "pending" : "paid",
+      passDesign: fusionnerPassDesign((evenement as any)?.passDesign)
     };
   });
   res.json(filtered);

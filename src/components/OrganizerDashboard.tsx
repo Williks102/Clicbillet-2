@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Plus, LayoutDashboard, BarChart3, Calendar, MapPin, Tag, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X, AtSign, CheckCircle2, AlertCircle, Receipt, Download } from "lucide-react";
-import { Event, User, SalesStatus } from "../types";
+import { Event, User, SalesStatus, PassDesign } from "../types";
 import { authFetch } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
 import { isEventPast, EVENT_SCAN_GRACE_HOURS, EVENT_DEFAULT_DURATION_HOURS } from "../lib/eventStatus";
 import { BannerUploadZone } from "./BannerUploadZone";
 import { fetchCategories, cleDeLEvenement, type Category } from "../lib/categories";
 import { printHtmlDocument, escapeHtml } from "../lib/printDocument";
-import { isVipTier, formatTierLabel } from "../lib/ticketTier";
+import { isVipTier, formatTierLabel, formatSaleWindowLabel } from "../lib/ticketTier";
 import { isPaidTicket } from "../lib/ticketPayment";
+import PassDesignEditor from "./PassDesignEditor";
+import { PASS_DESIGN_PAR_DEFAUT, resolvePassDesign } from "../lib/passDesign";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 import AccountCodeBadge from "./AccountCodeBadge";
 import WeeklySalesChart from "./WeeklySalesChart";
@@ -23,6 +25,23 @@ interface OrganizerDashboardProps {
 }
 
 type OrganizerSubTab = "dashboard" | "reports" | "create" | "simulator" | "payouts" | "invoices";
+
+// Ligne de la grille tarifaire en cours de saisie : tout y est chaîne de caractères, la
+// conversion en nombres se faisant à l'envoi.
+type TierDraft = { name: string; price: string; total: string; salesStart: string; salesEnd: string };
+
+// Un tarif vide ne part pas au serveur ; on ne conserve que ce qui est réellement renseigné.
+function nettoyerTarifs(brouillons: TierDraft[]) {
+  return brouillons
+    .filter((t) => t.name.trim() !== "")
+    .map((t) => ({
+      name: t.name.trim(),
+      price: Number(t.price) || 0,
+      total: Number(t.total) || 0,
+      salesStart: t.salesStart ? t.salesStart.slice(0, 16) : null,
+      salesEnd: t.salesEnd ? t.salesEnd.slice(0, 16) : null,
+    }));
+}
 
 const ORGANIZER_SUB_TAB_LABELS: Record<OrganizerSubTab, string> = {
   dashboard: "Suivi des Ventes",
@@ -165,7 +184,10 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [endDate, setEndDate] = useState("");
   const [endTime, setEndTime] = useState("");
   const [price, setPrice] = useState("");
-  const [ticketTypes, setTicketTypes] = useState<{name: string; price: string; total: string}[]>([{ name: 'Standard', price: '', total: '' }]);
+  // salesStart/salesEnd : fenêtre de vente facultative propre au tarif (early bird, pass
+  // tardif), saisie en datetime-local et envoyée telle quelle ("YYYY-MM-DDTHH:MM").
+  const [ticketTypes, setTicketTypes] = useState<TierDraft[]>([{ name: 'Standard', price: '', total: '', salesStart: '', salesEnd: '' }]);
+  const [passDesign, setPassDesign] = useState<PassDesign>({ ...PASS_DESIGN_PAR_DEFAUT });
   const [venue, setVenue] = useState("");
   const [category, setCategory] = useState("concert");
   const [totalTickets, setTotalTickets] = useState("");
@@ -194,7 +216,12 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [editEndDate, setEditEndDate] = useState("");
   const [editEndTime, setEditEndTime] = useState("");
   const [editPrice, setEditPrice] = useState("");
-  const [editTicketTypes, setEditTicketTypes] = useState<{name: string; price: string; total: string}[]>([]);
+  const [editTicketTypes, setEditTicketTypes] = useState<TierDraft[]>([]);
+  // Habillage du pass : chargé à l'ouverture de la fenêtre de modification via son endpoint
+  // dédié, et non lu depuis l'événement du catalogue — le logo et l'image de fond n'y sont
+  // volontairement pas embarqués (cf. GET /api/events/:id/pass-design).
+  const [editPassDesign, setEditPassDesign] = useState<PassDesign>({ ...PASS_DESIGN_PAR_DEFAUT });
+  const [editPassDesignLoading, setEditPassDesignLoading] = useState(false);
   const [editVenue, setEditVenue] = useState("");
   const [editCategory, setEditCategory] = useState("concert");
   const [editTotalTickets, setEditTotalTickets] = useState("");
@@ -348,8 +375,25 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       }
     }
 
+    // Habillage du pass de l'événement à modifier. En cas d'échec on repart du thème par
+    // défaut plutôt que de bloquer la fenêtre : l'organisateur peut vouloir corriger un tout
+    // autre champ, et rien n'est écrasé tant qu'il n'enregistre pas.
+    async function chargerPassDesign(eventId: string) {
+      setEditPassDesignLoading(true);
+      try {
+        const response = await authFetch(`/api/events/${eventId}/pass-design`);
+        if (!response.ok) throw new Error("Habillage indisponible.");
+        setEditPassDesign(resolvePassDesign(await response.json()));
+      } catch {
+        setEditPassDesign({ ...PASS_DESIGN_PAR_DEFAUT });
+      } finally {
+        setEditPassDesignLoading(false);
+      }
+    }
+
     function openEdit(evt: Event) {
       setEditingEvent(evt);
+      chargerPassDesign(evt.id);
       setEditTitle(evt.title);
     setEditDescription(evt.description);
     setEditDate(evt.date);
@@ -360,7 +404,13 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     setEditVenue(evt.venue);
     setEditCategory(cleDeLEvenement(evt));
     setEditTotalTickets(String(evt.totalTickets));
-    setEditTicketTypes((evt.ticketTypes || []).map(t => ({ name: t.name, price: String(t.price), total: String(t.total || '') })));
+    setEditTicketTypes((evt.ticketTypes || []).map(t => ({
+      name: t.name,
+      price: String(t.price),
+      total: String(t.total || ''),
+      salesStart: t.salesStart || '',
+      salesEnd: t.salesEnd || '',
+    })));
     setEditScheduledOnsale(Boolean(evt.scheduledOnsale));
     if (BANNER_TEMPLATES.some(b => b.url === evt.banner)) {
       setEditSelectedBanner(evt.banner);
@@ -380,9 +430,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
 
     const bannerPath = editCustomBannerUrl.trim() !== "" ? editCustomBannerUrl.trim() : editSelectedBanner;
 
-    const cleanedEditTiers = editTicketTypes
-      .filter(t => t.name.trim() !== "")
-      .map(t => ({ name: t.name, price: Number(t.price), total: Number(t.total) || 0 }));
+    const cleanedEditTiers = nettoyerTarifs(editTicketTypes);
     const tierTotalSum = cleanedEditTiers.reduce((s, t) => s + t.total, 0);
     const payload = {
       title: editTitle,
@@ -398,7 +446,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       banner: bannerPath,
       totalTickets: tierTotalSum > 0 ? tierTotalSum : Number(editTotalTickets),
       organizerId: user.id,
-      scheduledOnsale: editScheduledOnsale
+      scheduledOnsale: editScheduledOnsale,
+      passDesign: editPassDesign
     };
 
     try {
@@ -554,6 +603,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
     setSubmitting(true);
 
     const bannerPath = customBannerUrl.trim() !== "" ? customBannerUrl.trim() : selectedBanner;
+    const cleanedTiers = nettoyerTarifs(ticketTypes);
 
     const payload = {
       title,
@@ -563,14 +613,18 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       endDate: endDate || null,
       endTime: endTime || null,
       price: Number(price),
-      ticketTypes: ticketTypes.filter(t => t.name.trim() !== "").map(t => ({ name: t.name, price: Number(t.price), total: Number(t.total) || 0 })),
+      ticketTypes: cleanedTiers,
       venue,
       category,
       banner: bannerPath,
-      totalTickets: ticketTypes.reduce((s, t) => s + (Number(t.total) || 0), 0) || Number(totalTickets),
+      // La capacité se déduit des quotas RÉELLEMENT envoyés : la sommer sur les brouillons
+      // comptait aussi les lignes sans nom, que le serveur écarte — la grille annonçait alors
+      // moins de places que la jauge globale de l'événement.
+      totalTickets: cleanedTiers.reduce((s, t) => s + t.total, 0) || Number(totalTickets),
       organizerId: user.id,
       organizerName: user.name,
-      scheduledOnsale
+      scheduledOnsale,
+      passDesign
     };
 
     try {
@@ -598,7 +652,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
       setEndDate("");
       setEndTime("");
       setPrice("");
-      setTicketTypes([{ name: 'Standard', price: '', total: '' }]);
+      setTicketTypes([{ name: 'Standard', price: '', total: '', salesStart: '', salesEnd: '' }]);
+      setPassDesign({ ...PASS_DESIGN_PAR_DEFAUT });
       setVenue("");
       setTotalTickets("");
       setScheduledOnsale(false);
@@ -1118,7 +1173,8 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
               </div>
               <div className="space-y-2">
                 {ticketTypes.map((tier, idx) => (
-                  <div key={idx} className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+                  <div key={idx} className="space-y-2 rounded-2xl border border-gray-100 p-2 sm:border-0 sm:p-0">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
                     <input
                       type="text"
                       placeholder="Ex: VIP"
@@ -1167,10 +1223,43 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                       <X className="w-4 h-4" />
                     </button>
                   </div>
+
+                  {/* Fenêtre de vente propre à ce tarif : c'est ce qui permet un early bird qui
+                      ferme avant les autres, ou un pass qui n'ouvre qu'à une date donnée.
+                      Laisser vide = en vente dès l'approbation et jusqu'à l'événement. */}
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <label className="space-y-1">
+                      <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Ouverture des ventes (option.)</span>
+                      <input
+                        type="datetime-local"
+                        value={tier.salesStart}
+                        onChange={(e) => {
+                          const newTiers = [...ticketTypes];
+                          newTiers[idx].salesStart = e.target.value;
+                          setTicketTypes(newTiers);
+                        }}
+                        className="w-full min-w-0 rounded-xl border border-gray-200 py-2.5 px-3 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Clôture des ventes (option.)</span>
+                      <input
+                        type="datetime-local"
+                        value={tier.salesEnd}
+                        onChange={(e) => {
+                          const newTiers = [...ticketTypes];
+                          newTiers[idx].salesEnd = e.target.value;
+                          setTicketTypes(newTiers);
+                        }}
+                        className="w-full min-w-0 rounded-xl border border-gray-200 py-2.5 px-3 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100"
+                      />
+                    </label>
+                  </div>
+                  </div>
                 ))}
                 <button
                   type="button"
-                  onClick={() => setTicketTypes([...ticketTypes, { name: '', price: '', total: '' }])}
+                  onClick={() => setTicketTypes([...ticketTypes, { name: '', price: '', total: '', salesStart: '', salesEnd: '' }])}
                   className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center mt-2"
                 >
                   <Plus className="w-3 h-3 mr-1" /> Ajouter un type de billet
@@ -1190,6 +1279,13 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                 className="w-full rounded-xl border border-gray-200 py-3 px-4 text-xs outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100 placeholder:text-gray-400"
               />
             </div>
+
+            <PassDesignEditor
+              value={passDesign}
+              onChange={setPassDesign}
+              onError={setFormError}
+              idPrefix="create"
+            />
 
             <div className="space-y-2 rounded-xl border border-gray-200 p-4">
               <label className="flex items-center gap-2 text-xs font-bold text-gray-700">
@@ -1399,11 +1495,16 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                       const tierOptions = simEvent?.ticketTypes && simEvent.ticketTypes.length > 0
                         ? simEvent.ticketTypes
                         : [{ name: "Standard", price: simEvent?.price ?? 0 }];
-                      return tierOptions.map((t) => (
-                        <option key={t.name} value={t.name.toLowerCase()}>
-                          {t.name} ({t.price.toLocaleString("fr-FR")} F)
-                        </option>
-                      ));
+                      // Un tarif hors de sa fenêtre de vente reste proposé — l'injecteur sert
+                      // aussi à vérifier qu'il est bien refusé — mais annoncé comme tel.
+                      return tierOptions.map((t) => {
+                        const fenetre = formatSaleWindowLabel(t);
+                        return (
+                          <option key={t.name} value={t.name.toLowerCase()}>
+                            {t.name} ({t.price.toLocaleString("fr-FR")} F){fenetre ? ` — ${fenetre}` : ""}
+                          </option>
+                        );
+                      });
                     })()}
                   </select>
                 </div>
@@ -1675,12 +1776,17 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
 
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-700">Types de billets &amp; places</label>
+                  <p className="text-[10px] font-semibold leading-relaxed text-gray-400">
+                    Un type de billet déjà vendu ne peut plus être renommé ni supprimé : les billets
+                    émis y sont rattachés par son nom. Créez plutôt un nouveau type à côté.
+                  </p>
                   <div className="grid grid-cols-3 gap-1 mb-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1">
                     <span>Catégorie</span><span>Prix (XOF)</span><span>Places</span>
                   </div>
                   <div className="space-y-2">
                     {editTicketTypes.map((tier, idx) => (
-                      <div key={idx} className="flex space-x-2">
+                      <div key={idx} className="space-y-2 rounded-2xl border border-gray-100 p-2">
+                      <div className="flex space-x-2">
                         <input
                           type="text"
                           placeholder="Ex: VIP"
@@ -1725,16 +1831,59 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                           <X className="w-4 h-4" />
                         </button>
                       </div>
+
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <label className="space-y-1">
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Ouverture des ventes</span>
+                          <input
+                            type="datetime-local"
+                            value={tier.salesStart}
+                            onChange={(e) => {
+                              const t = [...editTicketTypes];
+                              t[idx].salesStart = e.target.value;
+                              setEditTicketTypes(t);
+                            }}
+                            className="w-full rounded-xl border border-gray-200 py-2.5 px-3 text-xs outline-none focus:border-orange-500"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Clôture des ventes</span>
+                          <input
+                            type="datetime-local"
+                            value={tier.salesEnd}
+                            onChange={(e) => {
+                              const t = [...editTicketTypes];
+                              t[idx].salesEnd = e.target.value;
+                              setEditTicketTypes(t);
+                            }}
+                            className="w-full rounded-xl border border-gray-200 py-2.5 px-3 text-xs outline-none focus:border-orange-500"
+                          />
+                        </label>
+                      </div>
+                      </div>
                     ))}
                     <button
                       type="button"
-                      onClick={() => setEditTicketTypes([...editTicketTypes, { name: '', price: '', total: '' }])}
+                      onClick={() => setEditTicketTypes([...editTicketTypes, { name: '', price: '', total: '', salesStart: '', salesEnd: '' }])}
                       className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center mt-1"
                     >
                       <Plus className="w-3 h-3 mr-1" /> Ajouter un type
                     </button>
                   </div>
                 </div>
+
+                {editPassDesignLoading ? (
+                  <div className="rounded-2xl border border-gray-200 p-4 text-[11px] font-semibold text-gray-400">
+                    Chargement de l'habillage du pass…
+                  </div>
+                ) : (
+                  <PassDesignEditor
+                    value={editPassDesign}
+                    onChange={setEditPassDesign}
+                    onError={setEditError}
+                    idPrefix="edit"
+                  />
+                )}
 
                 <div className="space-y-2 rounded-xl border border-gray-200 p-4">
                   <label className="flex items-center gap-2 text-xs font-bold text-gray-700">
