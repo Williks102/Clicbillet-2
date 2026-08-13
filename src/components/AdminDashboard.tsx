@@ -642,7 +642,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                 <h4 className="text-xs font-black text-gray-900 uppercase tracking-wide">Inscriptions récentes</h4>
                 <button 
                   onClick={() => setActiveSubTab("users")} 
-                  className="text-[10px] font-extrabold text-orange-600 hover:underline"
+                  className="inline-flex min-h-11 items-center rounded-lg px-2 text-[10px] font-extrabold text-orange-600 hover:underline sm:min-h-0 sm:px-0"
                 >
                   Voir tous
                 </button>
@@ -677,7 +677,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                 </h4>
                 <button 
                   onClick={() => setActiveSubTab("tickets")} 
-                  className="text-[10px] font-extrabold text-orange-600 hover:underline"
+                  className="inline-flex min-h-11 items-center rounded-lg px-2 text-[10px] font-extrabold text-orange-600 hover:underline sm:min-h-0 sm:px-0"
                 >
                   Superviser les flux
                 </button>
@@ -749,7 +749,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                 <button
                   onClick={() => handleCompressBanners(false)}
                   disabled={bannerCompressLoading}
-                  className="flex items-center space-x-1.5 rounded-xl bg-gray-50 px-4 py-2 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:opacity-50"
+                  className="flex min-h-11 items-center space-x-1.5 rounded-xl bg-gray-50 px-4 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-100 disabled:opacity-50 sm:min-h-0 sm:py-2"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${bannerCompressLoading ? "animate-spin" : ""}`} />
                   <span>Aperçu (aucune écriture)</span>

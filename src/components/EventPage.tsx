@@ -150,7 +150,7 @@ export default function EventPage({ event, loading, onBack, onBuyTicket, onViewO
     <div className="mx-auto max-w-3xl py-6" id="event-page">
       <button
         onClick={onBack}
-        className="mb-4 flex items-center gap-1.5 text-xs font-bold text-gray-500 transition-colors hover:text-orange-600"
+        className="mb-2 flex min-h-11 items-center gap-1.5 text-xs sm:mb-4 sm:min-h-0 font-bold text-gray-500 transition-colors hover:text-orange-600"
       >
         <ArrowLeft className="h-4 w-4" />
         Tous les événements
@@ -190,7 +190,7 @@ export default function EventPage({ event, loading, onBack, onBuyTicket, onViewO
             <button
               onClick={handleShare}
               id="event-share-btn"
-              className="flex shrink-0 items-center gap-1.5 rounded-xl border border-gray-200 px-3.5 py-2 text-xs font-black text-gray-700 transition-colors hover:border-orange-200 hover:text-orange-600"
+              className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl border border-gray-200 px-3.5 text-xs font-black text-gray-700 transition-colors hover:border-orange-200 hover:text-orange-600 sm:min-h-0 sm:py-2"
             >
               {shared ? <Check className="h-4 w-4 text-green-600" /> : <Share2 className="h-4 w-4" />}
               {shared ? "Lien copié" : "Partager"}
@@ -279,7 +279,7 @@ export default function EventPage({ event, loading, onBack, onBuyTicket, onViewO
                         aria-label={`Retirer un billet ${formatTierLabel(tier.name)}`}
                         onClick={() => adjustQuantity(tier.name, -1, tier.available)}
                         disabled={qty === 0}
-                        className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-30"
+                        className="flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-30 sm:h-9 sm:w-9"
                       >
                         <Minus className="h-3.5 w-3.5" />
                       </button>
@@ -289,7 +289,7 @@ export default function EventPage({ event, loading, onBack, onBuyTicket, onViewO
                         aria-label={`Ajouter un billet ${formatTierLabel(tier.name)}`}
                         onClick={() => adjustQuantity(tier.name, 1, tier.available)}
                         disabled={!enVente || tierSoldOut || past}
-                        className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-600 text-white transition-colors hover:bg-orange-700 disabled:bg-gray-200 disabled:text-gray-400"
+                        className="flex h-11 w-11 items-center justify-center rounded-full bg-orange-600 text-white transition-colors hover:bg-orange-700 disabled:bg-gray-200 disabled:text-gray-400 sm:h-9 sm:w-9"
                       >
                         <Plus className="h-3.5 w-3.5" />
                       </button>

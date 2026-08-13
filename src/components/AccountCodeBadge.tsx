@@ -39,7 +39,7 @@ export default function AccountCodeBadge({ code, className = "" }: AccountCodeBa
         type="button"
         onClick={handleCopy}
         aria-label="Copier mon code client"
-        className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-orange-50 hover:text-orange-600"
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-orange-50 hover:text-orange-600 sm:h-8 sm:w-8"
       >
         {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
       </button>

@@ -682,22 +682,25 @@ export default function App() {
         <footer className="mt-auto border-t border-gray-100 bg-white py-6 text-center text-xs text-gray-400 font-semibold uppercase tracking-wider print:hidden">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
             <p>© {new Date().getFullYear()} clicbillet. Tous droits réservés.</p>
-            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
-              <button onClick={() => navigateToTab("pricing")} className="hover:text-gray-600">
-                Tarifs
-              </button>
-              <span>•</span>
-              <button onClick={() => navigateToTab("contact")} className="hover:text-gray-600">
-                Contact
-              </button>
-              <span>•</span>
-              <button onClick={() => navigateToTab("terms")} className="hover:text-gray-600">
-                Conditions Générales de Vente
-              </button>
-              <span>•</span>
-              <button onClick={() => navigateToTab("privacy")} className="hover:text-gray-600">
-                Confidentialité
-              </button>
+            {/* Les séparateurs « • » disparaissent au profit d'un espacement : ces quatre
+                liens ne faisaient que 16 px de haut, soit la hauteur du texte, et ils sont
+                présents au bas de CHAQUE écran. Les puces les collaient les uns aux autres,
+                si bien qu'au doigt on ouvrait les CGV en visant Contact. */}
+            <div className="flex flex-wrap items-center justify-center gap-x-1 gap-y-1">
+              {([
+                ["pricing", "Tarifs"],
+                ["contact", "Contact"],
+                ["terms", "Conditions Générales de Vente"],
+                ["privacy", "Confidentialité"],
+              ] as const).map(([tab, libelle]) => (
+                <button
+                  key={tab}
+                  onClick={() => navigateToTab(tab)}
+                  className="flex min-h-11 items-center rounded-lg px-3 hover:bg-gray-50 hover:text-gray-600 sm:min-h-0 sm:px-2 sm:py-1"
+                >
+                  {libelle}
+                </button>
+              ))}
             </div>
           </div>
         </footer>

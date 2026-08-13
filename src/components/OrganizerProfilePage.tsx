@@ -71,7 +71,7 @@ export default function OrganizerProfilePage({ alias, onBack, onViewEvent }: Org
         <p className="mt-2 text-xs text-gray-500">Cet alias ne correspond à aucun organisateur actif.</p>
         <button
           onClick={onBack}
-          className="mt-6 flex items-center space-x-1.5 mx-auto text-xs font-bold text-gray-500 hover:text-orange-600"
+          className="mt-6 flex min-h-11 items-center space-x-1.5 mx-auto text-xs sm:min-h-0 font-bold text-gray-500 hover:text-orange-600"
         >
           <ArrowLeft className="h-4 w-4" />
           <span>Retour à l'accueil</span>
@@ -84,7 +84,7 @@ export default function OrganizerProfilePage({ alias, onBack, onViewEvent }: Org
     <div>
       <button
         onClick={onBack}
-        className="mb-6 flex items-center space-x-1.5 text-xs font-bold text-gray-500 transition-colors hover:text-orange-600"
+        className="mb-4 flex min-h-11 items-center space-x-1.5 text-xs sm:mb-6 sm:min-h-0 font-bold text-gray-500 transition-colors hover:text-orange-600"
       >
         <ArrowLeft className="h-4 w-4" />
         <span>Retour à l'accueil</span>

@@ -291,7 +291,7 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
             <button
               id="back-to-login-btn"
               onClick={() => switchMode("login")}
-              className="inline-flex items-center space-x-1 text-xs font-bold text-orange-600 hover:underline"
+              className="inline-flex min-h-11 items-center space-x-1 rounded-lg px-2 text-xs font-bold text-orange-600 hover:underline sm:min-h-0 sm:px-0"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               <span>J'ai confirmé, je me connecte</span>
@@ -311,7 +311,7 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
             <button
               id="back-to-login-btn"
               onClick={() => switchMode("login")}
-              className="inline-flex items-center space-x-1 text-xs font-bold text-orange-600 hover:underline"
+              className="inline-flex min-h-11 items-center space-x-1 rounded-lg px-2 text-xs font-bold text-orange-600 hover:underline sm:min-h-0 sm:px-0"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               <span>Retour à la connexion</span>
@@ -518,7 +518,7 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
               <button
                 id="back-to-login-btn"
                 onClick={() => switchMode("login")}
-                className="inline-flex items-center space-x-1 text-xs font-bold text-orange-600 hover:underline"
+                className="inline-flex min-h-11 items-center space-x-1 rounded-lg px-2 text-xs font-bold text-orange-600 hover:underline sm:min-h-0 sm:px-0"
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
                 <span>Retour à la connexion</span>
@@ -527,7 +527,7 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
               <button
                 id="toggle-auth-mode-btn"
                 onClick={() => switchMode(mode === "login" ? "register" : "login")}
-                className="inline-flex items-center space-x-1 text-xs font-bold text-orange-600 hover:underline"
+                className="inline-flex min-h-11 items-center space-x-1 rounded-lg px-2 text-xs font-bold text-orange-600 hover:underline sm:min-h-0 sm:px-0"
               >
                 <span>{mode === "login" ? "Nouveau sur ClicBillet ? Créer un compte" : "Déjà membre ? Se connecter"}</span>
                 <ArrowRight className="h-3.5 w-3.5" />
@@ -540,7 +540,7 @@ export default function AuthPage({ onSuccess, onCancel, initialResetToken, initi
         <button
           onClick={onCancel}
           id="auth-cancel-btn"
-          className="mt-4 w-full text-center text-xs font-bold text-gray-400 hover:text-gray-600"
+          className="mt-2 min-h-11 w-full rounded-lg text-center text-xs font-bold text-gray-400 hover:text-gray-600 sm:mt-4 sm:min-h-0"
         >
           Retourner à l'accueil
         </button>
