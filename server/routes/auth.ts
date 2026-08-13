@@ -5,7 +5,7 @@ import { isSupabaseEnabled, supabase, supabaseAdmin, createEphemeralAuthClient, 
 import { getDB, saveDB } from "../lib/db.js";
 import { runInBackground } from "../lib/utils.js";
 import { sendWelcomeEmail, sendAdminNewOrganizerEmail, sendPasswordResetEmail } from "../lib/email.js";
-import { registerRateLimiter, loginRateLimiter, resetPasswordRateLimiter, mfaVerifyRateLimiter, forgotPasswordRateLimiter } from "../lib/rateLimiters.js";
+import { registerRateLimiter, loginRateLimiter, resetPasswordRateLimiter, mfaVerifyRateLimiter, forgotPasswordRateLimiter, resendConfirmationRateLimiter } from "../lib/rateLimiters.js";
 import { validateRegister, validateLogin, validateForgotPassword, validateResetPassword } from "../lib/validators.js";
 import {
   requireAuth, requireRole,
@@ -360,6 +360,41 @@ router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: expr
 // et envoie un lien de réinitialisation par e-mail. Répond toujours avec le même message
 // générique, que l'e-mail corresponde ou non à un compte existant, pour ne pas permettre à un
 // attaquant de découvrir quels e-mails sont enregistrés sur la plateforme (énumération).
+// Renvoi du lien de confirmation d'inscription.
+//
+// L'inscription n'ouvre pas de session : Supabase Auth exige que l'adresse soit confirmée
+// avant tout signInWithPassword. Entre la création du compte et ce clic, l'organisateur quitte
+// le site — et si l'e-mail atterrit en spam, se perd, ou arrive après qu'il a fermé l'onglet,
+// son compte reste inutilisable sans qu'il puisse rien y faire. Il ne pouvait alors que
+// recommencer une inscription, refusée pour « e-mail déjà utilisé ».
+//
+// Réponse volontairement identique quel que soit le cas (compte inexistant, déjà confirmé,
+// renvoi effectué) : même raison qu'au mot de passe oublié, ne pas transformer cet endpoint en
+// détecteur d'adresses inscrites.
+router.post("/api/auth/resend-confirmation", resendConfirmationRateLimiter, validateForgotPassword, async (req: express.Request, res: express.Response) => {
+  const normalizedEmail = String(req.body.email).toLowerCase();
+  const genericResponse = { message: "Si ce compte existe et n'est pas encore confirmé, un nouveau lien vient de lui être envoyé." };
+
+  if (isSupabaseEnabled) {
+    try {
+      const { error } = await createEphemeralAuthClient().auth.resend({
+        type: "signup",
+        email: normalizedEmail,
+        options: { emailRedirectTo: APP_ORIGIN }
+      });
+      // Une adresse déjà confirmée fait répondre Supabase en erreur : c'est un cas normal ici,
+      // pas un incident, et il ne doit surtout pas se distinguer dans la réponse.
+      if (error) {
+        console.warn(`[Resend Confirmation] Renvoi non effectué : ${error.message}`);
+      }
+    } catch (err: any) {
+      console.error("[Resend Confirmation] Échec du renvoi :", err.message);
+    }
+  }
+
+  res.json(genericResponse);
+});
+
 router.post("/api/auth/forgot-password", forgotPasswordRateLimiter, validateForgotPassword, async (req: express.Request, res: express.Response) => {
   const { email } = req.body;
   const normalizedEmail = String(email).toLowerCase();
