@@ -3,13 +3,12 @@
 // "eyJ") and is *expected* in the frontend bundle, so a plain "eyJ" grep would false-positive
 // on every build. Instead, decode each JWT-looking match and flag it only if its payload
 // claims role=service_role, or if it matches SUPABASE_SERVICE_ROLE_KEY from the environment.
-// server.cjs/server.cjs.map are excluded — they run server-side only and are expected to
-// embed SUPABASE_SERVICE_ROLE_KEY.
+// Le bundle serveur ne s'écrit plus dans dist/ (cf. le second contrôle ci-dessous), donc plus
+// aucun fichier n'est exclu du scan : tout ce qui reste dans dist/ est public par définition.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 
 const DIST_DIR = "dist";
-const EXCLUDED_FILES = new Set(["server.cjs", "server.cjs.map"]);
 const SCANNED_EXTENSIONS = new Set([".js", ".mjs", ".html", ".css", ".json", ".map"]);
 const JWT_PATTERN = /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g;
 const SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
@@ -47,11 +46,31 @@ try {
   process.exit(1);
 }
 
+// Second filet, distinct du premier : dist/ est publié tel quel par @vercel/static-build et
+// servi à la racine du domaine (routes "handle: filesystem" de vercel.json). Tout ce qui y
+// atterrit est donc téléchargeable par n'importe qui. Le bundle serveur y a longtemps été
+// écrit : sa source map embarque le code source COMPLET de server/ (auth, webhooks, config),
+// soit une divulgation intégrale à l'URL /server.cjs.map. Il est désormais produit dans
+// build/. Ce contrôle empêche la régression — y compris pour toute autre source map, que le
+// build frontend n'est pas censé émettre.
+const publicSourceLeaks = files.filter((filePath) => {
+  const fileName = filePath.split(/[\\/]/).pop();
+  return extname(filePath) === ".map" || fileName.startsWith("server.cjs");
+});
+
+if (publicSourceLeaks.length > 0) {
+  console.error("[check:secrets] Code source exposé dans le build public (dist/) :");
+  for (const filePath of publicSourceLeaks) {
+    console.error(`  - ${filePath}`);
+  }
+  console.error("dist/ est servi à la racine du domaine : ces fichiers seraient téléchargeables publiquement.");
+  console.error("Le bundle serveur doit être produit dans build/, et le build frontend ne doit pas émettre de source map.");
+  process.exit(1);
+}
+
 const leaks = [];
 
 for (const filePath of files) {
-  const fileName = filePath.split(/[\\/]/).pop();
-  if (EXCLUDED_FILES.has(fileName)) continue;
   if (!SCANNED_EXTENSIONS.has(extname(filePath))) continue;
 
   const content = readFileSync(filePath, "utf8");

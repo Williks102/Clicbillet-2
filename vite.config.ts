@@ -4,6 +4,27 @@ import path from 'path';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+// Les commentaires HTML de index.html sont écrits pour les développeurs, mais un fichier
+// statique les livre tels quels à chaque visiteur : un scan externe a ainsi relevé un chemin
+// serveur (`server/lib/socialPreview.ts`) directement dans la réponse HTTP de la page d'accueil
+// — un attaquant y lit gratuitement la structure du dépôt (CWE-200, Path Disclosure).
+// Plutôt que d'appauvrir le source, on le laisse commenté et on retire les commentaires du
+// HTML produit. `enforce: "post"` fait passer ce plugin en dernier, donc après les balises
+// injectées par vite-plugin-pwa : leurs propres commentaires disparaissent aussi.
+// Les commentaires conditionnels IE (`<!--[if ...]>`) sont préservés : ce sont des
+// instructions, pas de la documentation. Le HTML de /e/:id est construit à partir du fichier
+// buildé (cf. server.ts), il hérite donc du nettoyage.
+function stripHtmlComments() {
+  return {
+    name: 'clicbillet-strip-html-comments',
+    apply: 'build' as const,
+    enforce: 'post' as const,
+    transformIndexHtml(html: string) {
+      return html.replace(/<!--(?!\[if)[\s\S]*?-->/g, '');
+    },
+  };
+}
+
 export default defineConfig(() => {
   return {
     plugins: [
@@ -87,6 +108,7 @@ export default defineConfig(() => {
           enabled: false,
         },
       }),
+      stripHtmlComments(),
     ],
     resolve: {
       alias: {
