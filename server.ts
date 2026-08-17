@@ -35,6 +35,12 @@ const app = express();
 app.set("trust proxy", 1);
 
 // Basic security headers
+//
+// Toute modification ici doit être répercutée dans vercel.json : les deux politiques couvrent
+// la même application mais sont servies par des chemins différents en production. Les réponses
+// de cette fonction Express (/api/*, /e/:id) portent la politique ci-dessous ; les fichiers
+// statiques (dont la page d'accueil) portent celle de vercel.json, posée par l'edge Vercel.
+// Une politique plus permissive que l'autre annule le durcissement pour la moitié du trafic.
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -42,10 +48,21 @@ app.use(helmet({
       scriptSrc: isProduction
         ? ["'self'", "https://js.paystack.co"]
         : ["'self'", "'unsafe-inline'", "https://js.paystack.co"],
+      // Les gestionnaires inline (onclick="…") ne servent jamais ici : React attache ses
+      // écouteurs via addEventListener. Les interdire ferme la voie d'exploitation la plus
+      // courante d'une injection HTML, que 'self' seul laisserait passer.
+      scriptSrcAttr: ["'none'"],
       connectSrc: ["'self'", `ws://127.0.0.1:${HMR_PORT}`, `ws://localhost:${HMR_PORT}`, ...PAYMENT_GATEWAY_ORIGINS, ...SUPABASE_REALTIME_ORIGINS],
-      styleSrc: ["'self'", "https:", "'unsafe-inline'"],
+      // 'unsafe-inline' reste nécessaire (styles injectés par le SDK Paystack et par les
+      // animations motion), mais le joker `https:` ne l'était pas : l'application ne charge
+      // aucune feuille de style ni police externe (Tailwind est compilé dans le bundle, les
+      // icônes lucide sont des SVG inline). On le remplace par la liste explicite des
+      // origines de paiement, seules tierces légitimes.
+      styleSrc: ["'self'", "'unsafe-inline'", ...PAYMENT_GATEWAY_ORIGINS],
+      // `https:` est conservé ici seulement : les affiches d'événements peuvent référencer une
+      // URL distante saisie par l'organisateur (les bannières uploadées, elles, sont des data:).
       imgSrc: ["'self'", "https:", "data:"],
-      fontSrc: ["'self'", "https:", "data:"],
+      fontSrc: ["'self'", "data:", ...PAYMENT_GATEWAY_ORIGINS],
       objectSrc: ["'none'"],
       frameSrc: ["'self'", ...PAYMENT_GATEWAY_ORIGINS],
       frameAncestors: ["'self'"],
