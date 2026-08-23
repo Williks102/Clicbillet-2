@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Search, Tag, Sparkles, ChevronRight } from "lucide-react";
+import { Search, Tag } from "lucide-react";
 import { Event } from "../types";
 import { fetchCategories, iconeDeCategorie, cleDeLEvenement, TOUTES_CATEGORIES, type Category } from "../lib/categories";
 import { isEventPast } from "../lib/eventStatus";
@@ -11,10 +11,9 @@ interface LandingPageProps {
   onViewEvent?: (event: Event) => void;
   userRole?: string;
   onViewOrganizer?: (alias: string) => void;
-  onViewVendors?: () => void;
 }
 
-export default function LandingPage({ events, onViewEvent, userRole, onViewOrganizer, onViewVendors }: LandingPageProps) {
+export default function LandingPage({ events, onViewEvent, userRole, onViewOrganizer }: LandingPageProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState(TOUTES_CATEGORIES);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -127,26 +126,6 @@ export default function LandingPage({ events, onViewEvent, userRole, onViewOrgan
           </div>
         </div>
       </section>
-
-      {/* Bandeau vers le marché de prestataires : un visiteur qui organise un événement a
-          souvent besoin d'un photographe, d'une régie ou d'un MC en plus de vendre des billets. */}
-      {onViewVendors && (
-        <section id="vendors-teaser-section">
-          <button
-            onClick={onViewVendors}
-            className="flex w-full items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-orange-600 to-amber-500 px-5 py-4 text-left text-white shadow-md transition-transform hover:scale-[1.01]"
-          >
-            <span className="flex items-center gap-3">
-              <Sparkles className="h-5 w-5 shrink-0" />
-              <span>
-                <span className="block text-sm font-black">Besoin d'un prestataire pour votre événement ?</span>
-                <span className="block text-xs font-semibold text-orange-50">Photographes, régies, MC, traiteurs... découvrez le marché de prestataires.</span>
-              </span>
-            </span>
-            <ChevronRight className="h-5 w-5 shrink-0" />
-          </button>
-        </section>
-      )}
 
       {/* Events Listings grid layout.
           La recherche et les catégories au-dessus ne sont volontairement pas animées : ce sont

@@ -8,6 +8,7 @@ import GuestOrAuthModal, { GuestInfo } from "./components/GuestOrAuthModal";
 import ToastStack, { ToastItem } from "./components/ToastStack";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
 import JoinPromoterCta from "./components/JoinPromoterCta";
+import JoinVendorCta from "./components/JoinVendorCta";
 import { EventGridSkeleton, PageSkeleton } from "./components/Skeleton";
 import OrganizerProfilePage from "./components/OrganizerProfilePage";
 import BottomTabBar from "./components/native/BottomTabBar";
@@ -338,6 +339,16 @@ export default function App() {
     (!user || user.role === "client") &&
     ["home", "event", "organizer-profile"].includes(activeTab);
 
+  // Même bande, pour rejoindre le marché de prestataires plutôt que vendre des billets. Un
+  // organisateur peut aussi être prestataire (photographe qui organise ses propres soirées,
+  // par exemple) : contrairement à showJoinCta, elle ne lui est pas masquée — seul l'admin
+  // n'a rien à y faire.
+  const showJoinVendorCta =
+    !nativeApp &&
+    !authModalVisible &&
+    (!user || user.role !== "admin") &&
+    ["home", "event", "organizer-profile"].includes(activeTab);
+
   // Confirmation de paiement instantanée : on s'abonne aux changements de SES PROPRES
   // tickets via Supabase Realtime (policy "tickets_select_own", scoped à buyer_id = auth.uid()).
   // Dès qu'un ticket passe de PENDING- à PAID- (confirmé par le webhook Paystack côté
@@ -593,7 +604,6 @@ export default function App() {
                     onViewEvent={handleViewEvent}
                     userRole={user?.role}
                     onViewOrganizer={handleViewOrganizer}
-                    onViewVendors={() => setActiveTab("vendors")}
                   />
                 )}
               </>
@@ -720,6 +730,7 @@ export default function App() {
       )}
 
       {showJoinCta && <JoinPromoterCta onJoin={handleBecomePromoter} isSignedIn={Boolean(user)} />}
+      {showJoinVendorCta && <JoinVendorCta onJoin={handleBecomeVendor} isSignedIn={Boolean(user)} />}
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
       <PwaInstallPrompt />
