@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Plus, LayoutDashboard, BarChart3, Calendar, MapPin, Tag, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X, AtSign, CheckCircle2, AlertCircle, Receipt, Download } from "lucide-react";
+import { Plus, LayoutDashboard, BarChart3, Calendar, MapPin, Tag, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X, AtSign, CheckCircle2, AlertCircle, Receipt, Download, ArrowRight } from "lucide-react";
 import { Event, User, SalesStatus, PassDesign } from "../types";
 import { authFetch } from "../lib/apiClient";
 import ResponsiveSheet from "./ResponsiveSheet";
@@ -1077,6 +1077,26 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
               <Check className="h-4 w-4" />
               <span>Félicitations ! L'événement a été publié avec succès.</span>
             </div>
+          )}
+
+          {/* Nudge vers le marché de prestataires : le moment où un organisateur vient de
+              publier un événement est précisément celui où il pense photographe, régie ou MC —
+              plus utile ici qu'une bannière générique ailleurs sur le site. */}
+          {formSuccess && (
+            <button
+              type="button"
+              id="orga-event-created-vendor-nudge"
+              onClick={() => setActiveTab("vendors")}
+              className="flex w-full items-center justify-between gap-3 rounded-xl border border-orange-100 bg-orange-50/60 px-4 py-3 text-left transition-colors hover:bg-orange-100"
+            >
+              <span className="flex items-center gap-2.5">
+                <Sparkles className="h-4 w-4 shrink-0 text-orange-600" />
+                <span className="text-xs font-bold text-orange-800">
+                  Besoin d'un photographe, d'une régie ou d'un MC pour cet événement ? Découvrez le marché de prestataires.
+                </span>
+              </span>
+              <ArrowRight className="h-4 w-4 shrink-0 text-orange-500" />
+            </button>
           )}
 
           {/* Form grid values */}

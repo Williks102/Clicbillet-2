@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import { Sparkles, ArrowRight, Camera, MessageCircleMore, Globe } from "lucide-react";
 import Reveal from "./Reveal";
+import { fetchVendorPublicStats } from "../lib/vendorPublicStats";
 
 interface JoinVendorCtaProps {
   // Mène là où le parcours se poursuit réellement : création de compte pour un visiteur,
@@ -20,6 +22,12 @@ const ARGUMENTS = [
 // publiques : deux appels à rejoindre la plateforme, l'un côté organisateur d'événements,
 // l'autre côté prestataire de services.
 export default function JoinVendorCta({ onJoin, isSignedIn }: JoinVendorCtaProps) {
+  const [stats, setStats] = useState<{ activeVendors: number; leadsLast30Days: number } | null>(null);
+
+  useEffect(() => {
+    fetchVendorPublicStats().then(setStats);
+  }, []);
+
   return (
     <section className="mx-auto w-full max-w-7xl px-3 pb-10 sm:px-6" id="join-vendor-cta">
       <Reveal className="overflow-hidden rounded-3xl bg-[#1a252f] px-6 py-10 text-white shadow-xl sm:px-12 sm:py-12">
@@ -32,6 +40,16 @@ export default function JoinVendorCta({ onJoin, isSignedIn }: JoinVendorCtaProps
             Photographe, vidéaste, DJ, régie son ou lumière, MC, traiteur, décorateur... publiez votre fiche sur le
             marché de prestataires ClicBillet et recevez des demandes de devis directement.
           </p>
+
+          {/* Preuve sociale : discrète tant qu'il n'y a rien à montrer (un compteur à zéro
+              affaiblirait l'appel plutôt que de le renforcer). */}
+          {stats && (stats.activeVendors > 0 || stats.leadsLast30Days > 0) && (
+            <p className="mx-auto mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs font-bold text-orange-200">
+              {stats.activeVendors > 0 && <span>{stats.activeVendors} prestataire{stats.activeVendors > 1 ? "s" : ""} déjà inscrit{stats.activeVendors > 1 ? "s" : ""}</span>}
+              {stats.activeVendors > 0 && stats.leadsLast30Days > 0 && <span className="text-orange-400">·</span>}
+              {stats.leadsLast30Days > 0 && <span>{stats.leadsLast30Days} devis envoyé{stats.leadsLast30Days > 1 ? "s" : ""} ce mois-ci</span>}
+            </p>
+          )}
 
           <div className="mt-8 grid gap-4 text-left sm:grid-cols-3">
             {ARGUMENTS.map(({ icon: Icon, title, text }) => (

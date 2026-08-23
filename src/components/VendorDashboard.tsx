@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Sparkles, AtSign, CheckCircle2, AlertCircle, Inbox, Mail, Phone, Calendar as CalendarIcon,
-  Upload, X, ImagePlus
+  Upload, X, ImagePlus, Award
 } from "lucide-react";
 import { User } from "../types";
 import { authFetch } from "../lib/apiClient";
@@ -30,6 +30,7 @@ interface VendorProfile {
   coverImage: string | null;
   portfolioImages: string[];
   categorySlugs: string[];
+  foundingMember: boolean;
 }
 
 interface VendorLead {
@@ -70,6 +71,7 @@ export default function VendorDashboard({ user }: VendorDashboardProps) {
 
   const [leads, setLeads] = useState<VendorLead[]>([]);
   const [leadsLoading, setLeadsLoading] = useState(true);
+  const [foundingMember, setFoundingMember] = useState(false);
 
   useEffect(() => {
     fetchVendorCategories().then(setCategories);
@@ -87,6 +89,7 @@ export default function VendorDashboard({ user }: VendorDashboardProps) {
         setPortfolioImages(data.portfolioImages);
         setAlias(data.alias || "");
         setSavedAlias(data.alias || null);
+        setFoundingMember(data.foundingMember);
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
@@ -265,6 +268,15 @@ export default function VendorDashboard({ user }: VendorDashboardProps) {
 
       {subTab === "profile" ? (
         <div className="space-y-5">
+          {foundingMember && (
+            <div className="flex items-center gap-2.5 rounded-2xl border border-orange-100 bg-orange-50 px-4 py-3" id="vendor-founding-member-banner">
+              <Award className="h-4.5 w-4.5 shrink-0 text-orange-600" />
+              <p className="text-xs font-bold text-orange-800">
+                Vous faites partie des prestataires fondateurs — ce statut reste acquis, quoi qu'il advienne des futures offres.
+              </p>
+            </div>
+          )}
+
           <div className="rounded-2xl border border-gray-100 bg-white p-5 space-y-4" id="vendor-public-profile-card">
             <div className="border-b border-gray-50 pb-3">
               <h4 className="text-xs font-black text-gray-900 uppercase tracking-wide flex items-center space-x-1.5">

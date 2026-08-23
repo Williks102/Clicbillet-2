@@ -658,7 +658,7 @@ router.get("/api/admin/vendor-stats", requireAuth, requireRole("admin"), async (
     try {
       const [{ data: requests, error: reqErr }, { data: profiles, error: profErr }, { data: profileCats, error: catErr }, { data: leads, error: leadErr }] = await Promise.all([
         adminClient.from("vendor_requests").select("status").limit(MAX_LIST_ROWS),
-        adminClient.from("vendor_profiles").select("id, business_name, alias, active, created_at").limit(MAX_LIST_ROWS),
+        adminClient.from("vendor_profiles").select("id, business_name, alias, active, founding_member, created_at").limit(MAX_LIST_ROWS),
         adminClient.from("vendor_profile_categories").select("vendor_id, category_slug").limit(MAX_LIST_ROWS),
         adminClient.from("vendor_leads").select("vendor_id, created_at").limit(MAX_LIST_ROWS),
       ]);
@@ -669,7 +669,7 @@ router.get("/api/admin/vendor-stats", requireAuth, requireRole("admin"), async (
 
       return res.json(buildVendorStats(
         (requests || []).map((r: any) => ({ status: r.status })),
-        (profiles || []).map((p: any) => ({ id: p.id, businessName: p.business_name, alias: p.alias, active: p.active !== false })),
+        (profiles || []).map((p: any) => ({ id: p.id, businessName: p.business_name, alias: p.alias, active: p.active !== false, foundingMember: p.founding_member === true })),
         (profileCats || []).map((c: any) => ({ vendorId: c.vendor_id, categorySlug: c.category_slug })),
         (leads || []).map((l: any) => ({ vendorId: l.vendor_id, createdAt: l.created_at })),
         labelBySlug
@@ -682,7 +682,7 @@ router.get("/api/admin/vendor-stats", requireAuth, requireRole("admin"), async (
   const db = getDB();
   return res.json(buildVendorStats(
     (db.vendorRequests || []).map((r: any) => ({ status: r.status })),
-    (db.vendorProfiles || []).map((p: any) => ({ id: p.id, businessName: p.businessName, alias: p.alias, active: p.active !== false })),
+    (db.vendorProfiles || []).map((p: any) => ({ id: p.id, businessName: p.businessName, alias: p.alias, active: p.active !== false, foundingMember: p.foundingMember === true })),
     (db.vendorProfiles || []).flatMap((p: any) => (p.categorySlugs || []).map((slug: string) => ({ vendorId: p.id, categorySlug: slug }))),
     (db.vendorLeads || []).map((l: any) => ({ vendorId: l.vendorId, createdAt: l.createdAt })),
     labelBySlug
@@ -691,7 +691,7 @@ router.get("/api/admin/vendor-stats", requireAuth, requireRole("admin"), async (
 
 function buildVendorStats(
   requests: { status: string }[],
-  profiles: { id: string; businessName: string; alias: string | null; active: boolean }[],
+  profiles: { id: string; businessName: string; alias: string | null; active: boolean; foundingMember: boolean }[],
   profileCategories: { vendorId: string; categorySlug: string }[],
   leads: { vendorId: string; createdAt: string }[],
   labelBySlug: Map<string, string>
@@ -754,6 +754,7 @@ function buildVendorStats(
       active: activeProfiles.length,
       incomplete: incompleteProfiles.length,
       suspended: suspendedProfiles.length,
+      founding: profiles.filter((p) => p.foundingMember).length,
     },
     leads: {
       total: leads.length,

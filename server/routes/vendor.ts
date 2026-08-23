@@ -25,6 +25,7 @@ function mapProfile(row: any): any {
     coverImage: row.cover_image || null,
     portfolioImages: row.portfolio_images || [],
     categorySlugs: row.category_slugs || [],
+    foundingMember: row.founding_member === true,
     active: row.active !== false,
   };
 }
@@ -40,6 +41,7 @@ function mapLocalProfile(row: any): any {
     coverImage: row.coverImage || null,
     portfolioImages: row.portfolioImages || [],
     categorySlugs: row.categorySlugs || [],
+    foundingMember: row.foundingMember === true,
     active: row.active !== false,
   };
 }

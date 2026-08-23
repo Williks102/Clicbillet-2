@@ -16,6 +16,15 @@ const router = express.Router();
 // une ligne vendor_profiles (+ vendor_profile_categories) rattachée au compte demandeur.
 // N'importe quel compte (client, organisateur, admin) peut demander une fiche.
 
+// Programme "prestataire fondateur" (cf. supabase_setup.sql section 31) : toute fiche créée
+// avant cette date porte le badge "Fondateur", figé définitivement à la création. Repousser
+// cette constante prolonge le programme ; la retirer (mettre une date passée) le clôt — dans
+// les deux cas, les fiches déjà créées gardent le statut qu'elles avaient au moment voulu.
+const VENDOR_FOUNDER_PROGRAM_ENDS = new Date("2027-06-30T23:59:59Z");
+function isWithinFounderProgram(): boolean {
+  return new Date() <= VENDOR_FOUNDER_PROGRAM_ENDS;
+}
+
 type RequestStatus = "pending" | "approved" | "rejected";
 
 interface MappedVendorRequest {
@@ -293,7 +302,8 @@ router.patch("/api/admin/vendor-requests/:id", requireAuth, requireRole("admin")
           business_name: request.business_name,
           phone: request.phone,
           city: request.city,
-          description: request.description
+          description: request.description,
+          founding_member: isWithinFounderProgram()
         });
         if (profileError) throw profileError;
 
@@ -356,6 +366,7 @@ router.patch("/api/admin/vendor-requests/:id", requireAuth, requireRole("admin")
       coverImage: null,
       portfolioImages: [],
       categorySlugs: request.categorySlugs || [],
+      foundingMember: isWithinFounderProgram(),
       active: true,
       createdAt: new Date().toISOString()
     });

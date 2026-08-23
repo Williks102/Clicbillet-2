@@ -1502,3 +1502,32 @@ CREATE INDEX IF NOT EXISTS idx_vendor_leads_vendor_id ON public.vendor_leads (ve
 
 ALTER TABLE public.vendor_leads ENABLE ROW LEVEL SECURITY;
 -- Pas de policy anon/authenticated : écrite et lue exclusivement par le backend.
+
+-- ==========================================
+-- 31. PROGRAMME "PRESTATAIRE FONDATEUR"
+-- ==========================================
+-- Le marché de prestataires est gratuit le temps d'attirer les premières fiches, avant
+-- d'introduire un abonnement une fois la formule décidée (cf. section 30). Pour que ce
+-- lancement gratuit reste un levier plutôt qu'un renoncement définitif, les fiches créées
+-- pendant cette fenêtre portent un badge "Fondateur" — figé à la création
+-- (server/routes/vendorRequests.ts, VENDOR_FOUNDER_PROGRAM_ENDS), jamais recalculé après coup :
+-- repousser ou clore le programme ne change rien aux fiches déjà marquées.
+ALTER TABLE public.vendor_profiles ADD COLUMN IF NOT EXISTS founding_member BOOLEAN NOT NULL DEFAULT false;
+
+-- La vue publique doit exposer la colonne pour que le badge s'affiche sur la fiche et sur les
+-- cartes du marché ; même contrainte de recréation qu'events_public (section 15) : DROP puis
+-- CREATE, pas CREATE OR REPLACE, pour ajouter une colonne sans décaler celles qui existent déjà.
+DROP VIEW IF EXISTS public.vendor_profiles_public;
+CREATE VIEW public.vendor_profiles_public
+WITH (security_invoker = true) AS
+SELECT
+  vp.id, vp.alias, vp.business_name, vp.city, vp.description, vp.cover_image,
+  vp.portfolio_images, vp.founding_member, vp.created_at,
+  COALESCE(
+    (SELECT array_agg(vpc.category_slug) FROM public.vendor_profile_categories vpc WHERE vpc.vendor_id = vp.id),
+    ARRAY[]::TEXT[]
+  ) AS category_slugs
+FROM public.vendor_profiles vp
+WHERE vp.active = true AND vp.alias IS NOT NULL;
+
+GRANT SELECT ON public.vendor_profiles_public TO anon, authenticated;

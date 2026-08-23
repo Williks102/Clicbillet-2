@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, MapPin, MessageCircleMore, Images } from "lucide-react";
+import { ArrowLeft, MapPin, MessageCircleMore, Images, Award } from "lucide-react";
 import { EventGridSkeleton, SkeletonBlock } from "./Skeleton";
 import { fetchVendorCategories, iconeDeCategoriePrestataire, VendorCategory } from "../lib/vendorCategories";
 import VendorContactModal from "./VendorContactModal";
@@ -100,6 +100,11 @@ export default function VendorProfilePage({ alias, onBack }: VendorProfilePagePr
             </div>
           )}
           <div className="flex flex-wrap gap-1.5">
+            {vendor.foundingMember && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-orange-700">
+                <Award className="h-3 w-3" /> Fondateur
+              </span>
+            )}
             {categoryLabels.map((label, i) => {
               const Icone = iconeDeCategoriePrestataire(categories.find((c) => c.label === label)?.icon || "Tag");
               return (

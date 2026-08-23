@@ -39,7 +39,7 @@ interface AdminStats {
 // demandes attendent, mais combien de fiches sont réellement en ligne et sollicitées.
 interface VendorStats {
   requests: { total: number; pending: number; approved: number; rejected: number };
-  profiles: { total: number; active: number; incomplete: number; suspended: number };
+  profiles: { total: number; active: number; incomplete: number; suspended: number; founding: number };
   leads: { total: number; last30Days: number };
   byCategory: { slug: string; label: string; activeProfiles: number; leads: number }[];
   topVendors: { id: string; businessName: string; alias: string | null; leads: number }[];
@@ -1188,12 +1188,18 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                   </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
                   <div className="rounded-2xl border border-gray-100 p-3.5">
                     <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400">
                       <Store className="h-3.5 w-3.5 text-orange-500" /> Fiches actives
                     </div>
                     <p className="mt-1.5 text-xl font-black text-gray-950">{vendorStats.profiles.active}</p>
+                  </div>
+                  <div className="rounded-2xl border border-gray-100 p-3.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400">
+                      <Award className="h-3.5 w-3.5 text-orange-500" /> Fondateurs
+                    </div>
+                    <p className="mt-1.5 text-xl font-black text-gray-950">{vendorStats.profiles.founding}</p>
                   </div>
                   <div className="rounded-2xl border border-gray-100 p-3.5">
                     <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400">

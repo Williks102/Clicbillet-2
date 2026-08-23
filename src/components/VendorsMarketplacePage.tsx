@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { MapPin, Sparkles } from "lucide-react";
+import { MapPin, Sparkles, Award } from "lucide-react";
 import { fetchVendorCategories, iconeDeCategoriePrestataire, TOUTES_CATEGORIES_PRESTATAIRES, VendorCategory } from "../lib/vendorCategories";
+import { fetchVendorPublicStats } from "../lib/vendorPublicStats";
 import { SkeletonBlock } from "./Skeleton";
 
 export interface VendorSummary {
@@ -12,6 +13,7 @@ export interface VendorSummary {
   coverImage: string | null;
   portfolioImages: string[];
   categorySlugs: string[];
+  foundingMember: boolean;
   createdAt: string;
 }
 
@@ -31,9 +33,11 @@ export default function VendorsMarketplacePage({ onViewVendor, onBecomeVendor }:
   const [city, setCity] = useState("");
   const [vendors, setVendors] = useState<VendorSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [publicStats, setPublicStats] = useState<{ activeVendors: number; leadsLast30Days: number } | null>(null);
 
   useEffect(() => {
     fetchVendorCategories().then(setCategories);
+    fetchVendorPublicStats().then(setPublicStats);
   }, []);
 
   useEffect(() => {
@@ -65,6 +69,12 @@ export default function VendorsMarketplacePage({ onViewVendor, onBecomeVendor }:
             Photographes, régies son et lumière, MC, traiteurs, décorateurs... trouvez qui il vous
             faut pour votre prochain événement.
           </p>
+          {publicStats && publicStats.activeVendors > 0 && (
+            <p className="mt-1.5 text-xs font-bold text-orange-600">
+              {publicStats.activeVendors} prestataire{publicStats.activeVendors > 1 ? "s" : ""} déjà inscrit{publicStats.activeVendors > 1 ? "s" : ""}
+              {publicStats.leadsLast30Days > 0 && ` · ${publicStats.leadsLast30Days} devis envoyé${publicStats.leadsLast30Days > 1 ? "s" : ""} ce mois-ci`}
+            </p>
+          )}
         </div>
 
         {onBecomeVendor && (
@@ -150,7 +160,12 @@ export default function VendorsMarketplacePage({ onViewVendor, onBecomeVendor }:
               onClick={() => onViewVendor(vendor.alias)}
               className="group flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white text-left shadow-xs transition-all duration-300 hover:-translate-y-1.5 hover:shadow-lg"
             >
-              <div className="h-40 w-full overflow-hidden bg-gray-100">
+              <div className="relative h-40 w-full overflow-hidden bg-gray-100">
+                {vendor.foundingMember && (
+                  <span className="absolute left-3 top-3 z-10 flex items-center gap-1 rounded-full bg-[#1a252f]/90 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-white shadow">
+                    <Award className="h-3 w-3 text-orange-400" /> Fondateur
+                  </span>
+                )}
                 {vendor.coverImage ? (
                   <img
                     src={vendor.coverImage}

@@ -19,6 +19,35 @@ router.get("/api/vendor-categories", async (_req: express.Request, res: express.
   res.json(await getVendorCategories());
 });
 
+// Preuve sociale affichée sur la bande "Nous rejoindre" (JoinVendorCta.tsx) et le marché
+// public : deux compteurs seulement, jamais le détail. Le détail par catégorie/prestataire
+// reste réservé à GET /api/admin/vendor-stats (server/routes/admin.ts), qui sert à décider
+// d'une formule d'abonnement — celui-ci sert à donner confiance à un visiteur.
+router.get("/api/vendor-stats/public", async (_req: express.Request, res: express.Response) => {
+  res.set("Cache-Control", "public, max-age=120, stale-while-revalidate=600");
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const [{ count: activeVendors, error: profErr }, { count: leadsLast30Days, error: leadErr }] = await Promise.all([
+        supabase.from("vendor_profiles_public").select("id", { count: "exact", head: true }),
+        supabase.from("vendor_leads").select("id", { count: "exact", head: true }).gte("created_at", thirtyDaysAgo),
+      ]);
+      if (profErr) throw profErr;
+      if (leadErr) throw leadErr;
+      return res.json({ activeVendors: activeVendors || 0, leadsLast30Days: leadsLast30Days || 0 });
+    } catch (err: any) {
+      console.error("[Supabase Error] Statistiques publiques prestataires, repli sur db.json :", err.message);
+    }
+  }
+
+  const db = getDB();
+  const thirtyDaysAgoMs = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const activeVendors = (db.vendorProfiles || []).filter((p: any) => p.active !== false && p.alias).length;
+  const leadsLast30Days = (db.vendorLeads || []).filter((l: any) => new Date(l.createdAt).getTime() >= thirtyDaysAgoMs).length;
+  res.json({ activeVendors, leadsLast30Days });
+});
+
 function mapPublicProfile(row: any): any {
   return {
     id: row.id,
@@ -29,6 +58,7 @@ function mapPublicProfile(row: any): any {
     coverImage: row.cover_image || null,
     portfolioImages: row.portfolio_images || [],
     categorySlugs: row.category_slugs || [],
+    foundingMember: row.founding_member === true,
     createdAt: row.created_at,
   };
 }
@@ -43,6 +73,7 @@ function mapLocalProfile(row: any): any {
     coverImage: row.coverImage || null,
     portfolioImages: row.portfolioImages || [],
     categorySlugs: row.categorySlugs || [],
+    foundingMember: row.foundingMember === true,
     createdAt: row.createdAt,
   };
 }
