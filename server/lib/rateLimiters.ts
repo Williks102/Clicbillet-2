@@ -88,6 +88,10 @@ export const checkoutRateLimiter = makeSharedRateLimiter("checkout", 20, 10 * 60
 export const contactRateLimiter = makeSharedRateLimiter("contact", 5, 15 * 60 * 1000, "Trop de messages envoyés. Réessayez dans quelques minutes.");
 export const transferTicketRateLimiter = makeSharedRateLimiter("transfer-ticket", 10, 15 * 60 * 1000, "Trop de transferts de billets. Réessayez dans quelques minutes.");
 export const organizerRequestRateLimiter = makeSharedRateLimiter("organizer-request", 5, 60 * 60 * 1000, "Trop de demandes envoyées. Réessayez dans une heure.");
+export const vendorRequestRateLimiter = makeSharedRateLimiter("vendor-request", 5, 60 * 60 * 1000, "Trop de demandes envoyées. Réessayez dans une heure.");
+// Formulaire de devis public (fiche prestataire), non authentifié : même plafond que le
+// formulaire de contact général, seul autre formulaire public du site.
+export const vendorLeadRateLimiter = makeSharedRateLimiter("vendor-lead", 5, 15 * 60 * 1000, "Trop de demandes envoyées. Réessayez dans quelques minutes.");
 
 // Volontairement laissé en mémoire : il s'applique à TOUTES les requêtes d'API, y compris la
 // consultation du catalogue. Un aller-retour base sur chacune coûterait plus cher que ce qu'il

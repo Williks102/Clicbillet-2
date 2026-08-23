@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Ticket, LogOut, User as UserIcon, LayoutDashboard, Calendar, Camera, ShieldCheck, Menu, Tag, Mail, Store } from "lucide-react";
+import { Ticket, LogOut, User as UserIcon, LayoutDashboard, Calendar, Camera, ShieldCheck, Menu, Tag, Mail, Store, Sparkles } from "lucide-react";
 import { User } from "../types";
 import MobileNavDrawer from "./MobileNavDrawer";
 
@@ -42,6 +42,16 @@ export default function Navbar({ user, onLogout, activeTab, setActiveTab, onOpen
               mobile, ces destinations sont accessibles via le tiroir hamburger ci-dessous. */}
           <div className="hidden items-center space-x-3 sm:flex">
             {/* Pages publiques, accessibles à tous (connecté ou non) */}
+            <button
+              id="tab-vendors-btn"
+              onClick={() => setActiveTab("vendors")}
+              className={`flex items-center space-x-1.5 rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
+                activeTab === "vendors" || activeTab === "vendor-profile" ? "bg-orange-50 text-orange-600" : "text-gray-600 hover:bg-gray-50 hover:text-gray-950"
+              }`}
+            >
+              <Sparkles className="h-4 w-4" />
+              <span>Prestataires</span>
+            </button>
             <button
               id="tab-pricing-btn"
               onClick={() => setActiveTab("pricing")}
@@ -161,6 +171,25 @@ export default function Navbar({ user, onLogout, activeTab, setActiveTab, onOpen
                       <span>Scanner</span>
                     </button>
                   </>
+                )}
+
+                {/* Accès direct à l'espace prestataire, qu'une fiche existe déjà ou non — le
+                    tableau de bord affiche le formulaire de demande tant qu'aucune fiche
+                    n'existe (cf. VendorDashboard.tsx). Pas de rôle dédié : client ou
+                    organisateur y ont accès de la même façon, l'admin n'en a pas l'usage. */}
+                {user.role !== "admin" && (
+                  <button
+                    id="tab-vendor-dashboard-btn"
+                    onClick={() => setActiveTab("vendor-dashboard")}
+                    className={`flex items-center space-x-1.5 rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
+                      activeTab === "vendor-dashboard"
+                        ? "bg-orange-50 text-orange-600"
+                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    }`}
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    <span>Espace Prestataire</span>
+                  </button>
                 )}
 
                 {/* User Information */}

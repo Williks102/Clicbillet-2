@@ -30,6 +30,26 @@ export interface OrganizerRequest {
   createdAt: string;
 }
 
+// Demande de fiche prestataire (marché de prestataires, cf. server/routes/vendorRequests.ts),
+// jumeau de OrganizerRequest. Contrairement au passage organisateur, l'approbation ne change
+// pas le rôle du compte : elle crée une fiche (VendorProfile) rattachée au même compte.
+export interface VendorRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userPublicCode?: string | null;
+  businessName: string;
+  phone: string;
+  city: string;
+  description: string | null;
+  categorySlugs: string[];
+  status: "pending" | "approved" | "rejected";
+  reviewNote: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+}
+
 export interface Event {
   id: string;
   title: string;

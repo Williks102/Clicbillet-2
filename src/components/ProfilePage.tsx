@@ -4,6 +4,7 @@ import { User } from "../types";
 import { authFetch } from "../lib/apiClient";
 import AccountCodeBadge from "./AccountCodeBadge";
 import BecomeOrganizerCard from "./BecomeOrganizerCard";
+import BecomeVendorCard from "./BecomeVendorCard";
 
 interface ProfilePageProps {
   user: User;
@@ -174,6 +175,11 @@ export default function ProfilePage({ user, onLogout, setActiveTab }: ProfilePag
         )}
 
         {user.role === "client" && <BecomeOrganizerCard />}
+
+        {/* Devenir prestataire n'est pas réservé aux acheteurs : un organisateur peut aussi
+            avoir une activité de prestataire (photographe qui organise ses propres soirées,
+            par exemple). Seul l'admin n'a pas d'intérêt à s'en servir. */}
+        {user.role !== "admin" && <BecomeVendorCard setActiveTab={setActiveTab} />}
 
         <div className="rounded-2xl border border-gray-100 bg-white shadow-xs">
           <button

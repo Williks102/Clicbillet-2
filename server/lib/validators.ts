@@ -382,6 +382,69 @@ export const validateOrganizerRequest = (req: express.Request, res: express.Resp
   next();
 };
 
+// Middleware de validation de la demande de fiche prestataire (marché de prestataires).
+// Même esprit que validateOrganizerRequest ci-dessus : les champs obligatoires sont ceux dont
+// l'administrateur a besoin pour juger la demande avant publication. Les clés de catégories
+// ne sont vérifiées ici que dans leur FORME (1 à 3 chaînes) — leur appartenance au référentiel
+// actif est résolue dans la route, qui a seule accès à getVendorCategories().
+export const validateVendorRequest = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { businessName, phone, city, description, categorySlugs } = req.body;
+
+  if (!businessName || typeof businessName !== "string" || !businessName.trim() || businessName.length > 120) {
+    return res.status(400).json({ error: "Le nom de votre structure est requis (120 caractères maximum)." });
+  }
+
+  const normalizedPhone = String(phone || "").replace(/\s+/g, "");
+  if (!normalizedPhone || normalizedPhone.length < 8 || normalizedPhone.length > 20 || !/^\+?\d+$/.test(normalizedPhone)) {
+    return res.status(400).json({ error: "Un numéro de téléphone valide est requis." });
+  }
+
+  if (!city || typeof city !== "string" || !city.trim() || city.length > 100) {
+    return res.status(400).json({ error: "La ville est requise (100 caractères maximum)." });
+  }
+
+  if (description !== undefined && description !== null && (typeof description !== "string" || description.length > 1000)) {
+    return res.status(400).json({ error: "La description de votre activité ne peut pas dépasser 1000 caractères." });
+  }
+
+  if (!Array.isArray(categorySlugs) || categorySlugs.length < 1 || categorySlugs.length > 3 || !categorySlugs.every((s) => typeof s === "string" && s.trim())) {
+    return res.status(400).json({ error: "Choisissez entre 1 et 3 catégories." });
+  }
+
+  req.body.phone = normalizedPhone;
+  next();
+};
+
+// Middleware de validation du formulaire public de demande de devis (fiche prestataire, page
+// /p/:alias, non authentifié) : mêmes règles que validateContactMessage ci-dessous, seul
+// autre formulaire public du site.
+export const validateVendorLead = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { name, email, phone, eventDate, message } = req.body;
+
+  if (!name || typeof name !== "string" || !name.trim() || name.length > 100) {
+    return res.status(400).json({ error: "Le nom est requis (100 caractères maximum)." });
+  }
+
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!email || typeof email !== "string" || !emailRegex.test(email)) {
+    return res.status(400).json({ error: "L'adresse e-mail est invalide." });
+  }
+
+  if (phone !== undefined && phone !== null && phone !== "" && (typeof phone !== "string" || phone.length > 30)) {
+    return res.status(400).json({ error: "Le numéro de téléphone est invalide." });
+  }
+
+  if (eventDate !== undefined && eventDate !== null && eventDate !== "" && (typeof eventDate !== "string" || eventDate.length > 40)) {
+    return res.status(400).json({ error: "La date de l'événement est invalide." });
+  }
+
+  if (!message || typeof message !== "string" || !message.trim() || message.length > 3000) {
+    return res.status(400).json({ error: "Le message est requis (3000 caractères maximum)." });
+  }
+
+  next();
+};
+
 // Middleware de validation du formulaire de contact public (page /contact, non authentifié).
 const CONTACT_SUBJECTS = new Set([
   "Question générale",

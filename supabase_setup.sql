@@ -1344,3 +1344,190 @@ ALTER TABLE public.scan_conflicts ENABLE ROW LEVEL SECURITY;
 -- l'accueil. L'organisateur la lit via GET /api/events/:id/pass-design, l'acheteur la reçoit
 -- avec ses billets (GET /api/my-tickets).
 ALTER TABLE public.events ADD COLUMN IF NOT EXISTS pass_design JSONB;
+
+-- ==========================================
+-- 30. MARCHÉ DE PRESTATAIRES ÉVÉNEMENTIELS
+-- ==========================================
+-- Second marché adossé aux mêmes comptes : un prestataire (photographe, régie, MC, traiteur...)
+-- publie une fiche vitrine publique et reçoit des demandes de devis par e-mail (V1 : pas de
+-- paiement ni de réservation in-app). Volontairement PAS un rôle — users.role ne change pas —
+-- un compte organisateur ou client peut aussi être prestataire, sur simple demande validée par
+-- un administrateur, même mécanique que organizer_requests (section 19) dupliquée ici plutôt
+-- que réutilisée : le premier flux ouvre un accès à l'encaissement, pas le second, et les deux
+-- n'ont pas vocation à évoluer ensemble.
+
+-- Référentiel des catégories de prestataires, même forme que public.categories (section 27),
+-- table séparée pour ne pas mélanger les deux listes.
+CREATE TABLE IF NOT EXISTS public.vendor_categories (
+    slug TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    icon TEXT NOT NULL DEFAULT 'Tag',
+    sort_order INTEGER NOT NULL DEFAULT 100,
+    active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO public.vendor_categories (slug, label, icon, sort_order) VALUES
+  ('photographe',    'Photographe',      'Camera',           10),
+  ('videaste',       'Vidéaste',         'Video',            20),
+  ('dj-regie-son',   'DJ / Régie son',   'Music',            30),
+  ('regie-lumiere',  'Régie lumière',    'Lightbulb',        40),
+  ('mc-animateur',   'MC / Animateur',   'Mic2',             50),
+  ('traiteur',       'Traiteur',         'UtensilsCrossed',  60),
+  ('decoration',     'Décoration',       'Sparkles',         70),
+  ('securite',       'Sécurité',         'ShieldCheck',      80)
+ON CONFLICT (slug) DO NOTHING;
+
+ALTER TABLE public.vendor_categories ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public read access to active vendor categories" ON public.vendor_categories;
+CREATE POLICY "Public read access to active vendor categories"
+  ON public.vendor_categories FOR SELECT
+  USING (active = true);
+
+-- Demande de fiche prestataire, même mécanique que organizer_requests (section 19) : une
+-- demande en attente est examinée par un administrateur avant toute publication.
+CREATE TABLE IF NOT EXISTS public.vendor_requests (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    user_name TEXT,
+    user_email TEXT,
+    business_name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    city TEXT NOT NULL,
+    description TEXT,
+    category_slugs TEXT[] NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'approved', 'rejected'
+    review_note TEXT,
+    reviewed_by TEXT,
+    reviewed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_vendor_requests_user_id ON public.vendor_requests (user_id);
+CREATE INDEX IF NOT EXISTS idx_vendor_requests_status ON public.vendor_requests (status);
+
+-- Une seule demande en attente à la fois par compte, même garde-fou que
+-- organizer_requests_one_pending_per_user.
+CREATE UNIQUE INDEX IF NOT EXISTS vendor_requests_one_pending_per_user
+  ON public.vendor_requests (user_id)
+  WHERE status = 'pending';
+
+ALTER TABLE public.vendor_requests ENABLE ROW LEVEL SECURITY;
+-- Pas de policy anon/authenticated : accès exclusif via la clé service_role (server.ts).
+
+-- Fiche prestataire publiée, créée uniquement à l'approbation d'une demande (jamais en
+-- libre-service). ALIAS NULLABLE à la création, exactement comme users.organizer_alias
+-- (section 18) : le prestataire le choisit ensuite depuis son tableau de bord
+-- (GET/PATCH /api/vendor/profile, server/lib/vendorAlias.ts) plutôt que de se le voir imposer
+-- à l'approbation — la fiche existe et lui appartient avant d'être publique. Colonne séparée
+-- de users.organizer_alias : un compte peut être organisateur ET prestataire, avec deux alias
+-- publics indépendants (/o/:alias et /p/:alias).
+CREATE TABLE IF NOT EXISTS public.vendor_profiles (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    alias TEXT,
+    business_name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    city TEXT NOT NULL,
+    description TEXT,
+    cover_image TEXT,
+    portfolio_images JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- Bascule admin pour suspendre une fiche (abus, litige) sans la supprimer ni perdre
+    -- l'historique des demandes de devis déjà reçues.
+    active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS vendor_profiles_alias_unique
+  ON public.vendor_profiles (LOWER(alias))
+  WHERE alias IS NOT NULL;
+-- Un seul profil prestataire par compte en V1 : simplifie la modération et le tableau de
+-- bord. Le multi-établissement pourra lever cette contrainte plus tard si le besoin apparaît.
+CREATE UNIQUE INDEX IF NOT EXISTS vendor_profiles_one_per_user
+  ON public.vendor_profiles (user_id);
+
+ALTER TABLE public.vendor_profiles ENABLE ROW LEVEL SECURITY;
+-- Pas de policy anon/authenticated directe : le catalogue public passe par la vue
+-- vendor_profiles_public ci-dessous, qui n'expose pas le téléphone du prestataire.
+
+-- Catégories portées par un profil (un DJ peut aussi faire la régie lumière, par exemple) :
+-- table de jointure plutôt qu'une seule catégorie figée sur vendor_profiles.
+CREATE TABLE IF NOT EXISTS public.vendor_profile_categories (
+    vendor_id TEXT NOT NULL REFERENCES public.vendor_profiles(id) ON DELETE CASCADE,
+    category_slug TEXT NOT NULL,
+    PRIMARY KEY (vendor_id, category_slug)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vendor_profile_categories_slug ON public.vendor_profile_categories (category_slug);
+
+ALTER TABLE public.vendor_profile_categories ENABLE ROW LEVEL SECURITY;
+
+-- Vue publique : uniquement les champs vitrine, jamais le téléphone du prestataire — le
+-- contact passe exclusivement par vendor_leads (formulaire de devis relayé par e-mail), même
+-- principe que events_public qui masque commission_rate. GRANT explicite indispensable : une
+-- vue ne hérite pas des privilèges par défaut du schéma comme le fait une table.
+DROP VIEW IF EXISTS public.vendor_profiles_public;
+CREATE VIEW public.vendor_profiles_public
+WITH (security_invoker = true) AS
+SELECT
+  vp.id, vp.alias, vp.business_name, vp.city, vp.description, vp.cover_image,
+  vp.portfolio_images, vp.created_at,
+  COALESCE(
+    (SELECT array_agg(vpc.category_slug) FROM public.vendor_profile_categories vpc WHERE vpc.vendor_id = vp.id),
+    ARRAY[]::TEXT[]
+  ) AS category_slugs
+FROM public.vendor_profiles vp
+-- alias IS NOT NULL : une fiche fraîchement approuvée mais dont le prestataire n'a pas encore
+-- choisi d'alias n'est ni listée ni atteignable par une URL /p/:alias.
+WHERE vp.active = true AND vp.alias IS NOT NULL;
+
+GRANT SELECT ON public.vendor_profiles_public TO anon, authenticated;
+
+-- Demandes de devis reçues par un prestataire, via le formulaire public de sa fiche. Pas de
+-- policy anon/authenticated (comme email_outbox, section 22) : écrite uniquement par le
+-- backend, après validation et limitation de débit (formulaire accessible sans connexion).
+CREATE TABLE IF NOT EXISTS public.vendor_leads (
+    id TEXT PRIMARY KEY,
+    vendor_id TEXT NOT NULL REFERENCES public.vendor_profiles(id) ON DELETE CASCADE,
+    sender_name TEXT NOT NULL,
+    sender_email TEXT NOT NULL,
+    sender_phone TEXT,
+    event_date TEXT,
+    message TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_vendor_leads_vendor_id ON public.vendor_leads (vendor_id, created_at DESC);
+
+ALTER TABLE public.vendor_leads ENABLE ROW LEVEL SECURITY;
+-- Pas de policy anon/authenticated : écrite et lue exclusivement par le backend.
+
+-- ==========================================
+-- 31. PROGRAMME "PRESTATAIRE FONDATEUR"
+-- ==========================================
+-- Le marché de prestataires est gratuit le temps d'attirer les premières fiches, avant
+-- d'introduire un abonnement une fois la formule décidée (cf. section 30). Pour que ce
+-- lancement gratuit reste un levier plutôt qu'un renoncement définitif, les fiches créées
+-- pendant cette fenêtre portent un badge "Fondateur" — figé à la création
+-- (server/routes/vendorRequests.ts, VENDOR_FOUNDER_PROGRAM_ENDS), jamais recalculé après coup :
+-- repousser ou clore le programme ne change rien aux fiches déjà marquées.
+ALTER TABLE public.vendor_profiles ADD COLUMN IF NOT EXISTS founding_member BOOLEAN NOT NULL DEFAULT false;
+
+-- La vue publique doit exposer la colonne pour que le badge s'affiche sur la fiche et sur les
+-- cartes du marché ; même contrainte de recréation qu'events_public (section 15) : DROP puis
+-- CREATE, pas CREATE OR REPLACE, pour ajouter une colonne sans décaler celles qui existent déjà.
+DROP VIEW IF EXISTS public.vendor_profiles_public;
+CREATE VIEW public.vendor_profiles_public
+WITH (security_invoker = true) AS
+SELECT
+  vp.id, vp.alias, vp.business_name, vp.city, vp.description, vp.cover_image,
+  vp.portfolio_images, vp.founding_member, vp.created_at,
+  COALESCE(
+    (SELECT array_agg(vpc.category_slug) FROM public.vendor_profile_categories vpc WHERE vpc.vendor_id = vp.id),
+    ARRAY[]::TEXT[]
+  ) AS category_slugs
+FROM public.vendor_profiles vp
+WHERE vp.active = true AND vp.alias IS NOT NULL;
+
+GRANT SELECT ON public.vendor_profiles_public TO anon, authenticated;

@@ -24,6 +24,9 @@ import maintenanceRouter from "./server/routes/maintenance.js";
 import webhooksRouter from "./server/routes/webhooks.js";
 import organizerRouter from "./server/routes/organizer.js";
 import organizerRequestsRouter from "./server/routes/organizerRequests.js";
+import vendorsRouter from "./server/routes/vendors.js";
+import vendorRequestsRouter from "./server/routes/vendorRequests.js";
+import vendorRouter from "./server/routes/vendor.js";
 import adminRouter from "./server/routes/admin.js";
 
 const app = express();
@@ -123,6 +126,7 @@ app.use((req: express.Request, res: express.Response, next: express.NextFunction
 // Sécurisation des endpoints administrateurs et organisateurs
 app.use("/api/admin", requireAuth, requireRole("admin"));
 app.use("/api/organizer", requireAuth);
+app.use("/api/vendor", requireAuth);
 
 app.use(eventsRouter);
 app.use(authRouter);
@@ -136,6 +140,9 @@ app.use(maintenanceRouter);
 app.use(webhooksRouter);
 app.use(organizerRouter);
 app.use(organizerRequestsRouter);
+app.use(vendorsRouter);
+app.use(vendorRequestsRouter);
+app.use(vendorRouter);
 app.use(adminRouter);
 
 // Doit être enregistré après tous les routers ci-dessus (et avant le middleware statique/SPA

@@ -10,6 +10,7 @@ import { isPaidTicket } from "../lib/ticketPayment.js";
 import { findTicketsByReference, confirmPaymentForTickets } from "../lib/paymentConfirmation.js";
 import { decryptPayoutDetails } from "../lib/payoutEncryption.js";
 import { getCategories, slugifyCategory, inValiderCacheCategories } from "../lib/categories.js";
+import { getVendorCategories, inValiderCacheVendorCategories } from "../lib/vendorCategories.js";
 
 const router = express.Router();
 
@@ -506,5 +507,262 @@ router.delete("/api/admin/categories/:slug", requireAuth, requireRole("admin"), 
   inValiderCacheCategories();
   res.json({ success: true, desactivee: false });
 });
+
+// ==========================================
+// CATÉGORIES DE PRESTATAIRES (marché prestataires)
+// ==========================================
+// Même gabarit que /api/admin/categories ci-dessus, référentiel séparé (supabase_setup.sql
+// section 30) : les catégories d'événements et de prestataires n'ont pas vocation à évoluer
+// ensemble.
+
+router.get("/api/admin/vendor-categories", requireAuth, requireRole("admin"), async (_req: express.Request, res: express.Response) => {
+  res.json(await getVendorCategories(true));
+});
+
+router.post("/api/admin/vendor-categories", requireAuth, requireRole("admin"), async (req: express.Request, res: express.Response) => {
+  if (!isSupabaseEnabled || !supabase) {
+    return res.status(503).json({ error: "Référentiel indisponible sans base de données." });
+  }
+  const label = String(req.body?.label || "").trim();
+  if (label.length < 2 || label.length > 60) {
+    return res.status(400).json({ error: "Le nom de la catégorie doit faire entre 2 et 60 caractères." });
+  }
+
+  const slug = slugifyCategory(label);
+  if (!slug) {
+    return res.status(400).json({ error: "Ce nom ne produit aucune clé exploitable. Utilisez au moins une lettre ou un chiffre." });
+  }
+
+  const { data: existante } = await supabase.from("vendor_categories").select("slug, label, active").eq("slug", slug).maybeSingle();
+  if (existante) {
+    if (!existante.active) {
+      await supabase.from("vendor_categories").update({ label, active: true }).eq("slug", slug);
+      inValiderCacheVendorCategories();
+      return res.status(200).json({ slug, label, reactivee: true });
+    }
+    return res.status(409).json({ error: `La catégorie « ${existante.label} » existe déjà.` });
+  }
+
+  const { data: derniere } = await supabase
+    .from("vendor_categories").select("sort_order").order("sort_order", { ascending: false }).limit(1).maybeSingle();
+
+  const { error } = await supabase.from("vendor_categories").insert({
+    slug,
+    label,
+    icon: String(req.body?.icon || "Tag"),
+    sort_order: (Number(derniere?.sort_order) || 0) + 10,
+    active: true
+  });
+  if (error) return res.status(500).json({ error: "Création impossible." });
+
+  inValiderCacheVendorCategories();
+  res.status(201).json({ slug, label });
+});
+
+router.patch("/api/admin/vendor-categories/:slug", requireAuth, requireRole("admin"), async (req: express.Request, res: express.Response) => {
+  if (!isSupabaseEnabled || !supabase) {
+    return res.status(503).json({ error: "Référentiel indisponible sans base de données." });
+  }
+  const maj: Record<string, any> = {};
+
+  if (typeof req.body?.label === "string") {
+    const label = req.body.label.trim();
+    if (label.length < 2 || label.length > 60) {
+      return res.status(400).json({ error: "Le nom de la catégorie doit faire entre 2 et 60 caractères." });
+    }
+    maj.label = label;
+  }
+  if (typeof req.body?.active === "boolean") maj.active = req.body.active;
+  if (typeof req.body?.icon === "string") maj.icon = req.body.icon;
+  if (Number.isFinite(Number(req.body?.sortOrder))) maj.sort_order = Number(req.body.sortOrder);
+
+  if (Object.keys(maj).length === 0) {
+    return res.status(400).json({ error: "Aucune modification fournie." });
+  }
+
+  const { error } = await supabase.from("vendor_categories").update(maj).eq("slug", req.params.slug);
+  if (error) return res.status(500).json({ error: "Modification impossible." });
+
+  inValiderCacheVendorCategories();
+  res.json({ success: true });
+});
+
+router.delete("/api/admin/vendor-categories/:slug", requireAuth, requireRole("admin"), async (req: express.Request, res: express.Response) => {
+  if (!isSupabaseEnabled || !supabase) {
+    return res.status(503).json({ error: "Référentiel indisponible sans base de données." });
+  }
+  const slug = req.params.slug;
+
+  // Une catégorie portée par des fiches prestataire n'est jamais supprimée : elle est
+  // DÉSACTIVÉE, comme pour les catégories d'événements.
+  const { count } = await supabase
+    .from("vendor_profile_categories").select("vendor_id", { count: "exact", head: true }).eq("category_slug", slug);
+
+  if ((count || 0) > 0) {
+    const { error } = await supabase.from("vendor_categories").update({ active: false }).eq("slug", slug);
+    if (error) return res.status(500).json({ error: "Désactivation impossible." });
+    inValiderCacheVendorCategories();
+    return res.json({
+      success: true,
+      desactivee: true,
+      prestataires: count,
+      message: `${count} fiche(s) prestataire utilisent cette catégorie : elle a été retirée des listes sans être supprimée, pour ne pas les laisser sans catégorie.`
+    });
+  }
+
+  const { error } = await supabase.from("vendor_categories").delete().eq("slug", slug);
+  if (error) return res.status(500).json({ error: "Suppression impossible." });
+  inValiderCacheVendorCategories();
+  res.json({ success: true, desactivee: false });
+});
+
+// Suspension d'une fiche prestataire (abus, litige signalé) : la fiche disparaît du marché
+// public et de la recherche, sans être supprimée — l'historique des demandes de devis déjà
+// reçues (vendor_leads) reste intact, et la réactivation est immédiate.
+router.patch("/api/admin/vendors/:id/active", requireAuth, requireRole("admin"), async (req: express.Request, res: express.Response) => {
+  const { active } = req.body;
+  if (typeof active !== "boolean") {
+    return res.status(400).json({ error: "Le champ 'active' (booléen) est requis." });
+  }
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { error } = await supabase.from("vendor_profiles").update({ active }).eq("id", req.params.id);
+      if (error) throw error;
+      return res.json({ success: true, active });
+    } catch (err: any) {
+      console.error("[Supabase Error] Suspension de la fiche prestataire :", err.message);
+      return res.status(500).json({ error: "Modification impossible." });
+    }
+  }
+
+  const db = getDB();
+  const profile = (db.vendorProfiles || []).find((p: any) => p.id === req.params.id) as any;
+  if (!profile) return res.status(404).json({ error: "Fiche prestataire introuvable." });
+  profile.active = active;
+  saveDB(db);
+  res.json({ success: true, active });
+});
+
+// Suivi du marché de prestataires : rien n'était visible entre la file de modération (combien
+// de demandes en attente) et le catalogue public (quelles fiches sont en ligne). Sans ces
+// chiffres — fiches réellement publiées, devis reçus par catégorie, prestataires qui
+// convertissent le mieux — décider quand et comment introduire un abonnement resterait un
+// pari plutôt qu'une décision informée par l'usage réel.
+router.get("/api/admin/vendor-stats", requireAuth, requireRole("admin"), async (_req: express.Request, res: express.Response) => {
+  const categories = await getVendorCategories(true);
+  const labelBySlug = new Map(categories.map((c) => [c.slug, c.label]));
+
+  const adminClient = supabaseAdmin;
+  if (adminClient) {
+    try {
+      const [{ data: requests, error: reqErr }, { data: profiles, error: profErr }, { data: profileCats, error: catErr }, { data: leads, error: leadErr }] = await Promise.all([
+        adminClient.from("vendor_requests").select("status").limit(MAX_LIST_ROWS),
+        adminClient.from("vendor_profiles").select("id, business_name, alias, active, founding_member, created_at").limit(MAX_LIST_ROWS),
+        adminClient.from("vendor_profile_categories").select("vendor_id, category_slug").limit(MAX_LIST_ROWS),
+        adminClient.from("vendor_leads").select("vendor_id, created_at").limit(MAX_LIST_ROWS),
+      ]);
+      if (reqErr) throw reqErr;
+      if (profErr) throw profErr;
+      if (catErr) throw catErr;
+      if (leadErr) throw leadErr;
+
+      return res.json(buildVendorStats(
+        (requests || []).map((r: any) => ({ status: r.status })),
+        (profiles || []).map((p: any) => ({ id: p.id, businessName: p.business_name, alias: p.alias, active: p.active !== false, foundingMember: p.founding_member === true })),
+        (profileCats || []).map((c: any) => ({ vendorId: c.vendor_id, categorySlug: c.category_slug })),
+        (leads || []).map((l: any) => ({ vendorId: l.vendor_id, createdAt: l.created_at })),
+        labelBySlug
+      ));
+    } catch (err: any) {
+      console.error("[Supabase Error] Statistiques prestataires, repli sur db.json :", err.message);
+    }
+  }
+
+  const db = getDB();
+  return res.json(buildVendorStats(
+    (db.vendorRequests || []).map((r: any) => ({ status: r.status })),
+    (db.vendorProfiles || []).map((p: any) => ({ id: p.id, businessName: p.businessName, alias: p.alias, active: p.active !== false, foundingMember: p.foundingMember === true })),
+    (db.vendorProfiles || []).flatMap((p: any) => (p.categorySlugs || []).map((slug: string) => ({ vendorId: p.id, categorySlug: slug }))),
+    (db.vendorLeads || []).map((l: any) => ({ vendorId: l.vendorId, createdAt: l.createdAt })),
+    labelBySlug
+  ));
+});
+
+function buildVendorStats(
+  requests: { status: string }[],
+  profiles: { id: string; businessName: string; alias: string | null; active: boolean; foundingMember: boolean }[],
+  profileCategories: { vendorId: string; categorySlug: string }[],
+  leads: { vendorId: string; createdAt: string }[],
+  labelBySlug: Map<string, string>
+) {
+  const activeProfiles = profiles.filter((p) => p.active && p.alias);
+  // Approuvée mais sans alias choisi : la fiche existe mais n'apparaît nulle part sur le
+  // marché public — c'est le décrochage entre "validé par l'admin" et "réellement en ligne".
+  const incompleteProfiles = profiles.filter((p) => p.active && !p.alias);
+  const suspendedProfiles = profiles.filter((p) => !p.active);
+
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const leadsLast30Days = leads.filter((l) => new Date(l.createdAt).getTime() >= thirtyDaysAgo).length;
+
+  const activeProfileIds = new Set(activeProfiles.map((p) => p.id));
+  const categorySlugsByVendor = new Map<string, string[]>();
+  for (const c of profileCategories) {
+    if (!categorySlugsByVendor.has(c.vendorId)) categorySlugsByVendor.set(c.vendorId, []);
+    categorySlugsByVendor.get(c.vendorId)!.push(c.categorySlug);
+  }
+
+  const leadCountByVendor = new Map<string, number>();
+  for (const l of leads) {
+    leadCountByVendor.set(l.vendorId, (leadCountByVendor.get(l.vendorId) || 0) + 1);
+  }
+
+  const activeProfilesBySlug = new Map<string, number>();
+  const leadsBySlug = new Map<string, number>();
+  for (const [vendorId, slugs] of categorySlugsByVendor) {
+    const isActive = activeProfileIds.has(vendorId);
+    const vendorLeadCount = leadCountByVendor.get(vendorId) || 0;
+    for (const slug of slugs) {
+      if (isActive) activeProfilesBySlug.set(slug, (activeProfilesBySlug.get(slug) || 0) + 1);
+      leadsBySlug.set(slug, (leadsBySlug.get(slug) || 0) + vendorLeadCount);
+    }
+  }
+
+  const byCategory = [...new Set([...activeProfilesBySlug.keys(), ...leadsBySlug.keys()])]
+    .map((slug) => ({
+      slug,
+      label: labelBySlug.get(slug) || slug,
+      activeProfiles: activeProfilesBySlug.get(slug) || 0,
+      leads: leadsBySlug.get(slug) || 0,
+    }))
+    .sort((a, b) => b.leads - a.leads);
+
+  const topVendors = activeProfiles
+    .map((p) => ({ id: p.id, businessName: p.businessName, alias: p.alias, leads: leadCountByVendor.get(p.id) || 0 }))
+    .sort((a, b) => b.leads - a.leads)
+    .slice(0, 5);
+
+  return {
+    requests: {
+      total: requests.length,
+      pending: requests.filter((r) => r.status === "pending").length,
+      approved: requests.filter((r) => r.status === "approved").length,
+      rejected: requests.filter((r) => r.status === "rejected").length,
+    },
+    profiles: {
+      total: profiles.length,
+      active: activeProfiles.length,
+      incomplete: incompleteProfiles.length,
+      suspended: suspendedProfiles.length,
+      founding: profiles.filter((p) => p.foundingMember).length,
+    },
+    leads: {
+      total: leads.length,
+      last30Days: leadsLast30Days,
+    },
+    byCategory,
+    topVendors,
+  };
+}
 
 export default router;
