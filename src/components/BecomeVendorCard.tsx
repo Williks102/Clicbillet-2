@@ -10,6 +10,10 @@ interface BecomeVendorCardProps {
   // Optionnel : sans lui, l'état "approuvée" reste un simple message plutôt qu'un lien vers le
   // tableau de bord — c'est le cas d'un appelant qui n'a pas de navigation à proposer.
   setActiveTab?: (tab: string) => void;
+  // Ouvre le formulaire directement plutôt que le bouton replié : utile quand l'appelant a
+  // déjà été jusqu'ici dans l'intention explicite de faire une demande (marché de
+  // prestataires, tableau de bord sans fiche) — un clic de moins.
+  startOpen?: boolean;
 }
 
 // Parcours "devenir prestataire", jumeau de BecomeOrganizerCard.tsx. Différence : la bascule
@@ -17,11 +21,11 @@ interface BecomeVendorCardProps {
 // peut demander une fiche, y compris un compte déjà organisateur — et contrairement au passage
 // organisateur, aucune reconnexion n'est nécessaire : le tableau de bord est accessible tout
 // de suite après approbation.
-export default function BecomeVendorCard({ setActiveTab }: BecomeVendorCardProps) {
+export default function BecomeVendorCard({ setActiveTab, startOpen = false }: BecomeVendorCardProps) {
   const [request, setRequest] = useState<VendorRequest | null>(null);
   const [categories, setCategories] = useState<VendorCategory[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [formOpen, setFormOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(startOpen);
   const [businessName, setBusinessName] = useState("");
   const [phone, setPhone] = useState("");
   const [city, setCity] = useState("");

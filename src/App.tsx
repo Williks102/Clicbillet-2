@@ -314,6 +314,21 @@ export default function App() {
     setActiveTab("profile");
   }
 
+  // « Devenir prestataire » depuis le marché de prestataires : va directement au tableau de
+  // bord prestataire, qui affiche le formulaire de demande tant qu'aucune fiche n'existe (cf.
+  // VendorDashboard.tsx) — un visiteur sans compte doit d'abord s'inscrire, comme pour
+  // handleBecomePromoter, mais sans présélectionner de rôle : devenir prestataire n'est pas
+  // réservé aux organisateurs.
+  function handleBecomeVendor() {
+    window.scrollTo({ top: 0 });
+    if (!user) {
+      setCheckoutEvent(null);
+      openAuthScreen("register");
+      return;
+    }
+    setActiveTab("vendor-dashboard");
+  }
+
   // La bande « Nous rejoindre » n'a de sens que sur les pages de navigation publique, pour
   // quelqu'un qui n'est pas déjà promoteur. Elle est écartée de la page Tarifs, qui se termine
   // déjà par son propre appel à l'action — deux bandes successives se dévalueraient l'une l'autre.
@@ -608,7 +623,10 @@ export default function App() {
                 à la fois, et le repli occupe de toute façon la même zone. */}
             <Suspense fallback={<ScreenLoader />}>
               {activeTab === "vendors" && (
-                <VendorsMarketplacePage onViewVendor={handleViewVendor} />
+                <VendorsMarketplacePage
+                  onViewVendor={handleViewVendor}
+                  onBecomeVendor={user?.role === "admin" ? undefined : handleBecomeVendor}
+                />
               )}
 
               {activeTab === "vendor-profile" && viewingVendorAlias && (

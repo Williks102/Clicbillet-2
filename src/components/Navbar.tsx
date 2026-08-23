@@ -173,6 +173,25 @@ export default function Navbar({ user, onLogout, activeTab, setActiveTab, onOpen
                   </>
                 )}
 
+                {/* Accès direct à l'espace prestataire, qu'une fiche existe déjà ou non — le
+                    tableau de bord affiche le formulaire de demande tant qu'aucune fiche
+                    n'existe (cf. VendorDashboard.tsx). Pas de rôle dédié : client ou
+                    organisateur y ont accès de la même façon, l'admin n'en a pas l'usage. */}
+                {user.role !== "admin" && (
+                  <button
+                    id="tab-vendor-dashboard-btn"
+                    onClick={() => setActiveTab("vendor-dashboard")}
+                    className={`flex items-center space-x-1.5 rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
+                      activeTab === "vendor-dashboard"
+                        ? "bg-orange-50 text-orange-600"
+                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    }`}
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    <span>Espace Prestataire</span>
+                  </button>
+                )}
+
                 {/* User Information */}
                 <div className="hidden items-center space-x-1.5 rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs font-semibold text-gray-700 md:flex">
                   <UserIcon className="h-3.5 w-3.5 text-gray-400" />

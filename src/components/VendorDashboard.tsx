@@ -8,6 +8,7 @@ import { authFetch } from "../lib/apiClient";
 import { compressImageToDataUrl } from "../lib/imageCompress";
 import { fetchVendorCategories, VendorCategory } from "../lib/vendorCategories";
 import DashboardMobileMenu from "./DashboardMobileMenu";
+import BecomeVendorCard from "./BecomeVendorCard";
 import { PageSkeleton } from "./Skeleton";
 
 interface VendorDashboardProps {
@@ -197,13 +198,19 @@ export default function VendorDashboard({ user }: VendorDashboardProps) {
   }
 
   if (notFound) {
+    // Pas de fiche (pas encore demandée, ou demande en cours/refusée) : le formulaire de
+    // demande s'affiche directement ici plutôt que de renvoyer vers le profil — accéder à
+    // "mon espace prestataire" depuis la nav doit marcher qu'on ait déjà une fiche ou non.
     return (
-      <div className="mx-auto max-w-lg py-16 text-center" id="vendor-dashboard-not-found">
-        <Sparkles className="mx-auto h-12 w-12 text-gray-300" />
-        <h3 className="mt-4 text-base font-bold text-gray-900">Aucune fiche prestataire</h3>
-        <p className="mt-2 text-xs text-gray-500">
-          Vous n'avez pas encore de fiche prestataire. Demandez-en une depuis votre profil.
-        </p>
+      <div className="mx-auto max-w-lg py-10" id="vendor-dashboard-not-found">
+        <div className="mb-6 text-center">
+          <Sparkles className="mx-auto h-10 w-10 text-orange-300" />
+          <h3 className="mt-3 text-base font-bold text-gray-900">Aucune fiche prestataire pour l'instant</h3>
+          <p className="mt-1.5 text-xs text-gray-500">
+            Publiez une fiche vitrine (photographe, régie, MC, traiteur...) sur le marché de prestataires.
+          </p>
+        </div>
+        <BecomeVendorCard startOpen />
       </div>
     );
   }

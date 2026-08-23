@@ -190,6 +190,20 @@ export default function MobileNavDrawer({ user, activeTab, setActiveTab, onLogou
                   </button>
                 </>
               )}
+
+              {/* Cf. Navbar : accès direct à l'espace prestataire, fiche existante ou non. */}
+              {user.role !== "admin" && (
+                <button
+                  id="mobile-nav-vendor-dashboard-btn"
+                  onClick={() => go("vendor-dashboard")}
+                  className={`flex w-full items-center space-x-3 rounded-xl px-3 py-3 text-sm font-bold transition-colors ${
+                    activeTab === "vendor-dashboard" ? "bg-orange-50 text-orange-600" : "text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  <Sparkles className="h-4.5 w-4.5" />
+                  <span>Espace Prestataire</span>
+                </button>
+              )}
             </>
           )}
         </nav>

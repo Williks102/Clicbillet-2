@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MapPin } from "lucide-react";
+import { MapPin, Sparkles } from "lucide-react";
 import { fetchVendorCategories, iconeDeCategoriePrestataire, TOUTES_CATEGORIES_PRESTATAIRES, VendorCategory } from "../lib/vendorCategories";
 import { SkeletonBlock } from "./Skeleton";
 
@@ -17,12 +17,15 @@ export interface VendorSummary {
 
 interface VendorsMarketplacePageProps {
   onViewVendor: (alias: string) => void;
+  // Absent pour un visiteur non connecté ou déjà prestataire : le bouton "Devenir prestataire"
+  // n'a alors rien d'utile à proposer (cf. App.tsx, qui décide de la présence de ce callback).
+  onBecomeVendor?: () => void;
 }
 
 // Marché de prestataires événementiels : grille filtrable par catégorie et par ville, jumeau
 // dans son esprit de la page d'accueil (catalogue d'événements), mais pour les fiches
 // vitrines de photographes, régies, MC, traiteurs...
-export default function VendorsMarketplacePage({ onViewVendor }: VendorsMarketplacePageProps) {
+export default function VendorsMarketplacePage({ onViewVendor, onBecomeVendor }: VendorsMarketplacePageProps) {
   const [categories, setCategories] = useState<VendorCategory[]>([]);
   const [selectedCategory, setSelectedCategory] = useState(TOUTES_CATEGORIES_PRESTATAIRES);
   const [city, setCity] = useState("");
@@ -55,12 +58,25 @@ export default function VendorsMarketplacePage({ onViewVendor }: VendorsMarketpl
 
   return (
     <div id="vendors-marketplace-page" className="space-y-6 py-2">
-      <div>
-        <h1 className="text-2xl font-black text-gray-900 sm:text-3xl">Prestataires événementiels</h1>
-        <p className="mt-1.5 text-sm text-gray-500">
-          Photographes, régies son et lumière, MC, traiteurs, décorateurs... trouvez qui il vous
-          faut pour votre prochain événement.
-        </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-black text-gray-900 sm:text-3xl">Prestataires événementiels</h1>
+          <p className="mt-1.5 text-sm text-gray-500">
+            Photographes, régies son et lumière, MC, traiteurs, décorateurs... trouvez qui il vous
+            faut pour votre prochain événement.
+          </p>
+        </div>
+
+        {onBecomeVendor && (
+          <button
+            id="marketplace-become-vendor-btn"
+            onClick={onBecomeVendor}
+            className="flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-orange-600 px-4 py-2.5 text-xs font-black text-white shadow-md shadow-orange-100 transition-colors hover:bg-orange-700"
+          >
+            <Sparkles className="h-4 w-4" />
+            Devenir prestataire
+          </button>
+        )}
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
