@@ -28,6 +28,9 @@ const PricingPage = lazy(() => import("./components/PricingPage"));
 const ContactPage = lazy(() => import("./components/ContactPage"));
 const ProfilePage = lazy(() => import("./components/ProfilePage"));
 const EventPage = lazy(() => import("./components/EventPage"));
+const VendorsMarketplacePage = lazy(() => import("./components/VendorsMarketplacePage"));
+const VendorProfilePage = lazy(() => import("./components/VendorProfilePage"));
+const VendorDashboard = lazy(() => import("./components/VendorDashboard"));
 
 // Repli affiché le temps de récupérer le morceau de code d'un écran. Sur une connexion correcte
 // il n'apparaît qu'une fraction de seconde ; sur un réseau mobile lent, il tient l'écran assez
@@ -69,6 +72,7 @@ export default function App() {
 
   const [viewingOrganizerAlias, setViewingOrganizerAlias] = useState<string | null>(initialRoute.organizerAlias);
   const [viewingEventId, setViewingEventId] = useState<string | null>(initialRoute.eventId);
+  const [viewingVendorAlias, setViewingVendorAlias] = useState<string | null>(initialRoute.vendorAlias);
   // Onglet affiché derrière l'écran d'authentification : c'est là qu'on revient si l'utilisateur
   // abandonne. Une URL /connexion ouverte à froid retombe donc sur l'accueil à l'annulation.
   const [activeTab, setActiveTab] = useState<string>(initialAuthScreen ? "home" : initialRoute.tab);
@@ -217,13 +221,26 @@ export default function App() {
     setActiveTab("home");
   }
 
+  // Navigation vers la fiche publique d'un prestataire (/p/:alias), jumeau de
+  // handleViewOrganizer ci-dessus.
+  function handleViewVendor(alias: string) {
+    setViewingVendorAlias(alias);
+    setActiveTab("vendor-profile");
+    window.scrollTo({ top: 0 });
+  }
+
+  function handleBackFromVendorProfile() {
+    setViewingVendorAlias(null);
+    setActiveTab("vendors");
+  }
+
   // Boutons précédent/suivant du navigateur : l'URL fait foi, on réaligne l'écran dessus.
   useEffect(() => {
     function handlePopState() {
       const route = matchPath(window.location.pathname);
       // On mémorise l'écran que cette URL désigne, sous sa forme canonique, pour que l'effet
       // ci-dessous sache que l'état vient d'être dérivé de l'URL et n'ait rien à empiler.
-      routeFromUrl.current = pathForTab(route.tab, route.organizerAlias, route.eventId);
+      routeFromUrl.current = pathForTab(route.tab, route.organizerAlias, route.eventId, route.vendorAlias);
 
       // « Précédent » depuis un formulaire d'authentification doit le refermer, et y revenir
       // doit le rouvrir — c'est tout l'intérêt de lui avoir donné une adresse.
@@ -236,6 +253,7 @@ export default function App() {
       setAuthIntent(null);
       setViewingOrganizerAlias(route.organizerAlias);
       setViewingEventId(route.eventId);
+      setViewingVendorAlias(route.vendorAlias);
       setActiveTab(route.tab);
     }
     window.addEventListener("popstate", handlePopState);
@@ -251,7 +269,7 @@ export default function App() {
     // annoncer tant qu'il est affiché.
     const nextPath = authModalVisible
       ? pathForTab(authScreen)
-      : pathForTab(activeTab, viewingOrganizerAlias, viewingEventId);
+      : pathForTab(activeTab, viewingOrganizerAlias, viewingEventId, viewingVendorAlias);
 
     // État issu d'un précédent/suivant : l'URL est déjà la bonne, empiler ici renverrait
     // l'utilisateur d'où il vient à chaque appui sur « précédent ». On compare l'écran plutôt
@@ -266,7 +284,7 @@ export default function App() {
     if (nextPath !== window.location.pathname) {
       window.history.pushState({}, "", nextPath);
     }
-  }, [activeTab, viewingOrganizerAlias, viewingEventId, authModalVisible, authScreen]);
+  }, [activeTab, viewingOrganizerAlias, viewingEventId, viewingVendorAlias, authModalVisible, authScreen]);
 
   // Ouverture de la page d'un événement. C'est désormais ce que fait un clic sur une affiche,
   // à la place de l'ouverture directe de la fenêtre de paiement : sans écran intermédiaire,
@@ -560,6 +578,7 @@ export default function App() {
                     onViewEvent={handleViewEvent}
                     userRole={user?.role}
                     onViewOrganizer={handleViewOrganizer}
+                    onViewVendors={() => setActiveTab("vendors")}
                   />
                 )}
               </>
@@ -588,6 +607,18 @@ export default function App() {
             {/* Un seul Suspense pour tous les écrans chargés à la demande : un seul est monté
                 à la fois, et le repli occupe de toute façon la même zone. */}
             <Suspense fallback={<ScreenLoader />}>
+              {activeTab === "vendors" && (
+                <VendorsMarketplacePage onViewVendor={handleViewVendor} />
+              )}
+
+              {activeTab === "vendor-profile" && viewingVendorAlias && (
+                <VendorProfilePage alias={viewingVendorAlias} onBack={handleBackFromVendorProfile} />
+              )}
+
+              {activeTab === "vendor-dashboard" && user && (
+                <VendorDashboard user={user} />
+              )}
+
               {activeTab === "client-dashboard" && user && (
                 <ClientDashboard user={user} />
               )}

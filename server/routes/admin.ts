@@ -10,6 +10,7 @@ import { isPaidTicket } from "../lib/ticketPayment.js";
 import { findTicketsByReference, confirmPaymentForTickets } from "../lib/paymentConfirmation.js";
 import { decryptPayoutDetails } from "../lib/payoutEncryption.js";
 import { getCategories, slugifyCategory, inValiderCacheCategories } from "../lib/categories.js";
+import { getVendorCategories, inValiderCacheVendorCategories } from "../lib/vendorCategories.js";
 
 const router = express.Router();
 
@@ -505,6 +506,142 @@ router.delete("/api/admin/categories/:slug", requireAuth, requireRole("admin"), 
   if (error) return res.status(500).json({ error: "Suppression impossible." });
   inValiderCacheCategories();
   res.json({ success: true, desactivee: false });
+});
+
+// ==========================================
+// CATÉGORIES DE PRESTATAIRES (marché prestataires)
+// ==========================================
+// Même gabarit que /api/admin/categories ci-dessus, référentiel séparé (supabase_setup.sql
+// section 30) : les catégories d'événements et de prestataires n'ont pas vocation à évoluer
+// ensemble.
+
+router.get("/api/admin/vendor-categories", requireAuth, requireRole("admin"), async (_req: express.Request, res: express.Response) => {
+  res.json(await getVendorCategories(true));
+});
+
+router.post("/api/admin/vendor-categories", requireAuth, requireRole("admin"), async (req: express.Request, res: express.Response) => {
+  if (!isSupabaseEnabled || !supabase) {
+    return res.status(503).json({ error: "Référentiel indisponible sans base de données." });
+  }
+  const label = String(req.body?.label || "").trim();
+  if (label.length < 2 || label.length > 60) {
+    return res.status(400).json({ error: "Le nom de la catégorie doit faire entre 2 et 60 caractères." });
+  }
+
+  const slug = slugifyCategory(label);
+  if (!slug) {
+    return res.status(400).json({ error: "Ce nom ne produit aucune clé exploitable. Utilisez au moins une lettre ou un chiffre." });
+  }
+
+  const { data: existante } = await supabase.from("vendor_categories").select("slug, label, active").eq("slug", slug).maybeSingle();
+  if (existante) {
+    if (!existante.active) {
+      await supabase.from("vendor_categories").update({ label, active: true }).eq("slug", slug);
+      inValiderCacheVendorCategories();
+      return res.status(200).json({ slug, label, reactivee: true });
+    }
+    return res.status(409).json({ error: `La catégorie « ${existante.label} » existe déjà.` });
+  }
+
+  const { data: derniere } = await supabase
+    .from("vendor_categories").select("sort_order").order("sort_order", { ascending: false }).limit(1).maybeSingle();
+
+  const { error } = await supabase.from("vendor_categories").insert({
+    slug,
+    label,
+    icon: String(req.body?.icon || "Tag"),
+    sort_order: (Number(derniere?.sort_order) || 0) + 10,
+    active: true
+  });
+  if (error) return res.status(500).json({ error: "Création impossible." });
+
+  inValiderCacheVendorCategories();
+  res.status(201).json({ slug, label });
+});
+
+router.patch("/api/admin/vendor-categories/:slug", requireAuth, requireRole("admin"), async (req: express.Request, res: express.Response) => {
+  if (!isSupabaseEnabled || !supabase) {
+    return res.status(503).json({ error: "Référentiel indisponible sans base de données." });
+  }
+  const maj: Record<string, any> = {};
+
+  if (typeof req.body?.label === "string") {
+    const label = req.body.label.trim();
+    if (label.length < 2 || label.length > 60) {
+      return res.status(400).json({ error: "Le nom de la catégorie doit faire entre 2 et 60 caractères." });
+    }
+    maj.label = label;
+  }
+  if (typeof req.body?.active === "boolean") maj.active = req.body.active;
+  if (typeof req.body?.icon === "string") maj.icon = req.body.icon;
+  if (Number.isFinite(Number(req.body?.sortOrder))) maj.sort_order = Number(req.body.sortOrder);
+
+  if (Object.keys(maj).length === 0) {
+    return res.status(400).json({ error: "Aucune modification fournie." });
+  }
+
+  const { error } = await supabase.from("vendor_categories").update(maj).eq("slug", req.params.slug);
+  if (error) return res.status(500).json({ error: "Modification impossible." });
+
+  inValiderCacheVendorCategories();
+  res.json({ success: true });
+});
+
+router.delete("/api/admin/vendor-categories/:slug", requireAuth, requireRole("admin"), async (req: express.Request, res: express.Response) => {
+  if (!isSupabaseEnabled || !supabase) {
+    return res.status(503).json({ error: "Référentiel indisponible sans base de données." });
+  }
+  const slug = req.params.slug;
+
+  // Une catégorie portée par des fiches prestataire n'est jamais supprimée : elle est
+  // DÉSACTIVÉE, comme pour les catégories d'événements.
+  const { count } = await supabase
+    .from("vendor_profile_categories").select("vendor_id", { count: "exact", head: true }).eq("category_slug", slug);
+
+  if ((count || 0) > 0) {
+    const { error } = await supabase.from("vendor_categories").update({ active: false }).eq("slug", slug);
+    if (error) return res.status(500).json({ error: "Désactivation impossible." });
+    inValiderCacheVendorCategories();
+    return res.json({
+      success: true,
+      desactivee: true,
+      prestataires: count,
+      message: `${count} fiche(s) prestataire utilisent cette catégorie : elle a été retirée des listes sans être supprimée, pour ne pas les laisser sans catégorie.`
+    });
+  }
+
+  const { error } = await supabase.from("vendor_categories").delete().eq("slug", slug);
+  if (error) return res.status(500).json({ error: "Suppression impossible." });
+  inValiderCacheVendorCategories();
+  res.json({ success: true, desactivee: false });
+});
+
+// Suspension d'une fiche prestataire (abus, litige signalé) : la fiche disparaît du marché
+// public et de la recherche, sans être supprimée — l'historique des demandes de devis déjà
+// reçues (vendor_leads) reste intact, et la réactivation est immédiate.
+router.patch("/api/admin/vendors/:id/active", requireAuth, requireRole("admin"), async (req: express.Request, res: express.Response) => {
+  const { active } = req.body;
+  if (typeof active !== "boolean") {
+    return res.status(400).json({ error: "Le champ 'active' (booléen) est requis." });
+  }
+
+  if (isSupabaseEnabled && supabase) {
+    try {
+      const { error } = await supabase.from("vendor_profiles").update({ active }).eq("id", req.params.id);
+      if (error) throw error;
+      return res.json({ success: true, active });
+    } catch (err: any) {
+      console.error("[Supabase Error] Suspension de la fiche prestataire :", err.message);
+      return res.status(500).json({ error: "Modification impossible." });
+    }
+  }
+
+  const db = getDB();
+  const profile = (db.vendorProfiles || []).find((p: any) => p.id === req.params.id) as any;
+  if (!profile) return res.status(404).json({ error: "Fiche prestataire introuvable." });
+  profile.active = active;
+  saveDB(db);
+  res.json({ success: true, active });
 });
 
 export default router;

@@ -632,3 +632,128 @@ export async function sendOrganizerRequestDecisionEmail(user: { email: string; n
     html: buildOrganizerRequestDecisionHtml(user.name, status, reviewNote)
   });
 }
+
+// ==========================================
+// MARCHÉ DE PRESTATAIRES — mêmes gabarits que ci-dessus (demande, décision), plus la
+// notification de nouvelle demande de devis reçue sur une fiche.
+// ==========================================
+
+// --- Admin : demande de fiche prestataire ---
+export interface VendorRequestPayload {
+  userName: string;
+  userEmail: string;
+  publicCode?: string | null;
+  businessName: string;
+  phone: string;
+  city: string;
+  categoryLabels: string[];
+  description?: string | null;
+}
+
+export function buildAdminVendorRequestHtml(request: VendorRequestPayload): string {
+  const rows = [
+    { label: "Demandeur", value: escapeHtmlForEmail(request.userName) },
+    { label: "Email", value: escapeHtmlForEmail(request.userEmail) },
+    { label: "Code client", value: escapeHtmlForEmail(request.publicCode || "—") },
+    { label: "Structure", value: escapeHtmlForEmail(request.businessName) },
+    { label: "Téléphone", value: escapeHtmlForEmail(request.phone) },
+    { label: "Ville", value: escapeHtmlForEmail(request.city) },
+    { label: "Catégories", value: escapeHtmlForEmail(request.categoryLabels.join(", ")) }
+  ];
+
+  const descriptionBlock = request.description
+    ? `
+      <p style="font-size:13px; font-weight:bold; color:#9a3412; margin:20px 0 6px; text-transform:uppercase; letter-spacing:0.04em;">Activité décrite</p>
+      <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px; white-space:pre-wrap;">${escapeHtmlForEmail(request.description)}</p>
+    `
+    : "";
+
+  return emailLayout("Demande de fiche prestataire", `
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">Un compte demande à publier une fiche prestataire :</p>
+    ${infoCard(rows)}
+    ${descriptionBlock}
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0;">Approuvez ou refusez la demande depuis l'onglet <strong>Prestataires</strong> du tableau de bord admin.</p>
+  `);
+}
+
+export async function sendAdminVendorRequestEmail(request: VendorRequestPayload): Promise<void> {
+  await sendEmail({
+    to: ADMIN_NOTIFICATION_EMAIL,
+    subject: `Demande prestataire — ${request.businessName}`,
+    html: buildAdminVendorRequestHtml(request)
+  });
+}
+
+// --- Demandeur : décision sur sa demande de fiche prestataire ---
+export function buildVendorRequestDecisionHtml(name: string, status: string, reviewNote?: string | null): string {
+  const approved = status === "approved";
+  const noteBlock = reviewNote
+    ? `<p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px; white-space:pre-wrap;"><strong>Message de l'équipe :</strong><br/>${escapeHtmlForEmail(reviewNote)}</p>`
+    : "";
+
+  const body = approved
+    ? `
+      <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonne nouvelle : votre fiche <strong>prestataire</strong> est désormais publiée sur ClicBillet.</p>
+      ${noteBlock}
+      <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">Reconnectez-vous pour compléter votre fiche (photo de couverture, portfolio) depuis votre espace prestataire.</p>
+    `
+    : `
+      <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Votre demande de fiche prestataire n'a pas été retenue pour le moment.</p>
+      ${noteBlock}
+      <p style="font-size:14px; line-height:1.6; color:#374151; margin:0;">Vous pouvez soumettre une nouvelle demande plus tard.</p>
+    `;
+
+  return emailLayout(approved ? "Votre fiche prestataire est publiée" : "Suite à votre demande de fiche prestataire", `
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonjour ${escapeHtmlForEmail(name)},</p>
+    ${body}
+  `);
+}
+
+export async function sendVendorRequestDecisionEmail(user: { email: string; name: string }, status: string, reviewNote?: string | null): Promise<void> {
+  if (!user.email) return;
+  await sendEmail({
+    to: user.email,
+    subject: status === "approved"
+      ? "Votre fiche prestataire ClicBillet est publiée"
+      : "Suite à votre demande de fiche prestataire ClicBillet",
+    html: buildVendorRequestDecisionHtml(user.name, status, reviewNote)
+  });
+}
+
+// --- Prestataire : nouvelle demande de devis reçue sur sa fiche ---
+export interface VendorLeadPayload {
+  vendorName: string;
+  vendorEmail: string;
+  senderName: string;
+  senderEmail: string;
+  senderPhone?: string | null;
+  eventDate?: string | null;
+  message: string;
+}
+
+export function buildVendorLeadHtml(lead: VendorLeadPayload): string {
+  const rows = [
+    { label: "Nom", value: escapeHtmlForEmail(lead.senderName) },
+    { label: "Email", value: escapeHtmlForEmail(lead.senderEmail) },
+    { label: "Téléphone", value: escapeHtmlForEmail(lead.senderPhone || "—") },
+    { label: "Date de l'événement", value: escapeHtmlForEmail(lead.eventDate || "—") }
+  ];
+
+  return emailLayout("Nouvelle demande de devis", `
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonjour ${escapeHtmlForEmail(lead.vendorName)},</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px;">Vous avez reçu une nouvelle demande de devis depuis votre fiche ClicBillet :</p>
+    ${infoCard(rows)}
+    <p style="font-size:13px; font-weight:bold; color:#9a3412; margin:20px 0 6px; text-transform:uppercase; letter-spacing:0.04em;">Message</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 20px; white-space:pre-wrap;">${escapeHtmlForEmail(lead.message)}</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0;">Répondez directement à ${escapeHtmlForEmail(lead.senderEmail)} pour donner suite. Cette demande reste aussi consultable depuis votre espace prestataire.</p>
+  `);
+}
+
+export async function sendVendorLeadEmail(lead: VendorLeadPayload): Promise<void> {
+  if (!lead.vendorEmail) return;
+  await sendEmail({
+    to: lead.vendorEmail,
+    subject: `Nouvelle demande de devis — ${lead.senderName}`,
+    html: buildVendorLeadHtml(lead)
+  });
+}
