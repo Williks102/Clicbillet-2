@@ -730,7 +730,13 @@ export default function App() {
       )}
 
       {showJoinCta && <JoinPromoterCta onJoin={handleBecomePromoter} isSignedIn={Boolean(user)} />}
-      {showJoinVendorCta && <JoinVendorCta onJoin={handleBecomeVendor} isSignedIn={Boolean(user)} />}
+      {showJoinVendorCta && (
+        <JoinVendorCta
+          onJoin={handleBecomeVendor}
+          isSignedIn={Boolean(user)}
+          onBrowse={() => { window.scrollTo({ top: 0 }); setActiveTab("vendors"); }}
+        />
+      )}
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
       <PwaInstallPrompt />

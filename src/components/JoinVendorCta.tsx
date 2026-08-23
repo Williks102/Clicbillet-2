@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Sparkles, ArrowRight, Camera, MessageCircleMore, Globe } from "lucide-react";
+import { Sparkles, ArrowRight, Camera, MessageCircleMore, Globe, Search } from "lucide-react";
 import Reveal from "./Reveal";
 import { fetchVendorPublicStats } from "../lib/vendorPublicStats";
 
@@ -9,6 +9,10 @@ interface JoinVendorCtaProps {
   // C'est App.tsx qui tranche, seul à connaître l'état de connexion (cf. handleBecomeVendor).
   onJoin: () => void;
   isSignedIn: boolean;
+  // Vers le marché public (/prestataires), sans condition de connexion — cette bande cible
+  // d'abord qui veut PUBLIER une fiche, mais quelqu'un qui cherche plutôt à EN TROUVER un ne
+  // doit pas repartir bredouille faute d'un second chemin.
+  onBrowse: () => void;
 }
 
 const ARGUMENTS = [
@@ -21,7 +25,7 @@ const ARGUMENTS = [
 // JoinPromoterCta.tsx (même gabarit visuel), affichée juste après elle en bas des pages
 // publiques : deux appels à rejoindre la plateforme, l'un côté organisateur d'événements,
 // l'autre côté prestataire de services.
-export default function JoinVendorCta({ onJoin, isSignedIn }: JoinVendorCtaProps) {
+export default function JoinVendorCta({ onJoin, isSignedIn, onBrowse }: JoinVendorCtaProps) {
   const [stats, setStats] = useState<{ activeVendors: number; leadsLast30Days: number } | null>(null);
 
   useEffect(() => {
@@ -61,14 +65,24 @@ export default function JoinVendorCta({ onJoin, isSignedIn }: JoinVendorCtaProps
             ))}
           </div>
 
-          <button
-            id="join-vendor-btn"
-            onClick={onJoin}
-            className="mx-auto mt-8 flex items-center gap-2 rounded-xl bg-white px-6 py-3.5 text-sm font-black text-orange-700 transition hover:bg-orange-50 active:scale-95"
-          >
-            <span>{isSignedIn ? "Devenir prestataire" : "Créer mon compte"}</span>
-            <ArrowRight className="h-4 w-4" />
-          </button>
+          <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+            <button
+              id="join-vendor-btn"
+              onClick={onJoin}
+              className="flex items-center gap-2 rounded-xl bg-white px-6 py-3.5 text-sm font-black text-orange-700 transition hover:bg-orange-50 active:scale-95"
+            >
+              <span>{isSignedIn ? "Devenir prestataire" : "Créer mon compte"}</span>
+              <ArrowRight className="h-4 w-4" />
+            </button>
+            <button
+              id="browse-vendors-btn"
+              onClick={onBrowse}
+              className="flex items-center gap-2 rounded-xl border border-white/25 px-6 py-3.5 text-sm font-black text-white transition hover:bg-white/10 active:scale-95"
+            >
+              <Search className="h-4 w-4" />
+              <span>Trouver un prestataire</span>
+            </button>
+          </div>
           <p className="mt-3 text-[11px] font-semibold text-gray-300">
             Chaque fiche est vérifiée par l'équipe avant sa publication.
           </p>
