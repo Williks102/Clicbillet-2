@@ -5,7 +5,7 @@ import VendorCategorySettings from "./admin/VendorCategorySettings";
 import {
   Building2, Users, Calendar, DollarSign, Trash2, ShieldCheck,
   Search, ShieldAlert, Sparkles, Ticket as TicketIcon, TrendingUp, Filter, Percent,
-  Image as ImageIcon, RefreshCw, Store, ArrowUpCircle, ArrowDownCircle, BarChart3, Settings, Camera
+  Image as ImageIcon, RefreshCw, Store, ArrowUpCircle, ArrowDownCircle, BarChart3, Settings, Camera, Inbox, Award, AlertCircle
 } from "lucide-react";
 import { authFetch } from "../lib/apiClient";
 import { isEventPast } from "../lib/eventStatus";
@@ -32,6 +32,17 @@ interface AdminStats {
   users: { id: string; name: string; email: string; role: string; publicCode?: string | null }[];
   events: Event[];
   tickets: Ticket[];
+}
+
+// Suivi du marché de prestataires (cf. GET /api/admin/vendor-stats) : donne à l'admin de quoi
+// juger l'usage réel avant de statuer sur une formule d'abonnement — pas seulement combien de
+// demandes attendent, mais combien de fiches sont réellement en ligne et sollicitées.
+interface VendorStats {
+  requests: { total: number; pending: number; approved: number; rejected: number };
+  profiles: { total: number; active: number; incomplete: number; suspended: number };
+  leads: { total: number; last30Days: number };
+  byCategory: { slug: string; label: string; activeProfiles: number; leads: number }[];
+  topVendors: { id: string; businessName: string; alias: string | null; leads: number }[];
 }
 
 type AdminSubTab = "overview" | "reports" | "events" | "users" | "organizer-requests" | "vendor-requests" | "tickets" | "payouts" | "transactions" | "configuration";
@@ -139,17 +150,19 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
   const [vendorRequests, setVendorRequests] = useState<VendorRequest[]>([]);
   const [reviewingVendorRequestId, setReviewingVendorRequestId] = useState<string | null>(null);
   const [vendorCategoryLabelBySlug, setVendorCategoryLabelBySlug] = useState<Record<string, string>>({});
+  const [vendorStats, setVendorStats] = useState<VendorStats | null>(null);
 
   async function fetchAdminData() {
     setLoading(true);
     setError(null);
     try {
-      const [response, respPayouts, respTx, respRequests, respVendorRequests] = await Promise.all([
+      const [response, respPayouts, respTx, respRequests, respVendorRequests, respVendorStats] = await Promise.all([
         authFetch("/api/admin/stats", {}),
         authFetch("/api/admin/payouts", {}),
         authFetch("/api/admin/transactions", {}),
         authFetch("/api/admin/organizer-requests", {}),
-        authFetch("/api/admin/vendor-requests", {})
+        authFetch("/api/admin/vendor-requests", {}),
+        authFetch("/api/admin/vendor-stats", {})
       ]);
       if (!response.ok) {
         throw new Error("Impossible de communiquer avec l'interface d'administration.");
@@ -161,6 +174,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
       if (respTx.ok) setTransactions(await respTx.json());
       if (respRequests.ok) setOrganizerRequests(await respRequests.json());
       if (respVendorRequests.ok) setVendorRequests(await respVendorRequests.json());
+      if (respVendorStats.ok) setVendorStats(await respVendorStats.json());
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Impossible de récupérer les statistiques d'administration.");
@@ -1164,6 +1178,87 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         )}
 
         {activeSubTab === "vendor-requests" && (
+          <div className="space-y-5">
+            {vendorStats && (
+              <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-5">
+                <div className="border-b border-gray-50 pb-3">
+                  <h4 className="text-sm font-black text-gray-950">Marché de prestataires — en un coup d'œil</h4>
+                  <p className="mt-1 text-[11px] text-gray-500 font-semibold">
+                    De quoi juger l'usage réel avant de décider d'une formule d'abonnement.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className="rounded-2xl border border-gray-100 p-3.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400">
+                      <Store className="h-3.5 w-3.5 text-orange-500" /> Fiches actives
+                    </div>
+                    <p className="mt-1.5 text-xl font-black text-gray-950">{vendorStats.profiles.active}</p>
+                  </div>
+                  <div className="rounded-2xl border border-gray-100 p-3.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400">
+                      <AlertCircle className="h-3.5 w-3.5 text-amber-500" /> Approuvées, pas en ligne
+                    </div>
+                    <p className="mt-1.5 text-xl font-black text-gray-950">{vendorStats.profiles.incomplete}</p>
+                  </div>
+                  <div className="rounded-2xl border border-gray-100 p-3.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400">
+                      <Inbox className="h-3.5 w-3.5 text-orange-500" /> Devis reçus (30j)
+                    </div>
+                    <p className="mt-1.5 text-xl font-black text-gray-950">{vendorStats.leads.last30Days}</p>
+                  </div>
+                  <div className="rounded-2xl border border-gray-100 p-3.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400">
+                      <Inbox className="h-3.5 w-3.5 text-gray-400" /> Devis reçus (total)
+                    </div>
+                    <p className="mt-1.5 text-xl font-black text-gray-950">{vendorStats.leads.total}</p>
+                  </div>
+                </div>
+
+                {vendorStats.byCategory.length > 0 && (
+                  <div>
+                    <h5 className="mb-2 text-[10px] font-black uppercase tracking-wider text-gray-400">Par catégorie</h5>
+                    <div className="overflow-hidden rounded-xl border border-gray-100">
+                      <table className="w-full text-left text-[11px]">
+                        <thead className="bg-gray-50 text-[9px] font-black uppercase tracking-wider text-gray-400">
+                          <tr>
+                            <th className="px-3 py-2">Catégorie</th>
+                            <th className="px-3 py-2 text-right">Fiches actives</th>
+                            <th className="px-3 py-2 text-right">Devis reçus</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {vendorStats.byCategory.map((c) => (
+                            <tr key={c.slug}>
+                              <td className="px-3 py-2 font-bold text-gray-700">{c.label}</td>
+                              <td className="px-3 py-2 text-right font-semibold text-gray-600">{c.activeProfiles}</td>
+                              <td className="px-3 py-2 text-right font-semibold text-gray-600">{c.leads}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {vendorStats.topVendors.length > 0 && vendorStats.topVendors[0].leads > 0 && (
+                  <div>
+                    <h5 className="mb-2 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400">
+                      <Award className="h-3.5 w-3.5 text-orange-500" /> Prestataires les plus sollicités
+                    </h5>
+                    <ul className="space-y-1.5">
+                      {vendorStats.topVendors.filter((v) => v.leads > 0).map((v) => (
+                        <li key={v.id} className="flex items-center justify-between rounded-xl border border-gray-100 px-3 py-2 text-[11px]">
+                          <span className="font-bold text-gray-700">{v.businessName}</span>
+                          <span className="font-black text-orange-600">{v.leads} devis</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
           <div className="bg-white border border-gray-100 rounded-2xl p-5 space-y-4">
             <div className="border-b border-gray-50 pb-4">
               <h4 className="text-sm font-black text-gray-950">
@@ -1246,6 +1341,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                 ))}
               </div>
             )}
+          </div>
           </div>
         )}
 

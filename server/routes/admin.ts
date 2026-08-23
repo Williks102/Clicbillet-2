@@ -644,4 +644,124 @@ router.patch("/api/admin/vendors/:id/active", requireAuth, requireRole("admin"),
   res.json({ success: true, active });
 });
 
+// Suivi du marché de prestataires : rien n'était visible entre la file de modération (combien
+// de demandes en attente) et le catalogue public (quelles fiches sont en ligne). Sans ces
+// chiffres — fiches réellement publiées, devis reçus par catégorie, prestataires qui
+// convertissent le mieux — décider quand et comment introduire un abonnement resterait un
+// pari plutôt qu'une décision informée par l'usage réel.
+router.get("/api/admin/vendor-stats", requireAuth, requireRole("admin"), async (_req: express.Request, res: express.Response) => {
+  const categories = await getVendorCategories(true);
+  const labelBySlug = new Map(categories.map((c) => [c.slug, c.label]));
+
+  const adminClient = supabaseAdmin;
+  if (adminClient) {
+    try {
+      const [{ data: requests, error: reqErr }, { data: profiles, error: profErr }, { data: profileCats, error: catErr }, { data: leads, error: leadErr }] = await Promise.all([
+        adminClient.from("vendor_requests").select("status").limit(MAX_LIST_ROWS),
+        adminClient.from("vendor_profiles").select("id, business_name, alias, active, created_at").limit(MAX_LIST_ROWS),
+        adminClient.from("vendor_profile_categories").select("vendor_id, category_slug").limit(MAX_LIST_ROWS),
+        adminClient.from("vendor_leads").select("vendor_id, created_at").limit(MAX_LIST_ROWS),
+      ]);
+      if (reqErr) throw reqErr;
+      if (profErr) throw profErr;
+      if (catErr) throw catErr;
+      if (leadErr) throw leadErr;
+
+      return res.json(buildVendorStats(
+        (requests || []).map((r: any) => ({ status: r.status })),
+        (profiles || []).map((p: any) => ({ id: p.id, businessName: p.business_name, alias: p.alias, active: p.active !== false })),
+        (profileCats || []).map((c: any) => ({ vendorId: c.vendor_id, categorySlug: c.category_slug })),
+        (leads || []).map((l: any) => ({ vendorId: l.vendor_id, createdAt: l.created_at })),
+        labelBySlug
+      ));
+    } catch (err: any) {
+      console.error("[Supabase Error] Statistiques prestataires, repli sur db.json :", err.message);
+    }
+  }
+
+  const db = getDB();
+  return res.json(buildVendorStats(
+    (db.vendorRequests || []).map((r: any) => ({ status: r.status })),
+    (db.vendorProfiles || []).map((p: any) => ({ id: p.id, businessName: p.businessName, alias: p.alias, active: p.active !== false })),
+    (db.vendorProfiles || []).flatMap((p: any) => (p.categorySlugs || []).map((slug: string) => ({ vendorId: p.id, categorySlug: slug }))),
+    (db.vendorLeads || []).map((l: any) => ({ vendorId: l.vendorId, createdAt: l.createdAt })),
+    labelBySlug
+  ));
+});
+
+function buildVendorStats(
+  requests: { status: string }[],
+  profiles: { id: string; businessName: string; alias: string | null; active: boolean }[],
+  profileCategories: { vendorId: string; categorySlug: string }[],
+  leads: { vendorId: string; createdAt: string }[],
+  labelBySlug: Map<string, string>
+) {
+  const activeProfiles = profiles.filter((p) => p.active && p.alias);
+  // Approuvée mais sans alias choisi : la fiche existe mais n'apparaît nulle part sur le
+  // marché public — c'est le décrochage entre "validé par l'admin" et "réellement en ligne".
+  const incompleteProfiles = profiles.filter((p) => p.active && !p.alias);
+  const suspendedProfiles = profiles.filter((p) => !p.active);
+
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const leadsLast30Days = leads.filter((l) => new Date(l.createdAt).getTime() >= thirtyDaysAgo).length;
+
+  const activeProfileIds = new Set(activeProfiles.map((p) => p.id));
+  const categorySlugsByVendor = new Map<string, string[]>();
+  for (const c of profileCategories) {
+    if (!categorySlugsByVendor.has(c.vendorId)) categorySlugsByVendor.set(c.vendorId, []);
+    categorySlugsByVendor.get(c.vendorId)!.push(c.categorySlug);
+  }
+
+  const leadCountByVendor = new Map<string, number>();
+  for (const l of leads) {
+    leadCountByVendor.set(l.vendorId, (leadCountByVendor.get(l.vendorId) || 0) + 1);
+  }
+
+  const activeProfilesBySlug = new Map<string, number>();
+  const leadsBySlug = new Map<string, number>();
+  for (const [vendorId, slugs] of categorySlugsByVendor) {
+    const isActive = activeProfileIds.has(vendorId);
+    const vendorLeadCount = leadCountByVendor.get(vendorId) || 0;
+    for (const slug of slugs) {
+      if (isActive) activeProfilesBySlug.set(slug, (activeProfilesBySlug.get(slug) || 0) + 1);
+      leadsBySlug.set(slug, (leadsBySlug.get(slug) || 0) + vendorLeadCount);
+    }
+  }
+
+  const byCategory = [...new Set([...activeProfilesBySlug.keys(), ...leadsBySlug.keys()])]
+    .map((slug) => ({
+      slug,
+      label: labelBySlug.get(slug) || slug,
+      activeProfiles: activeProfilesBySlug.get(slug) || 0,
+      leads: leadsBySlug.get(slug) || 0,
+    }))
+    .sort((a, b) => b.leads - a.leads);
+
+  const topVendors = activeProfiles
+    .map((p) => ({ id: p.id, businessName: p.businessName, alias: p.alias, leads: leadCountByVendor.get(p.id) || 0 }))
+    .sort((a, b) => b.leads - a.leads)
+    .slice(0, 5);
+
+  return {
+    requests: {
+      total: requests.length,
+      pending: requests.filter((r) => r.status === "pending").length,
+      approved: requests.filter((r) => r.status === "approved").length,
+      rejected: requests.filter((r) => r.status === "rejected").length,
+    },
+    profiles: {
+      total: profiles.length,
+      active: activeProfiles.length,
+      incomplete: incompleteProfiles.length,
+      suspended: suspendedProfiles.length,
+    },
+    leads: {
+      total: leads.length,
+      last30Days: leadsLast30Days,
+    },
+    byCategory,
+    topVendors,
+  };
+}
+
 export default router;
