@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MapPin, Sparkles, Award } from "lucide-react";
+import { MapPin, Award } from "lucide-react";
 import { fetchVendorCategories, iconeDeCategoriePrestataire, TOUTES_CATEGORIES_PRESTATAIRES, VendorCategory } from "../lib/vendorCategories";
 import { fetchVendorPublicStats } from "../lib/vendorPublicStats";
 import { SkeletonBlock } from "./Skeleton";
@@ -62,75 +62,96 @@ export default function VendorsMarketplacePage({ onViewVendor, onBecomeVendor }:
 
   return (
     <div id="vendors-marketplace-page" className="space-y-6 py-2">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-black text-gray-900 sm:text-3xl">Prestataires événementiels</h1>
-          <p className="mt-1.5 text-sm text-gray-500">
-            Photographes, régies son et lumière, MC, traiteurs, décorateurs... trouvez qui il vous
-            faut pour votre prochain événement.
-          </p>
-          {publicStats && publicStats.activeVendors > 0 && (
-            <p className="mt-1.5 text-xs font-bold text-orange-600">
-              {publicStats.activeVendors} prestataire{publicStats.activeVendors > 1 ? "s" : ""} déjà inscrit{publicStats.activeVendors > 1 ? "s" : ""}
-              {publicStats.leadsLast30Days > 0 && ` · ${publicStats.leadsLast30Days} devis envoyé${publicStats.leadsLast30Days > 1 ? "s" : ""} ce mois-ci`}
+      {/* Section héro : point d'entrée du marché. Photo plein cadre, nette (pas de flou) —
+          un voile sombre uniforme, plutôt qu'un dégradé blanc, garde titre, sous-titre et
+          boutons lisibles sur cette photo déjà très claire (fond blanc, photographe net à
+          gauche). */}
+      <div className="relative overflow-hidden rounded-3xl shadow-xl" id="vendors-hero">
+        <img
+          src="/vendors-hero.jpg"
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+        <div className="absolute inset-0 bg-black/55" aria-hidden="true" />
+        <div className="relative px-6 py-12 sm:px-10 sm:py-16">
+          <div className="mx-auto max-w-2xl text-center">
+            <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">
+              Trouvez le prestataire idéal pour votre événement
+            </h1>
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-gray-100 sm:text-base">
+              Photographes, régies son et lumière, MC, traiteurs, décorateurs... des prestataires vérifiés par
+              l'équipe ClicBillet, prêts à recevoir votre demande de devis.
             </p>
-          )}
-        </div>
 
-        {onBecomeVendor && (
-          <button
-            id="marketplace-become-vendor-btn"
-            onClick={onBecomeVendor}
-            className="flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-orange-600 px-4 py-2.5 text-xs font-black text-white shadow-md shadow-orange-100 transition-colors hover:bg-orange-700"
-          >
-            <Sparkles className="h-4 w-4" />
-            Devenir prestataire
-          </button>
-        )}
+            {publicStats && publicStats.activeVendors > 0 && (
+              <p className="mx-auto mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs font-bold text-gray-200">
+                <span>{publicStats.activeVendors} prestataire{publicStats.activeVendors > 1 ? "s" : ""} déjà inscrit{publicStats.activeVendors > 1 ? "s" : ""}</span>
+                {publicStats.leadsLast30Days > 0 && (
+                  <>
+                    <span className="text-gray-400">·</span>
+                    <span>{publicStats.leadsLast30Days} devis envoyé{publicStats.leadsLast30Days > 1 ? "s" : ""} ce mois-ci</span>
+                  </>
+                )}
+              </p>
+            )}
+
+            <div className="mx-auto mt-8 flex max-w-lg flex-col gap-2.5 sm:flex-row">
+              <div className="relative flex-1">
+                <MapPin className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  id="vendors-hero-city-input"
+                  type="text"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="Chercher par ville (ex : Abidjan)"
+                  className="w-full rounded-full border border-gray-200 bg-white py-3 pl-10 pr-4 text-sm text-gray-900 shadow-lg outline-none placeholder:text-gray-400 focus:border-orange-500 focus:ring-2 focus:ring-orange-100"
+                />
+              </div>
+
+              {onBecomeVendor && (
+                <button
+                  id="marketplace-become-vendor-btn"
+                  onClick={onBecomeVendor}
+                  className="flex shrink-0 items-center justify-center gap-1.5 rounded-full bg-orange-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-orange-900/10 transition-colors hover:bg-orange-700"
+                >
+                  Devenir prestataire
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1 sm:max-w-xs">
-          <MapPin className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
-            placeholder="Filtrer par ville"
-            className="w-full rounded-full border border-gray-200 bg-white py-2.5 pl-10 pr-4 text-sm outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100"
-          />
-        </div>
-
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            onClick={() => setSelectedCategory(TOUTES_CATEGORIES_PRESTATAIRES)}
-            className={`flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-bold transition-colors ${
-              selectedCategory === TOUTES_CATEGORIES_PRESTATAIRES
-                ? "border-orange-600 bg-orange-600 text-white"
-                : "border-gray-200 bg-white text-gray-600 hover:border-orange-300"
-            }`}
-          >
-            Toutes catégories
-          </button>
-          {categories.map((cat) => {
-            const Icone = iconeDeCategoriePrestataire(cat.icon);
-            const selected = selectedCategory === cat.slug;
-            return (
-              <button
-                key={cat.slug}
-                onClick={() => setSelectedCategory(cat.slug)}
-                className={`flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-bold transition-colors ${
-                  selected
-                    ? "border-orange-600 bg-orange-600 text-white"
-                    : "border-gray-200 bg-white text-gray-600 hover:border-orange-300"
-                }`}
-              >
-                <Icone className="h-3.5 w-3.5" />
-                {cat.label}
-              </button>
-            );
-          })}
-        </div>
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          onClick={() => setSelectedCategory(TOUTES_CATEGORIES_PRESTATAIRES)}
+          className={`flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-bold transition-colors ${
+            selectedCategory === TOUTES_CATEGORIES_PRESTATAIRES
+              ? "border-orange-600 bg-orange-600 text-white"
+              : "border-gray-200 bg-white text-gray-600 hover:border-orange-300"
+          }`}
+        >
+          Toutes catégories
+        </button>
+        {categories.map((cat) => {
+          const Icone = iconeDeCategoriePrestataire(cat.icon);
+          const selected = selectedCategory === cat.slug;
+          return (
+            <button
+              key={cat.slug}
+              onClick={() => setSelectedCategory(cat.slug)}
+              className={`flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-bold transition-colors ${
+                selected
+                  ? "border-orange-600 bg-orange-600 text-white"
+                  : "border-gray-200 bg-white text-gray-600 hover:border-orange-300"
+              }`}
+            >
+              <Icone className="h-3.5 w-3.5" />
+              {cat.label}
+            </button>
+          );
+        })}
       </div>
 
       {loading ? (
