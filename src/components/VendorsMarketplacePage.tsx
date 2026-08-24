@@ -63,8 +63,9 @@ export default function VendorsMarketplacePage({ onViewVendor, onBecomeVendor }:
   return (
     <div id="vendors-marketplace-page" className="space-y-6 py-2">
       {/* Section héro : point d'entrée du marché. Photo plein cadre, nette (pas de flou) —
-          un dégradé blanc, plus marqué derrière le texte qu'au niveau de la photo, garde
-          titre, sous-titre et boutons lisibles sans étouffer l'image. */}
+          un voile sombre uniforme, plutôt qu'un dégradé blanc, garde titre, sous-titre et
+          boutons lisibles sur cette photo déjà très claire (fond blanc, photographe net à
+          gauche). */}
       <div className="relative overflow-hidden rounded-3xl shadow-xl" id="vendors-hero">
         <img
           src="/vendors-hero.jpg"
@@ -72,23 +73,23 @@ export default function VendorsMarketplacePage({ onViewVendor, onBecomeVendor }:
           aria-hidden="true"
           className="absolute inset-0 h-full w-full object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-white/85 via-white/70 to-white/85" aria-hidden="true" />
+        <div className="absolute inset-0 bg-black/55" aria-hidden="true" />
         <div className="relative px-6 py-12 sm:px-10 sm:py-16">
           <div className="mx-auto max-w-2xl text-center">
-            <h1 className="text-3xl font-black tracking-tight text-gray-900 sm:text-4xl">
+            <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">
               Trouvez le prestataire idéal pour votre événement
             </h1>
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-gray-700 sm:text-base">
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-gray-100 sm:text-base">
               Photographes, régies son et lumière, MC, traiteurs, décorateurs... des prestataires vérifiés par
               l'équipe ClicBillet, prêts à recevoir votre demande de devis.
             </p>
 
             {publicStats && publicStats.activeVendors > 0 && (
-              <p className="mx-auto mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs font-bold text-orange-700">
+              <p className="mx-auto mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs font-bold text-gray-200">
                 <span>{publicStats.activeVendors} prestataire{publicStats.activeVendors > 1 ? "s" : ""} déjà inscrit{publicStats.activeVendors > 1 ? "s" : ""}</span>
                 {publicStats.leadsLast30Days > 0 && (
                   <>
-                    <span className="text-orange-300">·</span>
+                    <span className="text-gray-400">·</span>
                     <span>{publicStats.leadsLast30Days} devis envoyé{publicStats.leadsLast30Days > 1 ? "s" : ""} ce mois-ci</span>
                   </>
                 )}
