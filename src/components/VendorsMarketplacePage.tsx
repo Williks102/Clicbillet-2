@@ -62,75 +62,91 @@ export default function VendorsMarketplacePage({ onViewVendor, onBecomeVendor }:
 
   return (
     <div id="vendors-marketplace-page" className="space-y-6 py-2">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-black text-gray-900 sm:text-3xl">Prestataires événementiels</h1>
-          <p className="mt-1.5 text-sm text-gray-500">
-            Photographes, régies son et lumière, MC, traiteurs, décorateurs... trouvez qui il vous
-            faut pour votre prochain événement.
-          </p>
-          {publicStats && publicStats.activeVendors > 0 && (
-            <p className="mt-1.5 text-xs font-bold text-orange-600">
-              {publicStats.activeVendors} prestataire{publicStats.activeVendors > 1 ? "s" : ""} déjà inscrit{publicStats.activeVendors > 1 ? "s" : ""}
-              {publicStats.leadsLast30Days > 0 && ` · ${publicStats.leadsLast30Days} devis envoyé${publicStats.leadsLast30Days > 1 ? "s" : ""} ce mois-ci`}
+      {/* Section héro : point d'entrée du marché, jumelle dans son gabarit des en-têtes
+          OrganizerProfilePage/VendorProfilePage (même dégradé), mais avec sa propre fonction —
+          rechercher (ville) plutôt que présenter une fiche. */}
+      <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-orange-600 via-orange-500 to-amber-500 text-white shadow-xl" id="vendors-hero">
+        <div className="px-6 py-12 sm:px-10 sm:py-16">
+          <div className="mx-auto max-w-2xl text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15">
+              <Sparkles className="h-7 w-7" />
+            </div>
+            <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
+              Trouvez le prestataire idéal pour votre événement
+            </h1>
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-orange-50 sm:text-base">
+              Photographes, régies son et lumière, MC, traiteurs, décorateurs... des prestataires vérifiés par
+              l'équipe ClicBillet, prêts à recevoir votre demande de devis.
             </p>
-          )}
-        </div>
 
-        {onBecomeVendor && (
-          <button
-            id="marketplace-become-vendor-btn"
-            onClick={onBecomeVendor}
-            className="flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-orange-600 px-4 py-2.5 text-xs font-black text-white shadow-md shadow-orange-100 transition-colors hover:bg-orange-700"
-          >
-            <Sparkles className="h-4 w-4" />
-            Devenir prestataire
-          </button>
-        )}
+            {publicStats && publicStats.activeVendors > 0 && (
+              <p className="mx-auto mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs font-bold text-orange-100">
+                <span>{publicStats.activeVendors} prestataire{publicStats.activeVendors > 1 ? "s" : ""} déjà inscrit{publicStats.activeVendors > 1 ? "s" : ""}</span>
+                {publicStats.leadsLast30Days > 0 && (
+                  <>
+                    <span className="text-orange-300">·</span>
+                    <span>{publicStats.leadsLast30Days} devis envoyé{publicStats.leadsLast30Days > 1 ? "s" : ""} ce mois-ci</span>
+                  </>
+                )}
+              </p>
+            )}
+
+            <div className="mx-auto mt-8 flex max-w-lg flex-col gap-2.5 sm:flex-row">
+              <div className="relative flex-1">
+                <MapPin className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  id="vendors-hero-city-input"
+                  type="text"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="Chercher par ville (ex : Abidjan)"
+                  className="w-full rounded-full border-0 bg-white py-3 pl-10 pr-4 text-sm text-gray-900 shadow-lg outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-white/70"
+                />
+              </div>
+
+              {onBecomeVendor && (
+                <button
+                  id="marketplace-become-vendor-btn"
+                  onClick={onBecomeVendor}
+                  className="flex shrink-0 items-center justify-center gap-1.5 rounded-full border border-white/40 px-5 py-3 text-xs font-black text-white transition-colors hover:bg-white/10"
+                >
+                  Devenir prestataire
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1 sm:max-w-xs">
-          <MapPin className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
-            placeholder="Filtrer par ville"
-            className="w-full rounded-full border border-gray-200 bg-white py-2.5 pl-10 pr-4 text-sm outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-100"
-          />
-        </div>
-
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            onClick={() => setSelectedCategory(TOUTES_CATEGORIES_PRESTATAIRES)}
-            className={`flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-bold transition-colors ${
-              selectedCategory === TOUTES_CATEGORIES_PRESTATAIRES
-                ? "border-orange-600 bg-orange-600 text-white"
-                : "border-gray-200 bg-white text-gray-600 hover:border-orange-300"
-            }`}
-          >
-            Toutes catégories
-          </button>
-          {categories.map((cat) => {
-            const Icone = iconeDeCategoriePrestataire(cat.icon);
-            const selected = selectedCategory === cat.slug;
-            return (
-              <button
-                key={cat.slug}
-                onClick={() => setSelectedCategory(cat.slug)}
-                className={`flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-bold transition-colors ${
-                  selected
-                    ? "border-orange-600 bg-orange-600 text-white"
-                    : "border-gray-200 bg-white text-gray-600 hover:border-orange-300"
-                }`}
-              >
-                <Icone className="h-3.5 w-3.5" />
-                {cat.label}
-              </button>
-            );
-          })}
-        </div>
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          onClick={() => setSelectedCategory(TOUTES_CATEGORIES_PRESTATAIRES)}
+          className={`flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-bold transition-colors ${
+            selectedCategory === TOUTES_CATEGORIES_PRESTATAIRES
+              ? "border-orange-600 bg-orange-600 text-white"
+              : "border-gray-200 bg-white text-gray-600 hover:border-orange-300"
+          }`}
+        >
+          Toutes catégories
+        </button>
+        {categories.map((cat) => {
+          const Icone = iconeDeCategoriePrestataire(cat.icon);
+          const selected = selectedCategory === cat.slug;
+          return (
+            <button
+              key={cat.slug}
+              onClick={() => setSelectedCategory(cat.slug)}
+              className={`flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-bold transition-colors ${
+                selected
+                  ? "border-orange-600 bg-orange-600 text-white"
+                  : "border-gray-200 bg-white text-gray-600 hover:border-orange-300"
+              }`}
+            >
+              <Icone className="h-3.5 w-3.5" />
+              {cat.label}
+            </button>
+          );
+        })}
       </div>
 
       {loading ? (
