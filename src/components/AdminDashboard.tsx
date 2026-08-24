@@ -5,7 +5,7 @@ import VendorCategorySettings from "./admin/VendorCategorySettings";
 import {
   Building2, Users, Calendar, DollarSign, Trash2, ShieldCheck,
   Search, ShieldAlert, Sparkles, Ticket as TicketIcon, TrendingUp, Filter, Percent,
-  Image as ImageIcon, RefreshCw, Store, ArrowUpCircle, ArrowDownCircle, BarChart3, Settings, Camera, Inbox, Award, AlertCircle
+  Image as ImageIcon, RefreshCw, Store, ArrowUpCircle, ArrowDownCircle, BarChart3, Settings, Camera, Inbox, Award, AlertCircle, UserPlus
 } from "lucide-react";
 import { authFetch } from "../lib/apiClient";
 import { isEventPast } from "../lib/eventStatus";
@@ -14,6 +14,7 @@ import { PageSkeleton } from "./Skeleton";
 import { isVipTier, formatTierLabel } from "../lib/ticketTier";
 import DashboardMobileMenu from "./DashboardMobileMenu";
 import CommissionSheet from "./CommissionSheet";
+import CreateAccountSheet from "./CreateAccountSheet";
 import AdminReports from "./AdminReports";
 import { normalizeReport } from "../lib/reportStats";
 
@@ -141,6 +142,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
   };
   const [roleFilter, setRoleFilter] = useState("Tous");
   const [commissionSheetEvent, setCommissionSheetEvent] = useState<Event | null>(null);
+  const [createAccountOpen, setCreateAccountOpen] = useState(false);
 
   // File de modération des demandes de passage acheteur -> organisateur.
   const [organizerRequests, setOrganizerRequests] = useState<OrganizerRequest[]>([]);
@@ -996,6 +998,15 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                 Roster des Membres & Comptes ({filteredUsers.length})
               </h4>
               <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  id="open-create-account-btn"
+                  onClick={() => setCreateAccountOpen(true)}
+                  className="flex items-center gap-1.5 rounded-xl bg-orange-600 px-3.5 py-2.5 text-xs font-black text-white transition-colors hover:bg-orange-700"
+                >
+                  <UserPlus className="h-3.5 w-3.5" />
+                  Créer un compte
+                </button>
                 {/* Search */}
                 <div className="relative max-w-xs">
                   <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-gray-400" />
@@ -1601,6 +1612,13 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
           platformDefaultRate={stats.commissionRate}
           onClose={() => setCommissionSheetEvent(null)}
           onSave={(rate) => handleSaveCommission(commissionSheetEvent, rate)}
+        />
+      )}
+
+      {createAccountOpen && (
+        <CreateAccountSheet
+          onClose={() => setCreateAccountOpen(false)}
+          onCreated={fetchAdminData}
         />
       )}
     </div>

@@ -8,22 +8,17 @@ import { sendAdminVendorRequestEmail, sendVendorRequestDecisionEmail } from "../
 import { vendorRequestRateLimiter } from "../lib/rateLimiters.js";
 import { validateVendorRequest } from "../lib/validators.js";
 import { getVendorCategories } from "../lib/vendorCategories.js";
+import { createVendorProfileForUser } from "../lib/vendorProfiles.js";
 
 const router = express.Router();
 
 // Demande de fiche prestataire, jumeau de server/routes/organizerRequests.ts. Différence
 // clé : l'approbation ne change PAS users.role (un prestataire n'est pas un rôle) — elle crée
 // une ligne vendor_profiles (+ vendor_profile_categories) rattachée au compte demandeur.
-// N'importe quel compte (client, organisateur, admin) peut demander une fiche.
-
-// Programme "prestataire fondateur" (cf. supabase_setup.sql section 31) : toute fiche créée
-// avant cette date porte le badge "Fondateur", figé définitivement à la création. Repousser
-// cette constante prolonge le programme ; la retirer (mettre une date passée) le clôt — dans
-// les deux cas, les fiches déjà créées gardent le statut qu'elles avaient au moment voulu.
-const VENDOR_FOUNDER_PROGRAM_ENDS = new Date("2027-06-30T23:59:59Z");
-function isWithinFounderProgram(): boolean {
-  return new Date() <= VENDOR_FOUNDER_PROGRAM_ENDS;
-}
+// N'importe quel compte (client, organisateur, admin) peut demander une fiche. Un admin peut
+// aussi créer directement un compte ET sa fiche sans passer par une demande
+// (POST /api/admin/users, server/routes/admin.ts) — les deux chemins créent la même ligne
+// vendor_profiles via server/lib/vendorProfiles.ts.
 
 type RequestStatus = "pending" | "approved" | "rejected";
 
@@ -66,11 +61,6 @@ function mapSupabaseRow(row: any, publicCode?: string | null): MappedVendorReque
 function localRequests(db: any): any[] {
   if (!Array.isArray(db.vendorRequests)) db.vendorRequests = [];
   return db.vendorRequests;
-}
-
-function localProfiles(db: any): any[] {
-  if (!Array.isArray(db.vendorProfiles)) db.vendorProfiles = [];
-  return db.vendorProfiles;
 }
 
 // --- Côté demandeur ---
@@ -286,33 +276,16 @@ router.patch("/api/admin/vendor-requests/:id", requireAuth, requireRole("admin")
       // reste "pending" et pourra être retraitée, plutôt que de marquer une demande approuvée
       // sans fiche derrière — même ordre de garde que l'approbation organisateur.
       if (status === "approved") {
-        // Un compte n'a qu'un seul profil prestataire (vendor_profiles_one_per_user) : une
-        // demande approuvée deux fois pour le même compte échouerait sinon silencieusement en
-        // écrasant la fiche existante par un upsert. On refuse explicitement.
-        const { data: existingProfile } = await supabase
-          .from("vendor_profiles").select("id").eq("user_id", request.user_id).maybeSingle();
-        if (existingProfile) {
-          return res.status(409).json({ error: "Ce compte a déjà une fiche prestataire." });
-        }
-
-        const vendorId = `vnd-${crypto.randomUUID()}`;
-        const { error: profileError } = await supabase.from("vendor_profiles").insert({
-          id: vendorId,
-          user_id: request.user_id,
-          business_name: request.business_name,
+        const result = await createVendorProfileForUser({
+          userId: request.user_id,
+          businessName: request.business_name,
           phone: request.phone,
           city: request.city,
           description: request.description,
-          founding_member: isWithinFounderProgram()
+          categorySlugs: request.category_slugs || []
         });
-        if (profileError) throw profileError;
-
-        const categorySlugs: string[] = request.category_slugs || [];
-        if (categorySlugs.length > 0) {
-          const { error: catError } = await supabase.from("vendor_profile_categories").insert(
-            categorySlugs.map((slug) => ({ vendor_id: vendorId, category_slug: slug }))
-          );
-          if (catError) throw catError;
+        if (!result.ok) {
+          return res.status(result.status).json({ error: result.error });
         }
       }
 
@@ -351,25 +324,17 @@ router.patch("/api/admin/vendor-requests/:id", requireAuth, requireRole("admin")
   }
 
   if (status === "approved") {
-    const profiles = localProfiles(db);
-    if (profiles.some((p: any) => p.userId === request.userId)) {
-      return res.status(409).json({ error: "Ce compte a déjà une fiche prestataire." });
-    }
-    profiles.push({
-      id: `vnd-${crypto.randomUUID()}`,
+    const result = await createVendorProfileForUser({
       userId: request.userId,
-      alias: null,
       businessName: request.businessName,
       phone: request.phone,
       city: request.city,
       description: request.description,
-      coverImage: null,
-      portfolioImages: [],
-      categorySlugs: request.categorySlugs || [],
-      foundingMember: isWithinFounderProgram(),
-      active: true,
-      createdAt: new Date().toISOString()
-    });
+      categorySlugs: request.categorySlugs || []
+    }, db);
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error });
+    }
   }
 
   request.status = status;
