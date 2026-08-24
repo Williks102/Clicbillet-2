@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MapPin, Sparkles, Award } from "lucide-react";
+import { MapPin, Award } from "lucide-react";
 import { fetchVendorCategories, iconeDeCategoriePrestataire, TOUTES_CATEGORIES_PRESTATAIRES, VendorCategory } from "../lib/vendorCategories";
 import { fetchVendorPublicStats } from "../lib/vendorPublicStats";
 import { SkeletonBlock } from "./Skeleton";
@@ -62,29 +62,37 @@ export default function VendorsMarketplacePage({ onViewVendor, onBecomeVendor }:
 
   return (
     <div id="vendors-marketplace-page" className="space-y-6 py-2">
-      {/* Section héro : point d'entrée du marché, jumelle dans son gabarit des en-têtes
-          OrganizerProfilePage/VendorProfilePage (même dégradé), mais avec sa propre fonction —
-          rechercher (ville) plutôt que présenter une fiche. */}
-      <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-orange-600 via-orange-500 to-amber-500 text-white shadow-xl" id="vendors-hero">
-        <div className="px-6 py-12 sm:px-10 sm:py-16">
+      {/* Section héro : point d'entrée du marché. Photo plein cadre plutôt que le dégradé uni
+          des en-têtes de fiche (OrganizerProfilePage/VendorProfilePage) — voile sombre entre
+          la photo et le texte pour garder titre, sous-titre et boutons lisibles quelle que
+          soit la photo utilisée. */}
+      <div className="relative overflow-hidden rounded-3xl text-white shadow-xl" id="vendors-hero">
+        {/* Légèrement floutée et agrandie (scale-105, pour que le flou ne laisse pas voir de
+            bord net) : la photo porte son propre texte de marque, qui resterait lisible et
+            entrerait en collision avec le titre si elle restait nette. */}
+        <img
+          src="/vendors-hero.jpg"
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 h-full w-full scale-110 object-cover blur-md"
+        />
+        <div className="absolute inset-0 bg-black/70" aria-hidden="true" />
+        <div className="relative px-6 py-12 sm:px-10 sm:py-16">
           <div className="mx-auto max-w-2xl text-center">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15">
-              <Sparkles className="h-7 w-7" />
-            </div>
             <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
               Trouvez le prestataire idéal pour votre événement
             </h1>
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-orange-50 sm:text-base">
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-gray-100 sm:text-base">
               Photographes, régies son et lumière, MC, traiteurs, décorateurs... des prestataires vérifiés par
               l'équipe ClicBillet, prêts à recevoir votre demande de devis.
             </p>
 
             {publicStats && publicStats.activeVendors > 0 && (
-              <p className="mx-auto mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs font-bold text-orange-100">
+              <p className="mx-auto mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs font-bold text-gray-200">
                 <span>{publicStats.activeVendors} prestataire{publicStats.activeVendors > 1 ? "s" : ""} déjà inscrit{publicStats.activeVendors > 1 ? "s" : ""}</span>
                 {publicStats.leadsLast30Days > 0 && (
                   <>
-                    <span className="text-orange-300">·</span>
+                    <span className="text-gray-400">·</span>
                     <span>{publicStats.leadsLast30Days} devis envoyé{publicStats.leadsLast30Days > 1 ? "s" : ""} ce mois-ci</span>
                   </>
                 )}
