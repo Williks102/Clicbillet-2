@@ -1,5 +1,7 @@
 import express from "express";
 import sharp from "sharp";
+import crypto from "crypto";
+import bcrypt from "bcryptjs";
 import { isSupabaseEnabled, supabase, supabaseAdmin } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { requireAuth, requireRole } from "../lib/auth.js";
@@ -11,6 +13,8 @@ import { findTicketsByReference, confirmPaymentForTickets } from "../lib/payment
 import { decryptPayoutDetails } from "../lib/payoutEncryption.js";
 import { getCategories, slugifyCategory, inValiderCacheCategories } from "../lib/categories.js";
 import { getVendorCategories, inValiderCacheVendorCategories } from "../lib/vendorCategories.js";
+import { createVendorProfileForUser } from "../lib/vendorProfiles.js";
+import { ensureUserPublicCode } from "../lib/publicCode.js";
 
 const router = express.Router();
 
@@ -167,6 +171,157 @@ router.post("/api/admin/validate-payment", requireAuth, requireRole("admin"), as
     success: true,
     message: wasSupabase ? "Paiement validé avec succès." : "Paiement validé localement.",
     confirmedCount
+  });
+});
+
+// Création directe d'un compte organisateur ou prestataire par un admin — pour distribuer des
+// comptes prêts à l'emploi à des personnes déjà identifiées, sans leur faire passer le parcours
+// habituel (inscription + lien de confirmation par e-mail, puis pour un prestataire une demande
+// supplémentaire à valider). Le mot de passe est généré ici et renvoyé UNE SEULE FOIS dans la
+// réponse : ni stocké en clair, ni renvoyé par un autre endpoint ensuite — à l'admin de le noter
+// et de le transmettre (l'intéressé le change depuis son profil dès sa première connexion).
+//
+// Volontairement restreint à "client"/"organizer" : créer un compte admin par ce raccourci
+// serait une porte dérobée trop commode, sans les garde-fous qu'on voudrait autour d'un geste
+// aussi sensible.
+router.post("/api/admin/users", requireAuth, requireRole("admin"), async (req: express.Request, res: express.Response) => {
+  const { name, email, role, vendorProfile } = req.body;
+
+  const trimmedName = String(name || "").trim();
+  if (!trimmedName || trimmedName.length > 120) {
+    return res.status(400).json({ error: "Le nom est requis (120 caractères maximum)." });
+  }
+
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!emailRegex.test(normalizedEmail)) {
+    return res.status(400).json({ error: "L'adresse e-mail est invalide." });
+  }
+
+  if (role !== "client" && role !== "organizer") {
+    return res.status(400).json({ error: "Rôle invalide : 'client' ou 'organizer' attendu." });
+  }
+
+  let vendorInput: { businessName: string; phone: string; city: string; description: string | null; categorySlugs: string[] } | null = null;
+  if (vendorProfile) {
+    const businessName = String(vendorProfile.businessName || "").trim();
+    if (!businessName || businessName.length > 120) {
+      return res.status(400).json({ error: "Le nom de la structure prestataire est requis (120 caractères maximum)." });
+    }
+    const phone = String(vendorProfile.phone || "").replace(/\s+/g, "");
+    if (!phone || phone.length < 8 || phone.length > 20 || !/^\+?\d+$/.test(phone)) {
+      return res.status(400).json({ error: "Le téléphone du prestataire est invalide." });
+    }
+    const city = String(vendorProfile.city || "").trim();
+    if (!city || city.length > 100) {
+      return res.status(400).json({ error: "La ville du prestataire est requise (100 caractères maximum)." });
+    }
+    const categorySlugs: string[] = Array.isArray(vendorProfile.categorySlugs) ? vendorProfile.categorySlugs : [];
+    if (categorySlugs.length < 1 || categorySlugs.length > 3 || !categorySlugs.every((s) => typeof s === "string" && s.trim())) {
+      return res.status(400).json({ error: "Choisissez entre 1 et 3 catégories pour le prestataire." });
+    }
+    const activeSlugs = new Set((await getVendorCategories()).map((c) => c.slug));
+    const resolvedSlugs = [...new Set(categorySlugs.map((s) => s.trim()))];
+    if (resolvedSlugs.some((s) => !activeSlugs.has(s))) {
+      return res.status(400).json({ error: "Une ou plusieurs catégories choisies n'existent pas ou plus." });
+    }
+    vendorInput = {
+      businessName,
+      phone,
+      city,
+      description: String(vendorProfile.description || "").trim().slice(0, 1000) || null,
+      categorySlugs: resolvedSlugs
+    };
+  }
+
+  // Assez long pour ne pas être trivialement devinable, sans caractères qui posent problème à
+  // l'oral/au copier-coller (base64url : lettres, chiffres, "-", "_").
+  const temporaryPassword = crypto.randomBytes(9).toString("base64url");
+
+  if (isSupabaseEnabled && supabaseAdmin) {
+    try {
+      const { data: existingUser } = await supabaseAdmin.from("users").select("id").eq("email", normalizedEmail).maybeSingle();
+      if (existingUser) {
+        return res.status(409).json({ error: "Un compte existe déjà avec cet e-mail." });
+      }
+
+      // auth.admin.createUser (et non signUp) : contrairement à l'inscription publique, c'est
+      // ici l'admin qui vérifie l'identité de la personne avant de créer le compte — email_confirm
+      // à true évite un e-mail de confirmation inutile pour un compte remis en main propre.
+      const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
+        email: normalizedEmail,
+        password: temporaryPassword,
+        email_confirm: true,
+        user_metadata: { name: trimmedName, role }
+      });
+      if (createError || !created?.user) {
+        return res.status(400).json({ error: createError?.message || "Échec de la création du compte." });
+      }
+
+      const { data: profileRow, error: profileError } = await supabaseAdmin
+        .from("users")
+        .insert({ id: created.user.id, email: normalizedEmail, password: "[SECURE_SUPABASE_AUTH]", name: trimmedName, role })
+        .select()
+        .single();
+      if (profileError) throw profileError;
+
+      const publicCode = await ensureUserPublicCode(profileRow.id);
+
+      let vendorProfileId: string | null = null;
+      let vendorProfileError: string | null = null;
+      if (vendorInput) {
+        try {
+          const result = await createVendorProfileForUser({ userId: profileRow.id, ...vendorInput });
+          if (result.ok) vendorProfileId = result.id;
+          else vendorProfileError = result.error;
+        } catch (err: any) {
+          console.error("[Supabase Error] Création de la fiche prestataire pour un compte créé par l'admin :", err.message);
+          vendorProfileError = "Le compte a été créé, mais la fiche prestataire n'a pas pu être créée. Réessayez depuis la fiche « Devenir prestataire ».";
+        }
+      }
+
+      return res.status(201).json({
+        user: { id: profileRow.id, email: profileRow.email, name: profileRow.name, role: profileRow.role, publicCode },
+        temporaryPassword,
+        vendorProfileId,
+        vendorProfileError
+      });
+    } catch (err: any) {
+      console.error("[Supabase Error] Création de compte par l'admin :", err.message);
+      return res.status(500).json({ error: "Échec de la création du compte." });
+    }
+  }
+
+  const db = getDB();
+  if (db.users.some((u: any) => u.email.toLowerCase() === normalizedEmail)) {
+    return res.status(409).json({ error: "Un compte existe déjà avec cet e-mail." });
+  }
+
+  const newUser = {
+    id: `usr-${crypto.randomUUID()}`,
+    email: normalizedEmail,
+    password: bcrypt.hashSync(temporaryPassword, 10),
+    name: trimmedName,
+    role
+  };
+  db.users.push(newUser);
+
+  let vendorProfileId: string | null = null;
+  let vendorProfileError: string | null = null;
+  if (vendorInput) {
+    const result = await createVendorProfileForUser({ userId: newUser.id, ...vendorInput }, db);
+    if (result.ok) vendorProfileId = result.id;
+    else vendorProfileError = result.error;
+  }
+
+  saveDB(db);
+  const publicCode = await ensureUserPublicCode(newUser.id);
+
+  res.status(201).json({
+    user: { id: newUser.id, email: newUser.email, name: newUser.name, role: newUser.role, publicCode },
+    temporaryPassword,
+    vendorProfileId,
+    vendorProfileError
   });
 });
 
