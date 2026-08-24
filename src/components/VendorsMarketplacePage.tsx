@@ -62,37 +62,33 @@ export default function VendorsMarketplacePage({ onViewVendor, onBecomeVendor }:
 
   return (
     <div id="vendors-marketplace-page" className="space-y-6 py-2">
-      {/* Section héro : point d'entrée du marché. Photo plein cadre plutôt que le dégradé uni
-          des en-têtes de fiche (OrganizerProfilePage/VendorProfilePage) — voile sombre entre
-          la photo et le texte pour garder titre, sous-titre et boutons lisibles quelle que
-          soit la photo utilisée. */}
-      <div className="relative overflow-hidden rounded-3xl text-white shadow-xl" id="vendors-hero">
-        {/* Légèrement floutée et agrandie (scale-105, pour que le flou ne laisse pas voir de
-            bord net) : la photo porte son propre texte de marque, qui resterait lisible et
-            entrerait en collision avec le titre si elle restait nette. */}
+      {/* Section héro : point d'entrée du marché. Photo plein cadre, nette (pas de flou) —
+          un dégradé blanc, plus marqué derrière le texte qu'au niveau de la photo, garde
+          titre, sous-titre et boutons lisibles sans étouffer l'image. */}
+      <div className="relative overflow-hidden rounded-3xl shadow-xl" id="vendors-hero">
         <img
           src="/vendors-hero.jpg"
           alt=""
           aria-hidden="true"
-          className="absolute inset-0 h-full w-full scale-110 object-cover blur-md"
+          className="absolute inset-0 h-full w-full object-cover"
         />
-        <div className="absolute inset-0 bg-black/70" aria-hidden="true" />
+        <div className="absolute inset-0 bg-gradient-to-b from-white/85 via-white/70 to-white/85" aria-hidden="true" />
         <div className="relative px-6 py-12 sm:px-10 sm:py-16">
           <div className="mx-auto max-w-2xl text-center">
-            <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
+            <h1 className="text-3xl font-black tracking-tight text-gray-900 sm:text-4xl">
               Trouvez le prestataire idéal pour votre événement
             </h1>
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-gray-100 sm:text-base">
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-gray-700 sm:text-base">
               Photographes, régies son et lumière, MC, traiteurs, décorateurs... des prestataires vérifiés par
               l'équipe ClicBillet, prêts à recevoir votre demande de devis.
             </p>
 
             {publicStats && publicStats.activeVendors > 0 && (
-              <p className="mx-auto mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs font-bold text-gray-200">
+              <p className="mx-auto mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs font-bold text-orange-700">
                 <span>{publicStats.activeVendors} prestataire{publicStats.activeVendors > 1 ? "s" : ""} déjà inscrit{publicStats.activeVendors > 1 ? "s" : ""}</span>
                 {publicStats.leadsLast30Days > 0 && (
                   <>
-                    <span className="text-gray-400">·</span>
+                    <span className="text-orange-300">·</span>
                     <span>{publicStats.leadsLast30Days} devis envoyé{publicStats.leadsLast30Days > 1 ? "s" : ""} ce mois-ci</span>
                   </>
                 )}
@@ -108,7 +104,7 @@ export default function VendorsMarketplacePage({ onViewVendor, onBecomeVendor }:
                   value={city}
                   onChange={(e) => setCity(e.target.value)}
                   placeholder="Chercher par ville (ex : Abidjan)"
-                  className="w-full rounded-full border-0 bg-white py-3 pl-10 pr-4 text-sm text-gray-900 shadow-lg outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-white/70"
+                  className="w-full rounded-full border border-gray-200 bg-white py-3 pl-10 pr-4 text-sm text-gray-900 shadow-lg outline-none placeholder:text-gray-400 focus:border-orange-500 focus:ring-2 focus:ring-orange-100"
                 />
               </div>
 
@@ -116,7 +112,7 @@ export default function VendorsMarketplacePage({ onViewVendor, onBecomeVendor }:
                 <button
                   id="marketplace-become-vendor-btn"
                   onClick={onBecomeVendor}
-                  className="flex shrink-0 items-center justify-center gap-1.5 rounded-full border border-white/40 px-5 py-3 text-xs font-black text-white transition-colors hover:bg-white/10"
+                  className="flex shrink-0 items-center justify-center gap-1.5 rounded-full bg-orange-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-orange-900/10 transition-colors hover:bg-orange-700"
                 >
                   Devenir prestataire
                 </button>
