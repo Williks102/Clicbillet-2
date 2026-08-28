@@ -273,7 +273,14 @@ router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: expr
       // Auto-healing: If user exists in Auth but not in public table, let's create it on-the-fly
       if (!profile) {
         const userMetaName = authUser.user_metadata?.name || authUser.email?.split("@")[0] || "Abonné ClicBillet";
-        const userMetaRole = authUser.user_metadata?.role || "client";
+
+        // Les métadonnées de Supabase Auth sont contrôlées par l'utilisateur lors de son
+        // inscription directe avec la clé anon. Elles ne doivent donc JAMAIS décider d'un
+        // privilège applicatif : sans cette valeur fixe, un compte Auth sans ligne public.users
+        // pouvait fournir { role: "admin" } puis se connecter pour que ce bloc de réparation
+        // lui crée un profil administrateur. Les élévations vers organisateur/admin passent
+        // exclusivement par les flux serveur explicitement autorisés.
+        const userMetaRole = "client";
 
         const { data: newProfile, error: createProfileError } = await supabase
           .from("users")
@@ -872,4 +879,3 @@ router.post("/api/auth/mfa/login-verify", mfaVerifyRateLimiter, async (req: expr
 });
 
 export default router;
-
