@@ -94,6 +94,12 @@ export const PENDING_TICKET_EXPIRY_MINUTES = Number(process.env.PENDING_TICKET_E
 // qui traîne sans raison une fois le délai passé. Cf. /api/cron/expire-pending-tickets.
 export const ABANDONED_TICKET_RETENTION_DAYS = Number(process.env.ABANDONED_TICKET_RETENTION_DAYS) || 90;
 
+// Durée de vie d'une clé d'idempotence (POST /api/checkout, POST /api/organizer/payouts) :
+// assez longue pour couvrir un nouvel essai après un plantage réseau ou un double-clic, trop
+// courte n'aurait aucun sens puisqu'un client qui réessaie après ce délai formule de toute façon
+// une nouvelle intention. Purgée par /api/cron/expire-pending-tickets, cf. idempotency.ts.
+export const IDEMPOTENCY_KEY_RETENTION_HOURS = Number(process.env.IDEMPOTENCY_KEY_RETENTION_HOURS) || 24;
+
 // Le serveur n'utilise que la clé service_role pour toutes les écritures/lectures sensibles,
 // protégées par requireAuth/requireRole côté Express. Le frontend possède néanmoins SON PROPRE
 // client Supabase, à clé anon uniquement (src/lib/supabaseClient.ts), utilisé pour deux lectures

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Plus, LayoutDashboard, BarChart3, Calendar, MapPin, Tag, Users, DollarSign, ListCollapse, Image as ImageIcon, Sparkles, Check, Upload, SlidersHorizontal, RefreshCw, Play, Hammer, X, AtSign, CheckCircle2, AlertCircle, Receipt, Download, ArrowRight } from "lucide-react";
 import { Event, User, SalesStatus, PassDesign } from "../types";
 import { authFetch } from "../lib/apiClient";
@@ -260,6 +260,11 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
   const [payoutMethod, setPayoutMethod] = useState("Wave");
   const [payoutDetails, setPayoutDetails] = useState("");
   const [submittingPayout, setSubmittingPayout] = useState(false);
+  // Clé par demande de retrait, stable à travers les retries (double-clic, erreur réseau) :
+  // /api/organizer/payouts l'exige pour ne pas créer deux demandes pour la même intention.
+  // Contrairement au panier de CheckoutModal, aucun cron n'expire une demande de retrait
+  // dupliquée : elle resterait "pending" indéfiniment sans cette protection.
+  const payoutIdempotencyKeyRef = useRef<string | null>(null);
 
   // Page publique organisateur (alias + bio)
   const [profileAlias, setProfileAlias] = useState("");
@@ -589,18 +594,20 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
        return;
     }
     setSubmittingPayout(true);
+    if (!payoutIdempotencyKeyRef.current) payoutIdempotencyKeyRef.current = crypto.randomUUID();
     try {
       const resp = await authFetch("/api/organizer/payouts", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": payoutIdempotencyKeyRef.current },
         body: JSON.stringify({ organizerId: user.id, amount: payoutAmount, method: payoutMethod, details: payoutDetails })
       });
       if (!resp.ok) throw new Error("Erreur de demande.");
-      
+
       const newPayout = await resp.json();
       setPayouts([newPayout.payout, ...payouts]);
       setPayoutAmount("");
       setPayoutDetails("");
+      payoutIdempotencyKeyRef.current = null;
       alert("Demande de retrait effectuée ! Elle sera traitée par l'administration.");
     } catch(err: any) { alert(err.message); }
     finally { setSubmittingPayout(false); }
@@ -2142,7 +2149,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                     type="number"
                     max={stats?.totalRevenue || 0}
                     value={payoutAmount}
-                    onChange={(e) => setPayoutAmount(e.target.value)}
+                    onChange={(e) => { payoutIdempotencyKeyRef.current = null; setPayoutAmount(e.target.value); }}
                     required
                     className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2 text-xs"
                     placeholder="Ex: 50000"
@@ -2152,7 +2159,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                   <label className="text-xs font-bold text-gray-700">Moyen de réception</label>
                   <select
                     value={payoutMethod}
-                    onChange={(e) => setPayoutMethod(e.target.value)}
+                    onChange={(e) => { payoutIdempotencyKeyRef.current = null; setPayoutMethod(e.target.value); }}
                     className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2 text-xs bg-white text-gray-700"
                   >
                     <option value="Wave">Wave</option>
@@ -2166,7 +2173,7 @@ export default function OrganizerDashboard({ user, events, onEventCreated, setAc
                   <input
                     type="text"
                     value={payoutDetails}
-                    onChange={(e) => setPayoutDetails(e.target.value)}
+                    onChange={(e) => { payoutIdempotencyKeyRef.current = null; setPayoutDetails(e.target.value); }}
                     required
                     className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2 text-xs"
                     placeholder="Numéro ou détails..."

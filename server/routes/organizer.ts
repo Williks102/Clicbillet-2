@@ -9,6 +9,7 @@ import { getDefaultCommissionRate, computeCommissionBreakdown, fetchRevenueAggre
 import { isPaidTicket } from "../lib/ticketPayment.js";
 import { validateOrganizerAlias, MAX_ORGANIZER_BIO_LENGTH } from "../lib/organizerAlias.js";
 import { encryptPayoutDetails } from "../lib/payoutEncryption.js";
+import { beginIdempotentRequest, completeIdempotentRequest, abandonIdempotentRequest } from "../lib/idempotency.js";
 
 const router = express.Router();
 
@@ -296,6 +297,44 @@ router.post("/api/organizer/payouts", requireRole("organizer", "admin"), async (
   }
   const organizerId = requestedOrganizerId;
 
+  // Même protection qu'au checkout (cf. server/routes/checkout.ts) : sans clé d'idempotence,
+  // un double-clic ou un retry réseau sur ce bouton créait deux demandes de retrait distinctes,
+  // qu'aucun cron ne vient ensuite rapprocher ou expirer (contrairement aux paniers PENDING-) —
+  // elles restent "pending" jusqu'à ce qu'un admin les remarque.
+  const idemKey = req.header("Idempotency-Key");
+  if (!idemKey) {
+    return res.status(400).json({ error: "En-tête Idempotency-Key requis." });
+  }
+  const idemDb: any = !supabase ? getDB() : undefined;
+  let idemCheck;
+  try {
+    idemCheck = await beginIdempotentRequest(idemKey, "payout", { organizerId, amount: numericAmount, method, details }, idemDb);
+  } catch (e: any) {
+    console.error("[Idempotency] Erreur vérification clé payout:", e.message);
+    return res.status(503).json({ error: "Service temporairement indisponible. Veuillez réessayer." });
+  }
+  if (idemCheck.outcome === "conflict") {
+    return res.status(409).json({ error: "Cette clé d'idempotence a déjà été utilisée pour une demande différente." });
+  }
+  if (idemCheck.outcome === "in_progress") {
+    return res.status(409).json({ error: "Cette demande est déjà en cours de traitement." });
+  }
+  if (idemCheck.outcome === "replay") {
+    return res.status(idemCheck.statusCode).json(idemCheck.body);
+  }
+  const originalJson = res.json.bind(res);
+  let idemSettled = false;
+  res.json = ((body: any) => {
+    if (!idemSettled) {
+      idemSettled = true;
+      const persist = res.statusCode >= 500
+        ? abandonIdempotentRequest(idemKey, idemDb)
+        : completeIdempotentRequest(idemKey, res.statusCode, body, idemDb);
+      Promise.resolve(persist).catch((e: any) => console.error("[Idempotency] Échec enregistrement payout:", e.message));
+    }
+    return originalJson(body);
+  }) as any;
+
   // Contrôle de solde réel (Supabase uniquement) : en repli db.json (dev local), il n'existe
   // pas de calcul de solde fiable équivalent, donc on n'applique pas ce contrôle plutôt que de
   // bloquer systématiquement toute demande de retrait en développement.
@@ -323,7 +362,11 @@ router.post("/api/organizer/payouts", requireRole("organizer", "admin"), async (
        console.warn("[Supabase Error] Payout insert, falling back to local file DB:", e.message);
     }
   }
-  const db = getDB();
+  // Réutilise l'objet déjà chargé pour la vérification d'idempotence (quand Supabase est
+  // désactivé) : deux lectures de db.json donneraient deux objets distincts, et la ré-écriture
+  // la plus tardive effacerait sans le savoir ce que l'autre vient d'ajouter (payout ici,
+  // entrée idempotency_keys plus haut).
+  const db = idemDb || getDB();
   db.payouts = db.payouts || [];
   db.payouts.unshift(payout as any);
   saveDB(db);

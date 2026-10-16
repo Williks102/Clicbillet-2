@@ -19,6 +19,7 @@ import { runInBackground, isEventPast, generateTicketQrCode } from "../lib/utils
 import { sendOrganizerSaleEmail, sendTicketEmail } from "../lib/email.js";
 import { checkoutRateLimiter } from "../lib/rateLimiters.js";
 import { evaluateWaitingRoomGate, advanceAndGetWaitingRoomStatus } from "../lib/waitingRoom.js";
+import { beginIdempotentRequest, completeIdempotentRequest, abandonIdempotentRequest } from "../lib/idempotency.js";
 
 const router = express.Router();
 
@@ -121,6 +122,52 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
   if (!eventId || !buyerId || !buyerName || !buyerEmail || !items || !paymentDetails) {
     return res.status(400).json({ error: "Informations de commande incomplètes." });
   }
+
+  // Un double-clic, un onglet rouvert ou un retry réseau sur ce bouton créait jusqu'ici deux
+  // commandes distinctes — chacune réservant du stock, et pouvant chacune être payée (deux
+  // débits réels pour un seul achat voulu). Le client doit fournir une clé par tentative,
+  // stable à travers ses propres retries (cf. CheckoutModal.tsx) ; on rejoue la réponse
+  // d'origine plutôt que de recréer une commande si cette clé a déjà été traitée.
+  const idemKey = req.header("Idempotency-Key");
+  if (!idemKey) {
+    return res.status(400).json({ error: "En-tête Idempotency-Key requis." });
+  }
+  // buyerId n'entre pas dans le hash : pour un invité il est régénéré à chaque appel (ligne
+  // ci-dessus), donc un simple retry du même panier produirait un hash différent à tort.
+  let idemDb: any = (!isSupabaseEnabled || !supabase) ? getDB() : undefined;
+  let idemCheck;
+  try {
+    idemCheck = await beginIdempotentRequest(idemKey, "checkout", { eventId, buyerEmail, items, method: paymentDetails.method }, idemDb);
+  } catch (e: any) {
+    console.error("[Idempotency] Erreur vérification clé checkout:", e.message);
+    return res.status(503).json({ error: "Service de paiement temporairement indisponible. Veuillez réessayer." });
+  }
+  if (idemCheck.outcome === "conflict") {
+    return res.status(409).json({ error: "Cette clé d'idempotence a déjà été utilisée pour une commande différente." });
+  }
+  if (idemCheck.outcome === "in_progress") {
+    return res.status(409).json({ error: "Cette commande est déjà en cours de traitement." });
+  }
+  if (idemCheck.outcome === "replay") {
+    return res.status(idemCheck.statusCode).json(idemCheck.body);
+  }
+
+  // outcome === "proceed" : première fois que cette clé est vue. On intercepte res.json pour
+  // enregistrer l'issue (succès ou échec métier déterministe) sans toucher aux nombreux points
+  // de sortie existants ci-dessous — un échec serveur imprévu (5xx) libère la clé pour un vrai
+  // retry plutôt que de le figer sur une panne transitoire.
+  const originalJson = res.json.bind(res);
+  let idemSettled = false;
+  res.json = ((body: any) => {
+    if (!idemSettled) {
+      idemSettled = true;
+      const persist = res.statusCode >= 500
+        ? abandonIdempotentRequest(idemKey, idemDb)
+        : completeIdempotentRequest(idemKey, res.statusCode, body, idemDb);
+      Promise.resolve(persist).catch((e: any) => console.error("[Idempotency] Échec enregistrement checkout:", e.message));
+    }
+    return originalJson(body);
+  }) as any;
 
   const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
   // Référence de COMMANDE utilisée comme "reference" Paystack (webhook + vérification) — une
@@ -361,7 +408,10 @@ router.post("/api/checkout", checkoutRateLimiter, optionalAuth, validateCheckout
     }
   }
 
-  const db = getDB();
+  // Repli db.json (dev local sans Supabase, ou échec du bloc Supabase ci-dessus en dev) : si la
+  // vérification d'idempotence a déjà chargé db.json plus haut, on réutilise cette même instance
+  // au lieu d'en relire une seconde copie.
+  const db = idemDb || getDB();
   const event = db.events.find((e: any) => e.id === eventId);
 
   if (!event) {

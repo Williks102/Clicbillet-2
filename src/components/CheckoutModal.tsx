@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { X, Check, ArrowRight, ShieldCheck, CreditCard, MessageSquare, Ticket, Sparkles, Smartphone } from "lucide-react";
 import { Event, User, PaymentMethod, PaymentDetails } from "../types";
 import ResponsiveSheet from "./ResponsiveSheet";
@@ -52,6 +52,13 @@ export default function CheckoutModal({ event, user, guestInfo, initialQuantitie
   const [cvv, setCvv] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  // Une clé par tentative de commande, stable à travers les retries (double-clic, erreur
+  // réseau) : /api/checkout l'exige pour ne pas créer deux commandes pour la même intention
+  // d'achat. Générée en lazy (pas au montage) pour ne consommer la clé qu'au premier essai réel.
+  // Réinitialisée uniquement quand le panier change (cf. adjustQuantity) : le contenu de la
+  // commande change alors réellement, ce n'est plus la même tentative.
+  const idempotencyKeyRef = useRef<string | null>(null);
+
   // Computed values
   const selectedItems = activeTicketTypes
     .map((t) => ({ name: t.name, price: t.price, qty: quantities[t.name] || 0 }))
@@ -62,6 +69,7 @@ export default function CheckoutModal({ event, user, guestInfo, initialQuantitie
   const buyerEmail = user?.email ?? guestInfo?.email ?? "";
 
   function adjustQuantity(tierName: string, delta: number) {
+    idempotencyKeyRef.current = null;
     setQuantities((prev) => {
       const current = prev[tierName] || 0;
       const currentTotal = Object.values(prev).reduce((sum, q) => sum + q, 0);
@@ -119,10 +127,15 @@ export default function CheckoutModal({ event, user, guestInfo, initialQuantitie
     }
 
     setStep("processing");
+    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = crypto.randomUUID();
     // La session (si connecté) vit dans un cookie httpOnly envoyé automatiquement par le
     // navigateur — plus besoin de lire/transmettre un token manuellement. X-Requested-With est
     // exigé par le serveur en défense CSRF sur toute requête d'état (cf. server.ts).
-    const apiHeaders = { "Content-Type": "application/json", "X-Requested-With": "ClicBillet" };
+    const apiHeaders = {
+      "Content-Type": "application/json",
+      "X-Requested-With": "ClicBillet",
+      "Idempotency-Key": idempotencyKeyRef.current
+    };
 
     const buyerName = user?.name ?? (guestInfo?.email.split("@")[0] ?? "Invité");
     const buyerPhone = isGuest ? (guestInfo?.phone ?? phoneNumber) : phoneNumber;

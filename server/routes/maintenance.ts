@@ -11,7 +11,7 @@ import { runInBackground } from "../lib/utils.js";
 import { sendReservationExpiredEmail, RESEND_API_BASE } from "../lib/email.js";
 import { releaseWaitingRoomSlot } from "../lib/waitingRoom.js";
 import { groupTicketsByOrder, ticketEmailShape } from "../lib/paymentConfirmation.js";
-import { CRON_SECRET, PENDING_TICKET_EXPIRY_MINUTES, ABANDONED_TICKET_RETENTION_DAYS, RESEND_API_KEY, RESEND_FROM_EMAIL } from "../lib/config.js";
+import { CRON_SECRET, PENDING_TICKET_EXPIRY_MINUTES, ABANDONED_TICKET_RETENTION_DAYS, IDEMPOTENCY_KEY_RETENTION_HOURS, RESEND_API_KEY, RESEND_FROM_EMAIL } from "../lib/config.js";
 
 const router = express.Router();
 
@@ -31,6 +31,7 @@ router.get("/api/cron/expire-pending-tickets", async (req: express.Request, res:
 
   const cutoffIso = new Date(Date.now() - PENDING_TICKET_EXPIRY_MINUTES * 60 * 1000).toISOString();
   const retentionCutoffIso = new Date(Date.now() - ABANDONED_TICKET_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const idempotencyCutoffIso = new Date(Date.now() - IDEMPOTENCY_KEY_RETENTION_HOURS * 60 * 60 * 1000).toISOString();
 
   if (isSupabaseEnabled && supabase) {
     const { data: staleTickets, error } = await supabase
@@ -113,6 +114,17 @@ router.get("/api/cron/expire-pending-tickets", async (req: express.Request, res:
       console.log(`[Cron] Purge rétention : ${purgedTicketsCount || 0} billet(s) abandonné(s), ${purgedResetsCount || 0} jeton(s) de réinitialisation expiré(s).`);
     }
 
+    // Clés d'idempotence (cf. server/lib/idempotency.ts) : au-delà d'IDEMPOTENCY_KEY_RETENTION_HOURS,
+    // plus aucun client ne peut légitimement rejouer un retry avec cette clé, elle ne fait plus
+    // que grossir la table pour rien. idx_idempotency_keys_created_at (section 32) sert cette requête.
+    const { count: purgedIdempotencyCount, error: purgeIdempotencyError } = await supabase
+      .from("idempotency_keys")
+      .delete({ count: "exact" })
+      .lt("created_at", idempotencyCutoffIso);
+    if (purgeIdempotencyError) {
+      console.error("[Cron] Erreur purge clés d'idempotence expirées:", purgeIdempotencyError.message);
+    }
+
     const purgedRateLimitWindows = await purgeRateLimitWindows();
     const purgedEventPressure = await purgeEventPressure();
     return res.json({
@@ -120,6 +132,7 @@ router.get("/api/cron/expire-pending-tickets", async (req: express.Request, res:
       expired: expiredCount,
       purgedAbandonedTickets: purgedTicketsCount || 0,
       purgedExpiredResetTokens: purgedResetsCount || 0,
+      purgedIdempotencyKeys: purgedIdempotencyCount || 0,
       purgedRateLimitWindows
     });
   }
@@ -162,16 +175,21 @@ router.get("/api/cron/expire-pending-tickets", async (req: express.Request, res:
   db.passwordResets = (db.passwordResets || []).filter((r: any) => new Date(r.expiresAt) > new Date());
   const purgedResetsCountLocal = beforeResetsCount - (db.passwordResets || []).length;
 
+  const beforeIdempotencyCount = (db.idempotencyKeys || []).length;
+  db.idempotencyKeys = (db.idempotencyKeys || []).filter((k: any) => new Date(k.createdAt) > new Date(idempotencyCutoffIso));
+  const purgedIdempotencyCountLocal = beforeIdempotencyCount - (db.idempotencyKeys || []).length;
+
   saveDB(db);
 
-  if (purgedTicketsCountLocal > 0 || purgedResetsCountLocal > 0) {
-    console.log(`[Cron] Purge rétention (local) : ${purgedTicketsCountLocal} billet(s) abandonné(s), ${purgedResetsCountLocal} jeton(s) de réinitialisation expiré(s).`);
+  if (purgedTicketsCountLocal > 0 || purgedResetsCountLocal > 0 || purgedIdempotencyCountLocal > 0) {
+    console.log(`[Cron] Purge rétention (local) : ${purgedTicketsCountLocal} billet(s) abandonné(s), ${purgedResetsCountLocal} jeton(s) de réinitialisation expiré(s), ${purgedIdempotencyCountLocal} clé(s) d'idempotence expirée(s).`);
   }
 
   res.json({
     expired: expiredCountLocal,
     purgedAbandonedTickets: purgedTicketsCountLocal,
-    purgedExpiredResetTokens: purgedResetsCountLocal
+    purgedExpiredResetTokens: purgedResetsCountLocal,
+    purgedIdempotencyKeys: purgedIdempotencyCountLocal
   });
 });
 

@@ -1531,3 +1531,35 @@ FROM public.vendor_profiles vp
 WHERE vp.active = true AND vp.alias IS NOT NULL;
 
 GRANT SELECT ON public.vendor_profiles_public TO anon, authenticated;
+
+-- ==========================================
+-- 32. CLÉS D'IDEMPOTENCE (POST /api/checkout, POST /api/organizer/payouts)
+-- ==========================================
+-- Avant cette table, rien n'empêchait un double-clic ou une requête rejouée (retry réseau,
+-- deux onglets) de créer deux commandes — ou deux demandes de retrait — pour la même intention.
+-- Le cron d'expiration des paniers abandonnés (cf. maintenance.ts, PENDING-) nettoie bien le cas
+-- où UN des deux doublons n'est jamais payé, mais ne protège pas contre le cas où les DEUX
+-- aboutissent : deux débits Paystack réels pour un seul achat voulu. Cf. server/lib/idempotency.ts.
+--
+-- "key" est fournie par le client (en-tête Idempotency-Key, un UUID par tentative) : c'est elle
+-- qui identifie la REQUÊTE, pas son contenu. "request_hash" vérifie que la même clé n'est pas
+-- réutilisée pour une commande différente (bug client plutôt que retry légitime). "response"
+-- permet de REJOUER la réponse d'origine sans recréer de billets/demande de retrait.
+CREATE TABLE IF NOT EXISTS public.idempotency_keys (
+    key TEXT PRIMARY KEY,
+    scope TEXT NOT NULL, -- 'checkout' | 'payout'
+    request_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'processing', -- 'processing' | 'completed'
+    status_code INTEGER,
+    response JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Supporte à la fois la purge par ancienneté (cf. /api/cron/expire-pending-tickets) et, plus
+-- largement, toute requête sur cette colonne : exactement l'index que la table tickets n'a pas
+-- sur purchase_date pour son propre nettoyage par date (cf. l'échange avec l'utilisateur sur ce
+-- manque — corrigé ici dès la conception plutôt que constaté après coup).
+CREATE INDEX IF NOT EXISTS idx_idempotency_keys_created_at ON public.idempotency_keys (created_at);
+
+ALTER TABLE public.idempotency_keys ENABLE ROW LEVEL SECURITY;
+-- Pas de policy anon/authenticated : écrite et lue exclusivement par le backend (service_role).
