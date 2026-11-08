@@ -7,7 +7,7 @@
 import express from "express";
 import { verifyPaystackSignature } from "../lib/security.js";
 import { checkoutRateLimiter } from "../lib/rateLimiters.js";
-import { normalizeReferenceIdentifier, findTicketsByReference, confirmPaymentForTickets, notifyPaymentFailedForTickets } from "../lib/paymentConfirmation.js";
+import { normalizeReferenceIdentifier, findTicketsByReference, confirmPaymentForTickets, notifyPaymentFailedForTickets, verifyPaidAmount } from "../lib/paymentConfirmation.js";
 import { PAYSTACK_SECRET_KEY, PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL } from "../lib/config.js";
 
 const PAYSTACK_API_BASE = "https://api.paystack.co";
@@ -79,6 +79,14 @@ router.post("/api/webhooks/paystack", async (req: express.Request, res: express.
   }
 
   if (event === "charge.success") {
+    // Même contrôle qu'au verify : le webhook est signé (l'expéditeur est bien Paystack), mais
+    // le montant provient de l'initialisation faite par le navigateur. On refuse de confirmer
+    // si l'encaissement réel ne couvre pas le total recalculé en base.
+    const check = verifyPaidAmount(data, resolvedTickets);
+    if (!check.ok) {
+      console.error(`[Paystack Webhook] Paiement REFUSÉ pour ${reference} (${check.reason}) : encaissé ${check.paidSubunit}, attendu ${check.expectedSubunit}. Aucun billet confirmé.`);
+      return res.status(200).json({ status: "success" });
+    }
     const confirmedCount = await confirmPaymentForTickets(resolvedTickets);
     console.log(`[Paystack Webhook] ${confirmedCount}/${resolvedTickets.length} billet(s) confirmé(s) pour la référence ${reference}.`);
   } else if (event === "charge.failed") {
@@ -107,6 +115,7 @@ router.post("/api/payment/verify", checkoutRateLimiter, async (req: express.Requ
   }
 
   let paystackStatus: string;
+  let paystackData: any;
   try {
     const verifyRes = await fetch(`${PAYSTACK_API_BASE}/transaction/verify/${encodeURIComponent(reference)}`, {
       headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` }
@@ -116,7 +125,8 @@ router.post("/api/payment/verify", checkoutRateLimiter, async (req: express.Requ
       console.error("[Paystack Verify] Réponse invalide de l'API Paystack:", body);
       return res.status(502).json({ error: "Impossible de vérifier la transaction auprès de Paystack." });
     }
-    paystackStatus = body.data?.status;
+    paystackData = body.data;
+    paystackStatus = paystackData?.status;
   } catch (err: any) {
     console.error("[Paystack Verify] Erreur réseau:", err.message);
     return res.status(502).json({ error: "Erreur réseau lors de la vérification du paiement." });
@@ -128,6 +138,15 @@ router.post("/api/payment/verify", checkoutRateLimiter, async (req: express.Requ
   }
 
   if (paystackStatus === "success") {
+    // Contrôle du MONTANT avant toute confirmation : le montant envoyé à Paystack est fixé par
+    // le navigateur, donc falsifiable. On compare l'encaissement réel au total recalculé en
+    // base ; un sous-paiement laisse la commande en attente (le cron la nettoiera et rendra
+    // les places) plutôt que de délivrer des billets au prix fort.
+    const check = verifyPaidAmount(paystackData, resolvedTickets);
+    if (!check.ok) {
+      console.error(`[Paystack Verify] Paiement REFUSÉ pour ${reference} (${check.reason}) : encaissé ${check.paidSubunit}, attendu ${check.expectedSubunit}.`);
+      return res.status(402).json({ success: false, error: "Le montant réglé ne correspond pas au total de la commande. Contactez le support si vous pensez qu'il s'agit d'une erreur." });
+    }
     const confirmedCount = await confirmPaymentForTickets(resolvedTickets);
     console.log(`[Paystack Verify] ${confirmedCount}/${resolvedTickets.length} billet(s) confirmé(s) pour la référence ${reference}.`);
     return res.json({ success: true, status: "success" });

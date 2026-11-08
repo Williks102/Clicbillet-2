@@ -58,6 +58,52 @@ export async function findTicketsByReference(candidates: Array<string | null | u
   return local.map((raw: any) => ({ source: "local" as const, raw }));
 }
 
+// Total attendu d'une commande, en XOF, RECALCULÉ depuis les billets réellement enregistrés
+// (price_paid est le prix unitaire par ligne, posé côté serveur à la commande d'après la
+// grille tarifaire de l'événement — jamais d'après le navigateur). C'est la seule valeur de
+// référence fiable pour contrôler un encaissement.
+export function expectedOrderTotalXof(resolvedTickets: ResolvedTicket[]): number {
+  return resolvedTickets.reduce((sum, { source, raw }) => {
+    const unit = Number(source === "local" ? raw.pricePaid : raw.price_paid) || 0;
+    const qty = Number(raw.quantity) || 1;
+    return sum + unit * qty;
+  }, 0);
+}
+
+export interface AmountCheck {
+  ok: boolean;
+  reason?: string;
+  expectedSubunit: number;
+  paidSubunit: number;
+}
+
+/**
+ * Vérifie que le montant RÉELLEMENT encaissé par Paystack couvre le total attendu de la
+ * commande. Indispensable : le montant envoyé à Paystack est fixé par le navigateur
+ * (CheckoutModal.tsx), donc falsifiable — sans ce contrôle côté serveur, un acheteur peut
+ * régler une somme dérisoire et se voir délivrer des billets au prix fort. Paystack exprime
+ * les montants en sous-unité (×100), y compris pour le XOF.
+ */
+export function verifyPaidAmount(paystackData: any, resolvedTickets: ResolvedTicket[]): AmountCheck {
+  const expectedSubunit = Math.round(expectedOrderTotalXof(resolvedTickets) * 100);
+  const paidSubunit = Number(paystackData?.amount);
+  const currency = String(paystackData?.currency || "").toUpperCase();
+
+  if (!Number.isFinite(paidSubunit)) {
+    return { ok: false, reason: "montant Paystack absent ou non numérique", expectedSubunit, paidSubunit: NaN };
+  }
+  // L'application est mono-devise (XOF) : un paiement dans une autre devise vaudrait un montant
+  // nominal identique mais une valeur réelle moindre. On n'accepte que la devise attendue, et
+  // on ne bloque pas quand Paystack ne la renvoie pas (champ optionnel selon les intégrations).
+  if (currency && currency !== "XOF") {
+    return { ok: false, reason: `devise inattendue (${currency})`, expectedSubunit, paidSubunit };
+  }
+  if (paidSubunit < expectedSubunit) {
+    return { ok: false, reason: "montant insuffisant", expectedSubunit, paidSubunit };
+  }
+  return { ok: true, expectedSubunit, paidSubunit };
+}
+
 // Met en forme un ticket résolu (Supabase snake_case ou local déjà camelCase) au format
 // attendu par sendTicketEmail/sendPaymentFailedEmail.
 export function ticketEmailShape(resolved: ResolvedTicket): any {

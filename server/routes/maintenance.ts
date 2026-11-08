@@ -11,9 +11,31 @@ import { runInBackground } from "../lib/utils.js";
 import { sendReservationExpiredEmail, RESEND_API_BASE } from "../lib/email.js";
 import { releaseWaitingRoomSlot } from "../lib/waitingRoom.js";
 import { groupTicketsByOrder, ticketEmailShape } from "../lib/paymentConfirmation.js";
-import { CRON_SECRET, PENDING_TICKET_EXPIRY_MINUTES, ABANDONED_TICKET_RETENTION_DAYS, RESEND_API_KEY, RESEND_FROM_EMAIL } from "../lib/config.js";
+import { CRON_SECRET, IS_NON_DEV_DEPLOYMENT, PENDING_TICKET_EXPIRY_MINUTES, ABANDONED_TICKET_RETENTION_DAYS, RESEND_API_KEY, RESEND_FROM_EMAIL } from "../lib/config.js";
 
 const router = express.Router();
+
+// Garde partagée des routes /api/cron/*. Renvoie true si la requête peut passer.
+//
+// Secret défini → on exige le Bearer correspondant. Secret ABSENT → on échoue FERMÉ sur tout
+// déploiement non-dev (une route de maintenance ouverte annulerait des billets et purgerait
+// des données à la demande de n'importe qui) ; en développement local seulement, on laisse
+// passer pour pouvoir tester les crons sans configurer de secret.
+function cronAutorise(req: express.Request, res: express.Response): boolean {
+  if (CRON_SECRET) {
+    if (req.headers.authorization !== `Bearer ${CRON_SECRET}`) {
+      res.status(401).json({ error: "Non autorisé." });
+      return false;
+    }
+    return true;
+  }
+  if (IS_NON_DEV_DEPLOYMENT) {
+    console.error("[Security] Appel /api/cron/* refusé : CRON_SECRET n'est pas définie sur ce déploiement.");
+    res.status(503).json({ error: "Route de maintenance non configurée." });
+    return false;
+  }
+  return true;
+}
 
 // Annule automatiquement les billets restés "PENDING-" (paiement jamais confirmé ni
 // explicitement échoué) au-delà de PENDING_TICKET_EXPIRY_MINUTES, et libère l'inventaire
@@ -25,9 +47,7 @@ const router = express.Router();
 // justificatifs d'entrée. Appelée périodiquement par un planificateur externe (pas Vercel
 // Cron, cf. .env.example) avec Authorization: Bearer <CRON_SECRET>.
 router.get("/api/cron/expire-pending-tickets", async (req: express.Request, res: express.Response) => {
-  if (CRON_SECRET && req.headers.authorization !== `Bearer ${CRON_SECRET}`) {
-    return res.status(401).json({ error: "Non autorisé." });
-  }
+  if (!cronAutorise(req, res)) return;
 
   const cutoffIso = new Date(Date.now() - PENDING_TICKET_EXPIRY_MINUTES * 60 * 1000).toISOString();
   const retentionCutoffIso = new Date(Date.now() - ABANDONED_TICKET_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
@@ -234,9 +254,7 @@ function prochainEssai(attempts: number): string {
 }
 
 router.get("/api/cron/drain-emails", async (req: express.Request, res: express.Response) => {
-  if (CRON_SECRET && req.headers.authorization !== `Bearer ${CRON_SECRET}`) {
-    return res.status(401).json({ error: "Non autorisé." });
-  }
+  if (!cronAutorise(req, res)) return;
   if (!RESEND_API_KEY) {
     return res.json({ success: true, skipped: "Resend non configuré", sent: 0 });
   }
