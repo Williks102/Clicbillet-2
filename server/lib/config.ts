@@ -53,18 +53,27 @@ export const SUPABASE_WEBHOOK_SECRET = (process.env.SUPABASE_WEBHOOK_SECRET || "
 // pour authentifier ses propres appels programmés — cf. /api/cron/expire-pending-tickets.
 export const CRON_SECRET = (process.env.CRON_SECRET || "").trim();
 
+// Vrai dès qu'on tourne sur un déploiement qui n'est pas du développement local. On se fie à
+// VERCEL_ENV, injecté par la plateforme ("production"/"preview"/"development") et donc plus
+// fiable que NODE_ENV, souvent absent sur Vercel (même raisonnement qu'en tête de auth.ts).
+// Sert à faire échouer FERMÉ les routes sensibles quand un secret attendu manque, plutôt que
+// de les laisser ouvertes.
+export const IS_NON_DEV_DEPLOYMENT =
+  (Boolean(process.env.VERCEL_ENV) && process.env.VERCEL_ENV !== "development") ||
+  process.env.NODE_ENV === "production";
+
 // Les routes de maintenance (/api/cron/*) ne vérifient l'en-tête d'autorisation QUE si ce
 // secret est défini — sans lui, elles restent ouvertes à quiconque connaît leur URL. Or elles
 // ne sont pas anodines : l'une annule des billets en attente et purge des données, l'autre
 // vide la file d'e-mails. Un console.error plutôt qu'un avertissement : contrairement à une
 // APP_ORIGIN non définie, qui retombe sur une valeur correcte, il n'y a ici aucun repli — la
 // protection est simplement absente, et cela doit remonter jusqu'à Sentry.
-if (process.env.NODE_ENV === "production" && !CRON_SECRET) {
+if (IS_NON_DEV_DEPLOYMENT && !CRON_SECRET) {
   console.error(
-    "[Security] CRON_SECRET n'est pas définie : les routes /api/cron/* sont accessibles sans " +
-    "authentification à quiconque connaît leur URL — dont celle qui annule les billets en " +
-    "attente et purge les données. Définissez-la dans la configuration de l'hébergeur, avec la " +
-    "même valeur que dans le planificateur externe."
+    "[Security] CRON_SECRET n'est pas définie sur ce déploiement : les routes /api/cron/* " +
+    "REFUSENT désormais toute requête (fail-closed), y compris les appels légitimes du " +
+    "planificateur. Définissez-la dans la configuration de l'hébergeur, avec la même valeur " +
+    "que dans le planificateur externe, pour rétablir l'expiration des billets et la file d'e-mails."
   );
 }
 

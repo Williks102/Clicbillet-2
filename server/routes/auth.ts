@@ -4,7 +4,7 @@ import crypto from "crypto";
 import { isSupabaseEnabled, supabase, supabaseAdmin, createEphemeralAuthClient, APP_ORIGIN } from "../lib/config.js";
 import { getDB, saveDB } from "../lib/db.js";
 import { runInBackground } from "../lib/utils.js";
-import { sendWelcomeEmail, sendAdminNewOrganizerEmail, sendPasswordResetEmail } from "../lib/email.js";
+import { sendWelcomeEmail, sendAdminNewOrganizerEmail, sendPasswordResetEmail, sendExistingAccountNoticeEmail } from "../lib/email.js";
 import { registerRateLimiter, loginRateLimiter, resetPasswordRateLimiter, mfaVerifyRateLimiter, forgotPasswordRateLimiter, resendConfirmationRateLimiter } from "../lib/rateLimiters.js";
 import { validateRegister, validateLogin, validateForgotPassword, validateResetPassword } from "../lib/validators.js";
 import {
@@ -65,17 +65,29 @@ router.post("/api/auth/register", registerRateLimiter, validateRegister, async (
 
   const normalizedEmail = email.toLowerCase();
 
+  // Réponse d'inscription « en attente de confirmation » — STRICTEMENT identique que l'adresse
+  // soit nouvelle ou déjà prise, pour ne pas confirmer à un inconnu l'existence d'un compte
+  // (énumération de comptes). Le titulaire d'un compte déjà inscrit est averti par e-mail, lui.
+  const pendingConfirmationResponse = {
+    requiresEmailConfirmation: true,
+    email: normalizedEmail,
+    message: "Un e-mail de confirmation vient de vous être envoyé. Cliquez sur le lien qu'il contient avant de vous connecter."
+  };
+
   if (isSupabaseEnabled && supabase) {
     try {
-      // 1. Check if user already exists in public table (just to avoid auth spam)
+      // 1. Compte déjà existant : on ne le révèle pas. On renvoie la même réponse que pour une
+      // vraie inscription et on prévient par e-mail la personne réellement concernée, sans rien
+      // créer ni toucher au compte existant.
       const { data: existingUser } = await supabase
         .from("users")
-        .select("id")
+        .select("id, name, email")
         .eq("email", normalizedEmail)
         .maybeSingle();
 
       if (existingUser) {
-        return res.status(400).json({ error: "Un utilisateur avec cet e-mail existe déjà." });
+        runInBackground(sendExistingAccountNoticeEmail({ email: existingUser.email, name: existingUser.name || "" }));
+        return res.status(201).json(pendingConfirmationResponse);
       }
 
       // 2. Register inside Supabase Auth via le flux signUp() standard : c'est le seul chemin
@@ -132,11 +144,9 @@ router.post("/api/auth/register", registerRateLimiter, validateRegister, async (
       // l'inscription. Le frontend doit inviter l'utilisateur à confirmer son adresse avant de
       // se connecter normalement via /api/auth/login.
       if (!clientData?.session) {
-        return res.status(201).json({
-          requiresEmailConfirmation: true,
-          email: data.email,
-          message: "Un e-mail de confirmation vient de vous être envoyé. Cliquez sur le lien qu'il contient avant de vous connecter."
-        });
+        // Même réponse, au mot près, que la branche « compte déjà existant » ci-dessus :
+        // c'est ce qui rend les deux cas indiscernables côté client.
+        return res.status(201).json(pendingConfirmationResponse);
       }
 
       setSessionCookies(res, { token: clientData.session.access_token, refreshToken: clientData.session.refresh_token });
@@ -156,7 +166,9 @@ router.post("/api/auth/register", registerRateLimiter, validateRegister, async (
   const db = getDB();
   const exists = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
   if (exists) {
-    return res.status(400).json({ error: "Un utilisateur avec cet e-mail existe déjà." });
+    // Repli local : même traitement anti-énumération que la branche Supabase.
+    runInBackground(sendExistingAccountNoticeEmail({ email: exists.email, name: exists.name || "" }));
+    return res.status(201).json(pendingConfirmationResponse);
   }
 
   const newUser = {
@@ -235,7 +247,10 @@ router.post("/api/auth/login", loginRateLimiter, validateLogin, async (req: expr
         if (authError.code === "email_not_confirmed" || /confirm/i.test(authError.message)) {
           return res.status(401).json({ error: "Veuillez confirmer votre adresse e-mail avant de vous connecter (vérifiez votre boîte de réception)." });
         }
-        return res.status(401).json({ error: "Identifiant ou mot de passe incorrect. " + authError.message });
+        // Message strictement générique : recoller le message brut de Supabase pouvait
+        // exposer des détails internes selon l'état du compte. Le détail reste en log serveur.
+        console.warn(`[Login] Échec d'authentification pour ${normalizedEmail} : ${authError.message}`);
+        return res.status(401).json({ error: "Identifiant ou mot de passe incorrect." });
       }
 
       const authUser = authData?.user;

@@ -207,6 +207,30 @@ export async function sendPasswordResetEmail(user: { email: string; name: string
   });
 }
 
+// --- Tentative d'inscription sur une adresse déjà enregistrée ---
+// Envoyé au titulaire du compte existant quand quelqu'un relance une inscription avec son
+// adresse. C'est la contrepartie de la réponse générique du serveur (qui ne dit plus « cet
+// e-mail existe déjà », pour ne pas confirmer l'existence d'un compte à un inconnu) : la
+// personne réellement concernée, elle, est prévenue et réorientée vers la connexion.
+export function buildExistingAccountNoticeHtml(name: string, loginUrl: string, resetUrl: string): string {
+  return emailLayout("Votre compte ClicBillet existe déjà", `
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Bonjour ${name},</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;">Une inscription vient d'être tentée sur ClicBillet avec votre adresse e-mail. Un compte y est déjà associé, donc aucun nouveau compte n'a été créé.</p>
+    <p style="font-size:14px; line-height:1.6; color:#374151; margin:0 0 14px;"><strong>Si c'est vous</strong>, connectez-vous directement ; en cas d'oubli de mot de passe, réinitialisez-le :</p>
+    <p>${ctaButton("Me connecter", loginUrl)}</p>
+    <p style="font-size:13px; line-height:1.6; color:#6b7280; margin:0 0 14px;">Mot de passe oublié ? <a href="${resetUrl}" style="color:#ea580c;">Réinitialisez-le ici</a>.</p>
+    <p style="font-size:12px; color:#6b7280; margin:0;"><strong>Si ce n'est pas vous</strong>, vous pouvez ignorer cet e-mail : aucune action n'a été effectuée sur votre compte et votre mot de passe reste inchangé.</p>
+  `);
+}
+
+export async function sendExistingAccountNoticeEmail(user: { email: string; name: string }): Promise<void> {
+  await sendEmail({
+    to: user.email,
+    subject: "Une inscription a été tentée avec votre adresse ClicBillet",
+    html: buildExistingAccountNoticeHtml(user.name, `${APP_ORIGIN}/connexion`, `${APP_ORIGIN}/connexion`)
+  });
+}
+
 // --- Acheteur : confirmation de billet(s) ---
 // Une commande peut regrouper plusieurs billets (un QR code par billet, cf. /api/checkout) :
 // on envoie UN SEUL email par commande listant tous les QR codes, plutôt qu'un email par billet.
