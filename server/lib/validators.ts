@@ -116,6 +116,34 @@ export const validateResetPassword = async (req: express.Request, res: express.R
   next();
 };
 
+// Types d'images matricielles acceptés pour une affiche. Le SVG en est EXCLU
+// volontairement : il peut contenir du script, et l'endpoint GET /api/events/:id/banner
+// ressert l'image en document navigable de même origine — un SVG malveillant y exécuterait
+// son script dans l'origine de l'application (XSS stocké).
+const TYPES_IMAGE_BANNIERE = new Set(["png", "jpeg", "jpg", "webp", "gif", "avif"]);
+// Une affiche voyage dans la réponse du catalogue public, renvoyée à chaque visiteur :
+// on borne sa taille (base64 ~ 1,33× le binaire) pour éviter d'alourdir cette réponse et le
+// stockage. Le frontend compresse déjà à ~1280 px ; cette borne vise les appels directs à l'API.
+const MAX_LONGUEUR_BANNIERE = 3_000_000;
+
+export function validerBanniere(banner: string): string | null {
+  const brut = String(banner).trim();
+  if (brut.startsWith("http://") || brut.startsWith("https://")) {
+    return brut.length > 2048 ? "L'URL de l'affiche est trop longue." : null;
+  }
+  const m = /^data:image\/([a-zA-Z0-9.+-]+);base64,[A-Za-z0-9+/=]+$/.exec(brut);
+  if (!m) {
+    return "L'affiche est invalide : importez une image (PNG, JPG, WEBP, GIF, AVIF) ou donnez une adresse http(s) directe.";
+  }
+  if (!TYPES_IMAGE_BANNIERE.has(m[1].toLowerCase())) {
+    return "Ce format d'affiche n'est pas autorisé (le SVG notamment est refusé). Utilisez un PNG, JPG, WEBP, GIF ou AVIF.";
+  }
+  if (brut.length > MAX_LONGUEUR_BANNIERE) {
+    return "L'affiche est trop lourde. Choisissez une image plus légère.";
+  }
+  return null;
+}
+
 // Middleware de validation pour la création / modification d'événements
 export const validateEvent = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const { title, description, date, time, price, venue, category, banner, totalTickets, organizerId } = req.body;
@@ -208,8 +236,9 @@ export const validateEvent = async (req: express.Request, res: express.Response,
   req.body.endDate = endDate || null;
   req.body.endTime = endTime || null;
 
-  if (banner && !banner.startsWith("http://") && !banner.startsWith("https://") && !banner.startsWith("data:image/")) {
-    return res.status(400).json({ error: "L'URL de l'image de couverture est invalide (doit commencer par http://, https:// ou être une image uploadée)." });
+  if (banner) {
+    const bannerErreur = validerBanniere(banner);
+    if (bannerErreur) return res.status(400).json({ error: bannerErreur });
   }
 
   // La catégorie doit exister au référentiel (cf. server/lib/categories.ts). Auparavant

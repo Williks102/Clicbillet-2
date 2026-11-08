@@ -180,14 +180,32 @@ router.get("/api/events/:id/banner", async (req: express.Request, res: express.R
     return res.redirect(302, event.banner);
   }
 
-  const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(event.banner);
+  const match = /^data:image\/([a-zA-Z0-9.+-]+);base64,(.+)$/.exec(event.banner);
   if (!match) {
     return res.status(404).json({ error: "Format d'affiche non pris en charge." });
   }
 
-  const [, contentType, base64] = match;
+  const [, sousType, base64] = match;
+  // Content-Type tiré d'une LISTE BLANCHE, jamais directement du data URI stocké : une
+  // affiche enregistrée avant le durcissement de la validation pourrait être un SVG, que l'on
+  // ne doit pas resservir comme document exécutable de même origine. Tout type hors liste
+  // (svg+xml compris) est refusé ici aussi — double verrou avec la validation à l'écriture.
+  const TYPES_SERVIS: Record<string, string> = {
+    png: "image/png", jpeg: "image/jpeg", jpg: "image/jpeg",
+    webp: "image/webp", gif: "image/gif", avif: "image/avif"
+  };
+  const contentType = TYPES_SERVIS[sousType.toLowerCase()];
+  if (!contentType) {
+    return res.status(404).json({ error: "Format d'affiche non pris en charge." });
+  }
+
   const buffer = Buffer.from(base64, "base64");
   res.set("Content-Type", contentType);
+  // Défense en profondeur : empêche le navigateur de « renifler » un autre type que celui
+  // annoncé, et neutralise tout script/ressource si le contenu était malgré tout interprété
+  // comme un document.
+  res.set("X-Content-Type-Options", "nosniff");
+  res.set("Content-Security-Policy", "default-src 'none'; sandbox");
   // Une affiche ne change quasiment jamais, et les robots la retéléchargent à chaque partage.
   res.set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
   res.send(buffer);
