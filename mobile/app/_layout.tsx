@@ -10,6 +10,7 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerTintColor: colors.primary, headerTitleStyle: { color: colors.text }, contentStyle: { backgroundColor: colors.bg } }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="event/[id]" options={{ title: "Événement" }} />
+        <Stack.Screen name="web" options={{ title: "ClicBillet" }} />
         <Stack.Screen name="login" options={{ title: "Connexion", presentation: "modal" }} />
       </Stack>
     </AuthProvider>

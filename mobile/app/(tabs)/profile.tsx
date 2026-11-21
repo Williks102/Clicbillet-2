@@ -1,6 +1,6 @@
-import { Linking, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
-import { SITE_URL, appVersion } from "../../lib/api";
+import { appVersion } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { colors, radius } from "../../lib/theme";
 import { Button } from "../../lib/ui";
@@ -21,8 +21,13 @@ export default function Profile() {
             <Text style={s.meta}>{ROLES[user.role]}{user.publicCode ? ` · ${user.publicCode}` : ""}</Text>
           </View>
           {user.role !== "client" && (
-            <Button title="Tableau de bord sur le web" variant="ghost" onPress={() => Linking.openURL(SITE_URL)} />
+            <Button
+              title="Mon tableau de bord"
+              variant="ghost"
+              onPress={() => router.push({ pathname: "/web", params: { path: user.role === "admin" ? "/supervision" : "/organisateur", title: "Tableau de bord" } })}
+            />
           )}
+          <Button title="Espace prestataire" variant="ghost" onPress={() => router.push({ pathname: "/web", params: { path: "/prestataire", title: "Prestataire" } })} />
           <Button title="Se déconnecter" onPress={logout} />
         </>
       ) : (

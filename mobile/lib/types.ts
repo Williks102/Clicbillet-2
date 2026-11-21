@@ -20,6 +20,8 @@ export interface EventItem {
   description: string;
   date: string;
   time: string;
+  endDate?: string | null;
+  endTime?: string | null;
   venue: string;
   category: string;
   price: number;

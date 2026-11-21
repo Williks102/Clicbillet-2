@@ -1,10 +1,10 @@
 import { useCallback, useState } from "react";
-import { FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { RefreshControl, SectionList, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import QRCode from "react-native-qrcode-svg";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
-import { formatDate } from "../../lib/format";
+import { isEventPast } from "../../lib/dates";
 import { colors, radius } from "../../lib/theme";
 import { Button, Empty, ErrorText } from "../../lib/ui";
 import type { Ticket } from "../../lib/types";
@@ -37,41 +37,48 @@ export default function Tickets() {
     );
   }
 
+  const byDate = (a: Ticket, b: Ticket) => `${a.eventDate}T${a.eventTime}`.localeCompare(`${b.eventDate}T${b.eventTime}`);
+  const isPast = (t: Ticket) => isEventPast({ date: t.eventDate, time: t.eventTime });
+  const sections = [
+    { title: "À venir", data: tickets.filter((t) => !isPast(t)).sort(byDate) },
+    { title: "Passés", data: tickets.filter(isPast).sort((a, b) => byDate(b, a)) },
+  ].filter((s) => s.data.length > 0);
+
   return (
-    <FlatList
-      data={tickets}
+    <SectionList
+      sections={sections}
       keyExtractor={(t) => t.id}
-      contentContainerStyle={{ padding: 16, gap: 14 }}
+      contentContainerStyle={{ padding: 16 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}
       ListHeaderComponent={<ErrorText message={error} />}
       ListEmptyComponent={error ? undefined : <Empty text="Vous n'avez pas encore de billet." />}
-      renderItem={({ item: t }) => (
-        <View style={s.card}>
-          <Text style={s.title}>{t.eventTitle}</Text>
-          <Text style={s.meta}>{formatDate(t.eventDate, t.eventTime)} · {t.eventVenue}</Text>
-          <Text style={s.meta}>{t.tier.toUpperCase()} × {t.quantity}</Text>
-          <View style={s.qrBox}>
+      renderSectionHeader={({ section }) => <Text style={s.section}>{section.title}</Text>}
+      renderItem={({ item: t }) => {
+        const past = isPast(t);
+        return (
+          <View style={[s.card, past && { opacity: 0.45 }]}>
             {t.scanned ? (
-              <Text style={{ color: colors.muted }}>Billet déjà utilisé</Text>
+              <Text style={s.note}>Billet déjà utilisé</Text>
             ) : t.paymentStatus === "pending" ? (
-              <Text style={{ color: colors.muted }}>Paiement en attente</Text>
+              <Text style={s.note}>Paiement en attente</Text>
             ) : t.qrCodeData ? (
-              <QRCode value={t.qrCodeData} size={200} />
+              <QRCode value={t.qrCodeData} size={220} />
             ) : (
-              <Text style={{ color: colors.muted, textAlign: "center" }}>
+              <Text style={s.note}>
                 QR code disponible à l'approche de l'événement{t.qrUnlocksAt ? `\n(${new Date(t.qrUnlocksAt).toLocaleString("fr-FR")})` : ""}
               </Text>
             )}
+            <Text style={s.caption} numberOfLines={1}>{t.eventTitle}</Text>
           </View>
-        </View>
-      )}
+        );
+      }}
     />
   );
 }
 
 const s = StyleSheet.create({
-  card: { backgroundColor: colors.card, borderRadius: radius, padding: 16, borderWidth: 1, borderColor: colors.border },
-  title: { fontSize: 17, fontWeight: "800", color: colors.text },
-  meta: { color: colors.muted, marginTop: 3 },
-  qrBox: { alignItems: "center", justifyContent: "center", marginTop: 14, minHeight: 120 },
+  section: { fontSize: 16, fontWeight: "800", color: colors.muted, marginTop: 10, marginBottom: 10 },
+  card: { backgroundColor: colors.card, borderRadius: radius, padding: 20, borderWidth: 1, borderColor: colors.border, alignItems: "center", marginBottom: 14 },
+  caption: { marginTop: 12, fontSize: 12, color: colors.muted },
+  note: { color: colors.muted, textAlign: "center", paddingVertical: 30 },
 });

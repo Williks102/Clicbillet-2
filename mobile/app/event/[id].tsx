@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { api, post, SITE_URL, API_URL } from "../../lib/api";
+import { api, API_URL } from "../../lib/api";
+import { isEventPast } from "../../lib/dates";
 import { useAuth } from "../../lib/auth";
 import { formatDate, formatPrice } from "../../lib/format";
 import { colors, radius } from "../../lib/theme";
@@ -16,7 +17,6 @@ export default function EventDetail() {
   const [tier, setTier] = useState<TicketType | null>(null);
   const [qty, setQty] = useState(1);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api<EventItem[]>("/api/events")
@@ -40,32 +40,12 @@ export default function EventDetail() {
   const free = total === 0;
   const banner = event.banner ? (event.banner.startsWith("http") || event.banner.startsWith("data:") ? event.banner : `${API_URL}${event.banner}`) : undefined;
 
-  async function buy() {
-    if (!user) return router.push("/login");
-    if (!tier || !event) return;
-    if (!free) {
-      // Le paiement Paystack passe par un popup web : on confie la finalisation au site.
-      return Linking.openURL(`${SITE_URL}/e/${event.id}`);
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      await post("/api/checkout", {
-        eventId: event.id,
-        buyerId: user.id,
-        buyerName: user.name,
-        buyerEmail: user.email,
-        items: [{ tier: tier.name.toLowerCase(), quantity: qty }],
-        paymentDetails: { method: "orange_money" },
-      });
-      Alert.alert("Inscription confirmée", "Votre billet est disponible dans « Mes billets ».", [
-        { text: "Voir mes billets", onPress: () => router.replace("/(tabs)/tickets") },
-      ]);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
+  const past = isEventPast(event);
+
+  // Tout l'achat (payant comme gratuit) se fait sur la page de l'événement du site, affichée
+  // dans l'app : une seule logique, le paiement Paystack reste celui du site.
+  function buy() {
+    router.push({ pathname: "/web", params: { path: `/e/${event!.id}`, title: event!.title } });
   }
 
   return (
@@ -95,12 +75,11 @@ export default function EventDetail() {
         </View>
 
         <ErrorText message={error} />
-        <Button
-          title={!user ? "Se connecter pour acheter" : free ? "Réserver gratuitement" : `Payer ${formatPrice(total)} sur le site`}
-          onPress={buy}
-          loading={busy}
-        />
-        {!free && user && <Text style={s.note}>Le paiement mobile money / carte s'effectue de façon sécurisée sur clicbillet.com ; votre billet apparaîtra ensuite ici.</Text>}
+        {past ? (
+          <Text style={s.note}>Cet événement est terminé.</Text>
+        ) : (
+          <Button title={free ? "Réserver" : `Acheter · ${formatPrice(total)}`} onPress={buy} />
+        )}
       </View>
     </ScrollView>
   );
