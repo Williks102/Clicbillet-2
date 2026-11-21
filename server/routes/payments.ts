@@ -8,7 +8,7 @@ import express from "express";
 import { verifyPaystackSignature } from "../lib/security.js";
 import { checkoutRateLimiter } from "../lib/rateLimiters.js";
 import { normalizeReferenceIdentifier, findTicketsByReference, confirmPaymentForTickets, notifyPaymentFailedForTickets, verifyPaidAmount } from "../lib/paymentConfirmation.js";
-import { PAYSTACK_SECRET_KEY, PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL } from "../lib/config.js";
+import { PAYSTACK_SECRET_KEY, PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL, PAYSTACK_IVOIRESOURCE_WEBHOOK_URL } from "../lib/config.js";
 
 const PAYSTACK_API_BASE = "https://api.paystack.co";
 
@@ -18,14 +18,14 @@ const router = express.Router();
 // pas à ClicBillet vers l'application qui partage le même compte marchand — la signature
 // HMAC-SHA512 reste valide côté destinataire puisqu'elle porte sur ce même corps brut avec la
 // même clé secrète Paystack, donc son propre vérificateur de webhook fonctionne sans changement.
-async function relayForeignPaystackEvent(req: express.Request): Promise<boolean> {
-  if (!PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL) {
-    console.warn("[Paystack Webhook] Événement d'une autre application reçu mais PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL non configuré — ignoré.");
+async function relayForeignPaystackEvent(req: express.Request, targetUrl: string = PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL): Promise<boolean> {
+  if (!targetUrl) {
+    console.warn("[Paystack Webhook] Événement d'une autre application reçu mais aucune URL de relais n'est configurée pour cette référence (PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL ou PAYSTACK_IVOIRESOURCE_WEBHOOK_URL) — ignoré.");
     return false;
   }
   try {
     const signature = req.headers["x-paystack-signature"];
-    const relayRes = await fetch(PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL, {
+    const relayRes = await fetch(targetUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -59,7 +59,10 @@ router.post("/api/webhooks/paystack", async (req: express.Request, res: express.
   // préfixe "ORD-". On relaie donc tout événement qui n'est pas le nôtre plutôt que de le
   // traiter ou de le perdre silencieusement.
   if (rawReference && !rawReference.startsWith("ORD-")) {
-    const relayed = await relayForeignPaystackEvent(req);
+    // IvoireSource (références "IVS-") a sa propre destination ; toute autre référence étrangère
+    // continue d'aller vers l'application historique (inchangé).
+    const target = rawReference.startsWith("IVS-") ? PAYSTACK_IVOIRESOURCE_WEBHOOK_URL : PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL;
+    const relayed = await relayForeignPaystackEvent(req, target);
     return res.status(relayed ? 200 : 502).json({ status: relayed ? "success" : "error" });
   }
 

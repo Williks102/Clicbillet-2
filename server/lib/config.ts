@@ -15,6 +15,9 @@ export const PAYSTACK_SECRET_KEY = (process.env.PAYSTACK_SECRET_KEY || "").trim(
 // référence n'utilise pas notre préfixe "ORD-" est relayé tel quel vers cette URL plutôt que
 // traité ou perdu (cf. server/routes/tickets.ts, /api/webhooks/paystack).
 export const PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL = (process.env.PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL || "").trim();
+// Troisième application du même compte marchand (IvoireSource) : ses références commencent par
+// "IVS-" ; ses événements sont relayés ici plutôt que vers PAYSTACK_FOREIGN_WEBHOOK_FORWARD_URL.
+export const PAYSTACK_IVOIRESOURCE_WEBHOOK_URL = (process.env.PAYSTACK_IVOIRESOURCE_WEBHOOK_URL || "").trim();
 export const RESEND_API_KEY = (process.env.RESEND_API_KEY || "").trim();
 // Expéditeur de tous les emails transactionnels — billets, réinitialisation de mot de passe,
 // notifications. Le repli est désormais clicbillet.com : le domaine est vérifié (SPF/DKIM)
