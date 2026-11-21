@@ -2,6 +2,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { appVersion } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
+import { resetOnboarding } from "../../lib/onboarding";
 import { colors, radius } from "../../lib/theme";
 import { Button } from "../../lib/ui";
 
@@ -33,6 +34,7 @@ export default function Profile() {
       ) : (
         <Button title="Se connecter" onPress={() => router.push("/login")} />
       )}
+      <Text style={s.replay} onPress={async () => { await resetOnboarding(); router.replace("/onboarding"); }}>Revoir la présentation</Text>
       <Text style={s.version}>ClicBillet v{appVersion}</Text>
     </View>
   );
@@ -42,5 +44,6 @@ const s = StyleSheet.create({
   card: { backgroundColor: colors.card, borderRadius: radius, padding: 16, borderWidth: 1, borderColor: colors.border },
   name: { fontSize: 20, fontWeight: "800", color: colors.text },
   meta: { color: colors.muted, marginTop: 4 },
+  replay: { textAlign: "center", color: colors.primary, fontWeight: "600", marginTop: 10 },
   version: { textAlign: "center", color: colors.muted, marginTop: 20, fontSize: 12 },
 });
