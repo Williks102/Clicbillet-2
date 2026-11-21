@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "ClicBillet",
+    "slug": "clicbillet",
+    "scheme": "clicbillet",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-router",
+      ["expo-camera", { "cameraPermission": "ClicBillet utilise la caméra pour scanner les billets à l'entrée." }]
+    ],
+    "ios": { "bundleIdentifier": "ci.clicbillet.app", "supportsTablet": false },
+    "android": { "package": "ci.clicbillet.app" },
+    "experiments": { "typedRoutes": false }
+  }
+}
