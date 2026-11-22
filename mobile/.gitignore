@@ -1,7 +1,9 @@
-node_modules/
-.expo/
-dist/
-.env*
 !.env.example
+*.jks
+*.keystore
+.env*
+.expo/
 android/
+dist/
 ios/
+node_modules/
