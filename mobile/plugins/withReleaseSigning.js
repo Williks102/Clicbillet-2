@@ -21,8 +21,9 @@ module.exports = function withReleaseSigning(config) {
         }
 $2`
     );
+    // Uniquement le type de build « release » (dans buildTypes), pas le bloc signingConfigs.release.
     g = g.replace(
-      /(release\s*\{[\s\S]*?)signingConfig signingConfigs\.debug/,
+      /(buildTypes\s*\{[\s\S]*?\n\s+release\s*\{[\s\S]*?)signingConfig signingConfigs\.debug/,
       `$1signingConfig System.getenv("ANDROID_KEYSTORE_PATH") ? signingConfigs.release : signingConfigs.debug`
     );
     cfg.modResults.contents = g;
