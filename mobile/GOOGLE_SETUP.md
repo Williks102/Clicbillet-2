@@ -35,7 +35,7 @@ Valeurs à connaître :
 
 ## 4. Supabase
 1. Authentication → Providers → **Google** : activer.
-2. *Client IDs* : mettez l'ID **Web**, puis une virgule, puis l'ID **Android** (`web_id,android_id`).
+2. *Client IDs* : mettez l'ID **Web**, une virgule, puis l'ID **Android**, **sans aucun espace** (`web_id,android_id`) : Supabase refuse les espaces.
 3. *Client Secret* : le secret de l'ID Web.
 4. Activez **Skip nonce checks** : la bibliothèque Google native ne fournit pas de nonce à Supabase.
 5. Enregistrez.

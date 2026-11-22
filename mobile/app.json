@@ -3,7 +3,7 @@
     "name": "ClicBillet",
     "slug": "clicbillet",
     "scheme": "clicbillet",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "icon": "./assets/icon.png",
@@ -16,7 +16,7 @@
     "ios": { "bundleIdentifier": "ci.clicbillet.app", "supportsTablet": false },
     "android": {
       "package": "ci.clicbillet.app",
-      "versionCode": 3,
+      "versionCode": 4,
       "adaptiveIcon": { "foregroundImage": "./assets/adaptive-foreground.png", "backgroundColor": "#ea580c" }
     },
     "experiments": { "typedRoutes": false }
