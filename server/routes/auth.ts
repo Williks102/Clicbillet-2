@@ -609,6 +609,94 @@ router.post("/api/auth/refresh", async (req: express.Request, res: express.Respo
 // Auparavant purement client (localStorage.removeItem), ce qui laissait le refresh token
 // valide côté Supabase même après une "déconnexion" — un jeton volé avant la déconnexion
 // restait utilisable indéfiniment jusqu'à expiration naturelle.
+// Connexion avec Google pour l'app mobile native. La bibliothèque Google Sign-In du téléphone
+// rend un ID token signé par Google ; Supabase Auth en vérifie la signature et l'audience
+// (les ID client doivent figurer dans Authentication > Providers > Google > Authorized Client IDs),
+// c'est donc lui — pas ce code — qui décide de la validité du jeton.
+//
+// Mêmes garde-fous que /api/auth/login : rate limit, double authentification (un compte
+// organisateur lié à Google ne doit pas contourner son second facteur), profil jamais créé
+// avec un autre rôle que "client". L'e-mail Google doit être vérifié : sans cela, on ne lie
+// jamais la session à un compte portant la même adresse.
+router.post("/api/auth/google", loginRateLimiter, async (req: express.Request, res: express.Response) => {
+  const { idToken } = req.body || {};
+  if (typeof idToken !== "string" || idToken.length < 20 || idToken.length > 4096) {
+    return res.status(400).json({ error: "Jeton Google manquant ou invalide." });
+  }
+  if (!isSupabaseEnabled || !supabase) {
+    return res.status(503).json({ error: "Connexion Google indisponible." });
+  }
+
+  try {
+    const authClient = createEphemeralAuthClient();
+    const { data: authData, error: authError } = await authClient.auth.signInWithIdToken({
+      provider: "google",
+      token: idToken
+    });
+
+    if (authError || !authData?.user || !authData.session) {
+      console.warn("[Google Login] Refusé par Supabase Auth :", authError?.message);
+      return res.status(401).json({ error: "Connexion Google refusée. Réessayez ou utilisez votre e-mail." });
+    }
+
+    const authUser = authData.user;
+    const email = (authUser.email || "").toLowerCase();
+    if (!email || !authUser.email_confirmed_at) {
+      return res.status(401).json({ error: "L'adresse e-mail de ce compte Google n'est pas vérifiée." });
+    }
+
+    const { data: aalData } = await authClient.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aalData && aalData.nextLevel === "aal2" && aalData.currentLevel !== "aal2") {
+      setMfaPendingCookies(res, {
+        token: authData.session.access_token,
+        refreshToken: authData.session.refresh_token
+      });
+      return res.json({ mfaRequired: true });
+    }
+
+    let { data: profile } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", authUser.id)
+      .maybeSingle();
+
+    if (!profile) {
+      const googleName = String(authUser.user_metadata?.full_name || authUser.user_metadata?.name || email.split("@")[0]).slice(0, 100);
+      const { data: newProfile, error: createError } = await supabase
+        .from("users")
+        .insert({
+          id: authUser.id,
+          email,
+          password: "[SECURE_SUPABASE_AUTH]",
+          name: googleName.length >= 2 ? googleName : "Abonné ClicBillet",
+          role: "client"
+        })
+        .select()
+        .single();
+      if (createError || !newProfile) {
+        console.error("[Google Login] Création du profil impossible :", createError?.message);
+        return res.status(500).json({ error: "Impossible de créer votre profil. Réessayez." });
+      }
+      profile = newProfile;
+    }
+
+    await claimGuestTickets(authUser.id, email);
+    setSessionCookies(res, { token: authData.session.access_token, refreshToken: authData.session.refresh_token });
+
+    const publicCode = await ensureUserPublicCode(profile.id, profile.public_code);
+    return res.json({
+      id: profile.id,
+      email: profile.email,
+      name: profile.name,
+      role: profile.role,
+      publicCode
+    });
+  } catch (err: any) {
+    console.error("[Google Login] Erreur :", err.message);
+    return res.status(500).json({ error: "Erreur lors de la connexion Google." });
+  }
+});
+
 router.post("/api/auth/logout", async (req: express.Request, res: express.Response) => {
   const accessToken = req.cookies?.[SESSION_ACCESS_COOKIE];
   if (isSupabaseEnabled && supabaseAdmin && accessToken && !accessToken.startsWith("local-")) {

@@ -3,6 +3,7 @@ import { FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View } from
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuth } from "../lib/auth";
 import { markOnboardingSeen } from "../lib/onboarding";
 import { colors } from "../lib/theme";
 
@@ -14,6 +15,7 @@ const PAGES: { icon: React.ComponentProps<typeof Ionicons>["name"]; title: strin
 
 export default function Onboarding() {
   const router = useRouter();
+  const { user } = useAuth();
   const { width } = useWindowDimensions();
   const [index, setIndex] = useState(0);
   const list = useRef<FlatList>(null);
@@ -21,7 +23,7 @@ export default function Onboarding() {
 
   async function finish() {
     await markOnboardingSeen();
-    router.replace("/(tabs)");
+    router.replace(user ? "/(tabs)" : "/auth");
   }
 
   function next() {

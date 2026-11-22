@@ -31,9 +31,7 @@ export default function Profile() {
           <Button title="Espace prestataire" variant="ghost" onPress={() => router.push({ pathname: "/web", params: { path: "/prestataire", title: "Prestataire" } })} />
           <Button title="Se déconnecter" onPress={logout} />
         </>
-      ) : (
-        <Button title="Se connecter" onPress={() => router.push("/login")} />
-      )}
+      ) : null}
       <Text style={s.replay} onPress={async () => { await resetOnboarding(); router.replace("/onboarding"); }}>Revoir la présentation</Text>
       <Text style={s.version}>ClicBillet v{appVersion}</Text>
     </View>

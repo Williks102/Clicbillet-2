@@ -1,17 +1,16 @@
 import { useCallback, useState } from "react";
 import { RefreshControl, SectionList, StyleSheet, Text, View } from "react-native";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect } from "expo-router";
 import QRCode from "react-native-qrcode-svg";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { isEventPast } from "../../lib/dates";
 import { colors, radius } from "../../lib/theme";
-import { Button, Empty, ErrorText } from "../../lib/ui";
+import { Empty, ErrorText } from "../../lib/ui";
 import type { Ticket } from "../../lib/types";
 
 export default function Tickets() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
+  const { user } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -27,15 +26,6 @@ export default function Tickets() {
   }, [user]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
-
-  if (!loading && !user) {
-    return (
-      <View style={{ padding: 24, gap: 12 }}>
-        <Empty text="Connectez-vous pour retrouver vos billets." />
-        <Button title="Se connecter" onPress={() => router.push("/login")} />
-      </View>
-    );
-  }
 
   const byDate = (a: Ticket, b: Ticket) => `${a.eventDate}T${a.eventTime}`.localeCompare(`${b.eventDate}T${b.eventTime}`);
   const isPast = (t: Ticket) => isEventPast({ date: t.eventDate, time: t.eventTime });
