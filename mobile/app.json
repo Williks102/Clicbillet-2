@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "ClicBillet",
+    "slug": "clicbillet",
+    "scheme": "clicbillet",
+    "version": "1.2.1",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-router",
+      ["expo-camera", { "cameraPermission": "ClicBillet utilise la caméra pour scanner les billets à l'entrée." }],
+      ["expo-splash-screen", { "backgroundColor": "#ea580c", "image": "./assets/splash-logo.png", "imageWidth": 200 }]
+    ],
+    "ios": { "bundleIdentifier": "ci.clicbillet.app", "supportsTablet": false },
+    "android": {
+      "package": "ci.clicbillet.app",
+      "versionCode": 4,
+      "adaptiveIcon": { "foregroundImage": "./assets/adaptive-foreground.png", "backgroundColor": "#ea580c" }
+    },
+    "experiments": { "typedRoutes": false }
+  }
+}
